@@ -793,8 +793,10 @@ async function submitReview() {
 
     renderTabs();
   } catch (err) {
-    alert(`Error generating review: ${err.message}`);
+    const warn = $('#submit-warning');
+    if (warn) warn.textContent = `Error: ${err.message}`;
   } finally {
+    btn.textContent = 'Generate Review Prompt';
     updateSubmitButton();
   }
 }
