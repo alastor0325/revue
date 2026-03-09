@@ -3,7 +3,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { formatPrompt, submitReview } = require('../src/claude');
+const { formatCombinedPrompt, submitReview } = require('../src/claude');
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -12,173 +12,129 @@ const patch2 = { hash: 'bbb222', message: 'bugABC - Part 2: Implement logic' };
 const patch3 = { hash: 'ccc333', message: 'bugABC - Part 3: Fire events' };
 const allPatches = [patch1, patch2, patch3];
 
-const comments = [
+const comments1 = [
   { file: 'dom/media/Foo.cpp', line: 42, lineContent: 'MOZ_ASSERT(mCtx);', text: 'Add a message string' },
   { file: 'dom/media/Bar.h',   line: 15, lineContent: 'void Toggle();',    text: 'Rename to SetActive' },
 ];
+const comments2 = [
+  { file: 'dom/media/Baz.cpp', line: 7, lineContent: 'return nullptr;', text: 'Handle the error' },
+];
 
-// ── formatPrompt ───────────────────────────────────────────────────────────
+function makeFeedback(overrides = []) {
+  const base = [
+    { hash: 'aaa111', comments: comments1, generalComment: '' },
+    { hash: 'bbb222', comments: [],        generalComment: '' },
+    { hash: 'ccc333', comments: [],        generalComment: '' },
+  ];
+  for (const o of overrides) {
+    const entry = base.find((e) => e.hash === o.hash);
+    if (entry) Object.assign(entry, o);
+  }
+  return base;
+}
 
-describe('formatPrompt', () => {
-  test('includes bug ID in the output', () => {
-    const out = formatPrompt('bugABC', patch1, allPatches, comments);
-    expect(out).toContain('bugABC');
-  });
+// ── formatCombinedPrompt ───────────────────────────────────────────────────
 
-  test('identifies the correct patch number', () => {
-    expect(formatPrompt('bugABC', patch1, allPatches, comments)).toContain('Part 1 of 3');
-    expect(formatPrompt('bugABC', patch2, allPatches, comments)).toContain('Part 2 of 3');
-    expect(formatPrompt('bugABC', patch3, allPatches, comments)).toContain('Part 3 of 3');
-  });
-
-  test('marks the current patch with ← THIS PATCH', () => {
-    const out = formatPrompt('bugABC', patch2, allPatches, comments);
-    const lines = out.split('\n');
-    const marked = lines.find(l => l.includes('← THIS PATCH'));
-    expect(marked).toBeTruthy();
-    expect(marked).toContain(patch2.hash);
+describe('formatCombinedPrompt', () => {
+  test('includes worktree name', () => {
+    const out = formatCombinedPrompt('bugABC', allPatches, makeFeedback());
+    expect(out).toContain('firefox-bugABC');
   });
 
   test('lists all patches in the series', () => {
-    const out = formatPrompt('bugABC', patch1, allPatches, comments);
+    const out = formatCombinedPrompt('bugABC', allPatches, makeFeedback());
     expect(out).toContain(patch1.hash);
     expect(out).toContain(patch2.hash);
     expect(out).toContain(patch3.hash);
   });
 
-  test('formats each comment with [YOUR CODE] and [FEEDBACK] labels', () => {
-    const out = formatPrompt('bugABC', patch1, allPatches, comments);
+  test('includes feedback section for patches with comments', () => {
+    const out = formatCombinedPrompt('bugABC', allPatches, makeFeedback());
+    expect(out).toContain('Part 1');
     expect(out).toContain('[YOUR CODE] : MOZ_ASSERT(mCtx);');
     expect(out).toContain('[FEEDBACK]  : Add a message string');
-    expect(out).toContain('[YOUR CODE] : void Toggle();');
-    expect(out).toContain('[FEEDBACK]  : Rename to SetActive');
   });
 
   test('includes file path and line number for each comment', () => {
-    const out = formatPrompt('bugABC', patch1, allPatches, comments);
+    const out = formatCombinedPrompt('bugABC', allPatches, makeFeedback());
     expect(out).toContain('dom/media/Foo.cpp : line 42');
     expect(out).toContain('dom/media/Bar.h : line 15');
   });
 
-  test('instructions mention the patch number to scope the fix', () => {
-    const out = formatPrompt('bugABC', patch2, allPatches, comments);
-    expect(out).toContain('Part 2 only');
+  test('omits feedback section for patches with no comments and no general comment', () => {
+    const out = formatCombinedPrompt('bugABC', allPatches, makeFeedback());
+    // patch2 and patch3 have no feedback — their hashes appear only in series list
+    const afterSeries = out.slice(out.indexOf('---'));
+    expect(afterSeries).not.toContain(`Part 2`);
+    expect(afterSeries).not.toContain(`Part 3`);
   });
 
-  test('works with a single patch in the series', () => {
-    const out = formatPrompt('bugXYZ', patch1, [patch1], comments);
-    expect(out).toContain('Part 1 of 1');
-    // Only one patch — should not list others
-    expect(out).not.toContain(patch2.hash);
+  test('includes feedback sections for multiple patches when both have comments', () => {
+    const feedback = makeFeedback([{ hash: 'bbb222', comments: comments2 }]);
+    const out = formatCombinedPrompt('bugABC', allPatches, feedback);
+    expect(out).toContain('[FEEDBACK]  : Add a message string');
+    expect(out).toContain('[FEEDBACK]  : Handle the error');
   });
 
-  test('works with empty comments array', () => {
-    const out = formatPrompt('bugABC', patch1, allPatches, []);
-    expect(out).toContain('bugABC');
-    // No general or line feedback sections when both are empty
-    expect(out).not.toContain('## General feedback');
-    expect(out).not.toContain('## Line-level feedback');
+  test('includes general feedback section when generalComment is provided', () => {
+    const feedback = makeFeedback([{ hash: 'aaa111', generalComment: 'Please use RAII.' }]);
+    const out = formatCombinedPrompt('bugABC', allPatches, feedback);
+    expect(out).toContain('### General feedback:');
+    expect(out).toContain('Please use RAII.');
   });
 
-  test('marks skipped patches with [SKIPPED] in the series list', () => {
-    const out = formatPrompt('bugABC', patch1, allPatches, comments, [patch3.hash]);
-    expect(out).toContain('[SKIPPED — not reviewed]');
+  test('omits general feedback section when generalComment is empty', () => {
+    const out = formatCombinedPrompt('bugABC', allPatches, makeFeedback());
+    expect(out).not.toContain('### General feedback:');
+  });
+
+  test('marks skipped patches in the series list', () => {
+    const out = formatCombinedPrompt('bugABC', allPatches, makeFeedback(), [patch3.hash]);
     const lines = out.split('\n');
-    const skippedLine = lines.find(l => l.includes(patch3.hash));
-    expect(skippedLine).toContain('[SKIPPED');
+    const skippedLine = lines.find((l) => l.includes(patch3.hash));
+    expect(skippedLine).toContain('[SKIPPED — not reviewed]');
   });
 
-  test('does not mark the current patch as skipped even if its hash is in skippedHashes', () => {
-    const out = formatPrompt('bugABC', patch2, allPatches, comments, [patch2.hash]);
-    // Extract only the series list section to avoid matching the "Patch under review" header
-    const seriesSection = out.slice(out.indexOf('## Full patch series'));
-    const lines = seriesSection.split('\n');
-    const currentLine = lines.find(l => l.includes(patch2.hash));
-    expect(currentLine).toContain('← THIS PATCH');
-    expect(currentLine).not.toContain('SKIPPED');
+  test('omits feedback section for skipped patches even if they have comments', () => {
+    const feedback = makeFeedback([{ hash: 'bbb222', comments: comments2 }]);
+    const out = formatCombinedPrompt('bugABC', allPatches, feedback, [patch2.hash]);
+    const afterSeries = out.slice(out.indexOf('---'));
+    expect(afterSeries).not.toContain(patch2.hash);
   });
 
-  test('multiple skipped patches all show the marker', () => {
-    const out = formatPrompt('bugABC', patch1, allPatches, comments, [patch2.hash, patch3.hash]);
+  test('marks approved patches in the series list', () => {
+    const out = formatCombinedPrompt('bugABC', allPatches, makeFeedback(), [], [patch3.hash]);
     const lines = out.split('\n');
-    const skipped2 = lines.find(l => l.includes(patch2.hash));
-    const skipped3 = lines.find(l => l.includes(patch3.hash));
-    expect(skipped2).toContain('[SKIPPED');
-    expect(skipped3).toContain('[SKIPPED');
-  });
-
-  test('skippedHashes defaults to empty — no markers shown when omitted', () => {
-    const out = formatPrompt('bugABC', patch1, allPatches, comments);
-    expect(out).not.toContain('SKIPPED');
-  });
-
-  test('marks approved patches with [APPROVED] in the series list', () => {
-    const out = formatPrompt('bugABC', patch1, allPatches, comments, [], '', [patch3.hash]);
-    const lines = out.split('\n');
-    const approvedLine = lines.find(l => l.includes(patch3.hash));
+    const approvedLine = lines.find((l) => l.includes(patch3.hash));
     expect(approvedLine).toContain('[APPROVED — no issues]');
   });
 
-  test('does not mark the current patch as approved even if its hash is in approvedHashes', () => {
-    const out = formatPrompt('bugABC', patch2, allPatches, comments, [], '', [patch2.hash]);
-    const seriesSection = out.slice(out.indexOf('## Full patch series'));
-    const lines = seriesSection.split('\n');
-    const currentLine = lines.find(l => l.includes(patch2.hash));
-    expect(currentLine).toContain('← THIS PATCH');
-    expect(currentLine).not.toContain('APPROVED');
+  test('omits feedback section for approved patches', () => {
+    const feedback = makeFeedback([{ hash: 'bbb222', comments: comments2 }]);
+    const out = formatCombinedPrompt('bugABC', allPatches, feedback, [], [patch2.hash]);
+    const afterSeries = out.slice(out.indexOf('---'));
+    expect(afterSeries).not.toContain(patch2.hash);
   });
 
-  test('approved takes lower priority than skipped for other patches', () => {
-    // skipped wins — patch3 is in both lists, skipped takes precedence
-    const out = formatPrompt('bugABC', patch1, allPatches, comments, [patch3.hash], '', [patch3.hash]);
+  test('skipped takes priority over approved for the same patch', () => {
+    const out = formatCombinedPrompt('bugABC', allPatches, makeFeedback(), [patch3.hash], [patch3.hash]);
     const lines = out.split('\n');
-    const line = lines.find(l => l.includes(patch3.hash));
+    const line = lines.find((l) => l.includes(patch3.hash));
     expect(line).toContain('[SKIPPED');
     expect(line).not.toContain('[APPROVED');
   });
 
-  test('approvedHashes defaults to empty — no APPROVED markers when omitted', () => {
-    const out = formatPrompt('bugABC', patch1, allPatches, comments);
-    expect(out).not.toContain('APPROVED');
+  test('works with a single patch', () => {
+    const feedback = [{ hash: 'aaa111', comments: comments1, generalComment: '' }];
+    const out = formatCombinedPrompt('bugXYZ', [patch1], feedback);
+    expect(out).toContain(patch1.hash);
+    expect(out).toContain('[FEEDBACK]  : Add a message string');
+    expect(out).not.toContain(patch2.hash);
   });
 
-  test('includes general feedback section when generalComment is provided', () => {
-    const out = formatPrompt('bugABC', patch1, allPatches, comments, [], 'Please use RAII throughout.');
-    expect(out).toContain('## General feedback for Part 1:');
-    expect(out).toContain('Please use RAII throughout.');
-  });
-
-  test('general feedback section is patch-scoped — includes the part number', () => {
-    const out = formatPrompt('bugABC', patch2, allPatches, comments, [], 'Refactor error handling.');
-    expect(out).toContain('## General feedback for Part 2:');
-  });
-
-  test('line-level section is labeled with part number', () => {
-    const out = formatPrompt('bugABC', patch1, allPatches, comments, [], '');
-    expect(out).toContain('## Line-level feedback for Part 1:');
-  });
-
-  test('omits general feedback section when generalComment is empty', () => {
-    const out = formatPrompt('bugABC', patch1, allPatches, comments, [], '');
-    expect(out).not.toContain('## General feedback');
-  });
-
-  test('omits line-level section when comments array is empty', () => {
-    const out = formatPrompt('bugABC', patch1, allPatches, [], [], 'Only a general comment.');
-    expect(out).not.toContain('## Line-level feedback');
-    expect(out).toContain('Only a general comment.');
-  });
-
-  test('includes both sections when both are provided', () => {
-    const out = formatPrompt('bugABC', patch1, allPatches, comments, [], 'General concern here.');
-    expect(out).toContain('## General feedback for Part 1:');
-    expect(out).toContain('## Line-level feedback for Part 1:');
-    expect(out).toContain('[YOUR CODE]');
-  });
-
-  test('instructions mention Part N scope regardless of which sections are present', () => {
-    const out = formatPrompt('bugABC', patch2, allPatches, [], [], 'General only.');
-    expect(out).toContain('Part 2 only');
+  test('instructions section is present', () => {
+    const out = formatCombinedPrompt('bugABC', allPatches, makeFeedback());
+    expect(out).toContain('## Instructions:');
   });
 });
 
@@ -195,64 +151,51 @@ describe('submitReview', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  test('writes REVIEW_FEEDBACK_<hash>.md to the worktree', () => {
-    submitReview(tmpDir, 'bugABC', patch1, allPatches, comments);
-    const file = path.join(tmpDir, `REVIEW_FEEDBACK_${patch1.hash}.md`);
+  test('writes REVIEW_FEEDBACK_<worktreeName>.md to the worktree', () => {
+    submitReview(tmpDir, 'bugABC', allPatches, makeFeedback());
+    const file = path.join(tmpDir, 'REVIEW_FEEDBACK_bugABC.md');
     expect(fs.existsSync(file)).toBe(true);
   });
 
   test('written file contains the formatted prompt', () => {
-    submitReview(tmpDir, 'bugABC', patch1, allPatches, comments);
-    const content = fs.readFileSync(
-      path.join(tmpDir, `REVIEW_FEEDBACK_${patch1.hash}.md`),
-      'utf8'
-    );
-    expect(content).toContain('bugABC');
+    submitReview(tmpDir, 'bugABC', allPatches, makeFeedback());
+    const content = fs.readFileSync(path.join(tmpDir, 'REVIEW_FEEDBACK_bugABC.md'), 'utf8');
+    expect(content).toContain('firefox-bugABC');
     expect(content).toContain('[YOUR CODE]');
     expect(content).toContain('[FEEDBACK]');
   });
 
   test('returns the correct feedbackPath', () => {
-    const { feedbackPath } = submitReview(tmpDir, 'bugABC', patch1, allPatches, comments);
-    expect(feedbackPath).toBe(path.join(tmpDir, `REVIEW_FEEDBACK_${patch1.hash}.md`));
+    const { feedbackPath } = submitReview(tmpDir, 'bugABC', allPatches, makeFeedback());
+    expect(feedbackPath).toBe(path.join(tmpDir, 'REVIEW_FEEDBACK_bugABC.md'));
   });
 
-  test('returns a command string referencing the feedback file', () => {
-    const { command } = submitReview(tmpDir, 'bugABC', patch1, allPatches, comments);
+  test('returns a command referencing the feedback file', () => {
+    const { command } = submitReview(tmpDir, 'bugABC', allPatches, makeFeedback());
     expect(typeof command).toBe('string');
-    expect(command.length).toBeGreaterThan(0);
-    expect(command).toContain(`REVIEW_FEEDBACK_${patch1.hash}.md`);
+    expect(command).toContain('REVIEW_FEEDBACK_bugABC.md');
   });
 
-  test('passes generalComment to formatPrompt — content appears in file', () => {
-    submitReview(tmpDir, 'bugABC', patch1, allPatches, comments, [], 'Please use RAII.');
-    const content = fs.readFileSync(
-      path.join(tmpDir, `REVIEW_FEEDBACK_${patch1.hash}.md`), 'utf8'
-    );
-    expect(content).toContain('Please use RAII.');
-    expect(content).toContain('## General feedback for Part 1:');
+  test('overwrites the same file on successive calls', () => {
+    submitReview(tmpDir, 'bugABC', allPatches, makeFeedback());
+    const feedback2 = makeFeedback([{ hash: 'aaa111', generalComment: 'Updated feedback.' }]);
+    submitReview(tmpDir, 'bugABC', allPatches, feedback2);
+    const content = fs.readFileSync(path.join(tmpDir, 'REVIEW_FEEDBACK_bugABC.md'), 'utf8');
+    expect(content).toContain('Updated feedback.');
+    // only one file exists
+    const files = fs.readdirSync(tmpDir).filter((f) => f.startsWith('REVIEW_FEEDBACK'));
+    expect(files).toHaveLength(1);
   });
 
-  test('passes skippedHashes to formatPrompt — content reflects skipped patches', () => {
-    submitReview(tmpDir, 'bugABC', patch1, allPatches, comments, [patch3.hash]);
-    const content = fs.readFileSync(
-      path.join(tmpDir, `REVIEW_FEEDBACK_${patch1.hash}.md`), 'utf8'
-    );
+  test('reflects skipped patches in the file', () => {
+    submitReview(tmpDir, 'bugABC', allPatches, makeFeedback(), [patch3.hash]);
+    const content = fs.readFileSync(path.join(tmpDir, 'REVIEW_FEEDBACK_bugABC.md'), 'utf8');
     expect(content).toContain('[SKIPPED');
   });
 
-  test('passes approvedHashes to formatPrompt — content reflects approved patches', () => {
-    submitReview(tmpDir, 'bugABC', patch1, allPatches, comments, [], '', [patch3.hash]);
-    const content = fs.readFileSync(
-      path.join(tmpDir, `REVIEW_FEEDBACK_${patch1.hash}.md`), 'utf8'
-    );
+  test('reflects approved patches in the file', () => {
+    submitReview(tmpDir, 'bugABC', allPatches, makeFeedback(), [], [patch3.hash]);
+    const content = fs.readFileSync(path.join(tmpDir, 'REVIEW_FEEDBACK_bugABC.md'), 'utf8');
     expect(content).toContain('[APPROVED — no issues]');
-  });
-
-  test('each patch gets its own file — no clobbering', () => {
-    submitReview(tmpDir, 'bugABC', patch1, allPatches, comments);
-    submitReview(tmpDir, 'bugABC', patch2, allPatches, comments);
-    expect(fs.existsSync(path.join(tmpDir, `REVIEW_FEEDBACK_${patch1.hash}.md`))).toBe(true);
-    expect(fs.existsSync(path.join(tmpDir, `REVIEW_FEEDBACK_${patch2.hash}.md`))).toBe(true);
   });
 });

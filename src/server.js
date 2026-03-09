@@ -106,20 +106,23 @@ function createApp({ worktreeName, worktreePath, mainRepoPath }) {
     }
   });
 
-  // POST /api/submit — write REVIEW_FEEDBACK_<hash>.md and return the claude command
+  // POST /api/submit — write REVIEW_FEEDBACK_<worktreeName>.md and return the claude command
   app.post('/api/submit', (req, res) => {
-    const { patchHash, comments } = req.body;
+    const { patchHash, allFeedback } = req.body;
 
     if (!patchHash) {
       return res.status(400).json({ error: 'patchHash is required.' });
     }
 
-    const generalComment = typeof req.body.generalComment === 'string'
-      ? req.body.generalComment.trim()
-      : '';
-    const hasLineComments = Array.isArray(comments) && comments.length > 0;
+    if (!Array.isArray(allFeedback)) {
+      return res.status(400).json({ error: 'allFeedback is required.' });
+    }
 
-    if (!hasLineComments && !generalComment) {
+    const currentFeedback = allFeedback.find((f) => f.hash === patchHash);
+    const hasLineComments = currentFeedback && Array.isArray(currentFeedback.comments) && currentFeedback.comments.length > 0;
+    const hasGeneralComment = currentFeedback && (currentFeedback.generalComment || '').trim().length > 0;
+
+    if (!hasLineComments && !hasGeneralComment) {
       return res.status(400).json({ error: 'No comments provided.' });
     }
 
@@ -135,11 +138,9 @@ function createApp({ worktreeName, worktreePath, mainRepoPath }) {
       const { feedbackPath, command } = submitReview(
         worktreePath,
         worktreeName,
-        patch,
         patchesCache,
-        comments,
+        allFeedback,
         skippedHashes,
-        generalComment,
         approvedHashes
       );
       res.json({ ok: true, feedbackPath, command });

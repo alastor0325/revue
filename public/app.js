@@ -510,6 +510,12 @@ async function submitReview() {
   const generalComment = patch ? getGeneralComment(patch.hash).trim() : '';
   if (comments.length === 0 && !generalComment) return;
 
+  const allFeedback = state.patches.map((p) => ({
+    hash: p.hash,
+    comments: commentsForPatch(p.hash),
+    generalComment: getGeneralComment(p.hash).trim(),
+  }));
+
   const btn = $('#btn-submit');
   btn.disabled = true;
   btn.textContent = 'Submitting…';
@@ -520,8 +526,7 @@ async function submitReview() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         patchHash: patch.hash,
-        comments,
-        generalComment,
+        allFeedback,
         skippedHashes: [...state.skipped],
         approvedHashes: [...state.approved],
       }),

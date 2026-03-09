@@ -123,16 +123,19 @@ describe('POST /api/submit', () => {
     submitReview.mockReset();
     getDiffPerCommit.mockReturnValue(PATCHES);
     submitReview.mockReturnValue({
-      feedbackPath: '/fake/worktree/REVIEW_FEEDBACK_aaa111.md',
-      command: 'cd "/fake/worktree" && claude --print "$(cat REVIEW_FEEDBACK_aaa111.md)"',
+      feedbackPath: '/fake/worktree/REVIEW_FEEDBACK_bugABC.md',
+      command: 'cd "/fake/worktree" && claude --print "$(cat REVIEW_FEEDBACK_bugABC.md)"',
     });
   });
 
+  const validAllFeedback = [
+    { hash: 'aaa111', comments: [{ file: 'dom/media/Foo.webidl', line: 2, lineContent: '  void toggle();', text: 'Use camelCase' }], generalComment: '' },
+    { hash: 'bbb222', comments: [], generalComment: '' },
+  ];
+
   const validBody = {
     patchHash: 'aaa111',
-    comments: [
-      { file: 'dom/media/Foo.webidl', line: 2, lineContent: '  void toggle();', text: 'Use camelCase' },
-    ],
+    allFeedback: validAllFeedback,
   };
 
   test('returns 200 with ok, feedbackPath, and command on valid input', async () => {
@@ -140,112 +143,96 @@ describe('POST /api/submit', () => {
     const res = await request(app).post('/api/submit').send(validBody);
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
-    expect(res.body.feedbackPath).toContain('REVIEW_FEEDBACK_aaa111.md');
-    expect(res.body.command).toContain('REVIEW_FEEDBACK_aaa111.md');
+    expect(res.body.feedbackPath).toContain('REVIEW_FEEDBACK_bugABC.md');
+    expect(res.body.command).toContain('REVIEW_FEEDBACK_bugABC.md');
   });
 
-  test('calls submitReview with the correct patch and comments', async () => {
+  test('calls submitReview with allPatches and allFeedback', async () => {
     const app = makeApp();
     await request(app).post('/api/submit').send(validBody);
     expect(submitReview).toHaveBeenCalledTimes(1);
-    const [worktreePath, worktreeName, patch, allPatches, comments] = submitReview.mock.calls[0];
+    const [worktreePath, worktreeName, allPatches, allFeedback] = submitReview.mock.calls[0];
     expect(worktreePath).toBe('/fake/worktree');
     expect(worktreeName).toBe('bugABC');
-    expect(patch.hash).toBe('aaa111');
     expect(allPatches).toHaveLength(2);
-    expect(comments[0].text).toBe('Use camelCase');
+    expect(allFeedback[0].comments[0].text).toBe('Use camelCase');
   });
 
   test('returns 400 when patchHash is missing', async () => {
     const app = makeApp();
-    const res = await request(app).post('/api/submit').send({ comments: validBody.comments });
+    const res = await request(app).post('/api/submit').send({ allFeedback: validAllFeedback });
     expect(res.status).toBe(400);
     expect(res.body.error).toBeTruthy();
   });
 
-  test('returns 400 when comments array is empty', async () => {
-    const app = makeApp();
-    const res = await request(app).post('/api/submit').send({ patchHash: 'aaa111', comments: [] });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBeTruthy();
-  });
-
-  test('returns 400 when comments is missing', async () => {
+  test('returns 400 when allFeedback is missing', async () => {
     const app = makeApp();
     const res = await request(app).post('/api/submit').send({ patchHash: 'aaa111' });
     expect(res.status).toBe(400);
+    expect(res.body.error).toBeTruthy();
   });
 
-  test('returns 200 when only generalComment is provided (no line comments)', async () => {
+  test('returns 400 when current patch has no comments and no general comment', async () => {
     const app = makeApp();
     const res = await request(app).post('/api/submit').send({
       patchHash: 'aaa111',
-      comments: [],
-      generalComment: 'Please use RAII throughout this patch.',
+      allFeedback: [
+        { hash: 'aaa111', comments: [], generalComment: '' },
+        { hash: 'bbb222', comments: [], generalComment: '' },
+      ],
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBeTruthy();
+  });
+
+  test('returns 200 when only generalComment is provided for current patch', async () => {
+    const app = makeApp();
+    const res = await request(app).post('/api/submit').send({
+      patchHash: 'aaa111',
+      allFeedback: [
+        { hash: 'aaa111', comments: [], generalComment: 'Please use RAII.' },
+        { hash: 'bbb222', comments: [], generalComment: '' },
+      ],
     });
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
-  });
-
-  test('passes generalComment to submitReview', async () => {
-    const app = makeApp();
-    await request(app).post('/api/submit').send({
-      patchHash: 'aaa111',
-      comments: [],
-      generalComment: 'Use RAII.',
-    });
-    const generalArg = submitReview.mock.calls[0][6];
-    expect(generalArg).toBe('Use RAII.');
-  });
-
-  test('passes empty string for generalComment when not provided', async () => {
-    const app = makeApp();
-    await request(app).post('/api/submit').send(validBody);
-    const generalArg = submitReview.mock.calls[0][6];
-    expect(generalArg).toBe('');
   });
 
   test('returns 404 when patchHash does not match any patch', async () => {
     const app = makeApp();
     const res = await request(app).post('/api/submit').send({
       patchHash: 'zzz999',
-      comments: validBody.comments,
+      allFeedback: [{ hash: 'zzz999', comments: [{ file: 'f', line: 1, lineContent: 'x', text: 'y' }], generalComment: '' }],
     });
     expect(res.status).toBe(404);
     expect(res.body.error).toContain('zzz999');
   });
 
-  test('passes skippedHashes to submitReview when provided', async () => {
+  test('passes skippedHashes to submitReview', async () => {
     const app = makeApp();
-    await request(app).post('/api/submit').send({
-      ...validBody,
-      skippedHashes: ['bbb222'],
-    });
-    const skippedArg = submitReview.mock.calls[0][5];
+    await request(app).post('/api/submit').send({ ...validBody, skippedHashes: ['bbb222'] });
+    const skippedArg = submitReview.mock.calls[0][4];
     expect(skippedArg).toEqual(['bbb222']);
   });
 
   test('passes empty skippedHashes when not provided', async () => {
     const app = makeApp();
     await request(app).post('/api/submit').send(validBody);
-    const skippedArg = submitReview.mock.calls[0][5];
+    const skippedArg = submitReview.mock.calls[0][4];
     expect(skippedArg).toEqual([]);
   });
 
-  test('passes approvedHashes to submitReview when provided', async () => {
+  test('passes approvedHashes to submitReview', async () => {
     const app = makeApp();
-    await request(app).post('/api/submit').send({
-      ...validBody,
-      approvedHashes: ['bbb222'],
-    });
-    const approvedArg = submitReview.mock.calls[0][7];
+    await request(app).post('/api/submit').send({ ...validBody, approvedHashes: ['bbb222'] });
+    const approvedArg = submitReview.mock.calls[0][5];
     expect(approvedArg).toEqual(['bbb222']);
   });
 
   test('passes empty approvedHashes when not provided', async () => {
     const app = makeApp();
     await request(app).post('/api/submit').send(validBody);
-    const approvedArg = submitReview.mock.calls[0][7];
+    const approvedArg = submitReview.mock.calls[0][5];
     expect(approvedArg).toEqual([]);
   });
 
