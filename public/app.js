@@ -242,6 +242,7 @@ function showCommentForm(tr, patchHash, filePath, line, key) {
         <textarea placeholder="Leave a comment on this line…" autofocus></textarea>
         <div class="comment-actions">
           <button class="btn-cancel">Cancel</button>
+          <button class="btn-discard">Discard draft</button>
           <button class="btn-save">Save comment</button>
         </div>
       </div>
@@ -258,6 +259,11 @@ function showCommentForm(tr, patchHash, filePath, line, key) {
   textarea.addEventListener('input', () => { drafts[dk] = textarea.value; });
 
   formRow.querySelector('.btn-cancel').addEventListener('click', () => formRow.remove());
+
+  formRow.querySelector('.btn-discard').addEventListener('click', () => {
+    delete drafts[dk];
+    formRow.remove();
+  });
 
   formRow.querySelector('.btn-save').addEventListener('click', () => {
     const text = textarea.value.trim();
@@ -378,6 +384,7 @@ function renderCommitMessageSection(container, patchHash, commitMessage, disable
         <textarea placeholder="Leave feedback on this commit message…" autofocus></textarea>
         <div class="comment-actions">
           <button class="btn-cancel">Cancel</button>
+          <button class="btn-discard">Discard draft</button>
           <button class="btn-save">Save comment</button>
         </div>
       </div>`;
@@ -388,6 +395,7 @@ function renderCommitMessageSection(container, patchHash, commitMessage, disable
     ta.focus();
     ta.addEventListener('input', () => { drafts[dk] = ta.value; });
     formEl.querySelector('.btn-cancel').addEventListener('click', () => { formEl.innerHTML = ''; });
+    formEl.querySelector('.btn-discard').addEventListener('click', () => { delete drafts[dk]; formEl.innerHTML = ''; });
     formEl.querySelector('.btn-save').addEventListener('click', () => {
       const text = ta.value.trim();
       if (!text) return;

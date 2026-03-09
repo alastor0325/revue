@@ -579,6 +579,17 @@ tr.comment-display-row td {
 
 .btn-cancel:hover { background: #21262d; color: #c9d1d9; }
 
+.btn-discard {
+  background: transparent;
+  color: #8b949e;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.btn-discard:hover { background: #3d1a1a; color: #f85149; border-color: #6e2b2b; }
+
 .comment-display-inner {
   background: #2d2a1e;
   border-left: 3px solid #f0883e;
