@@ -94,33 +94,33 @@ All can be undone by clicking again.
 
 ### Submitting feedback
 
-Once a patch has at least one line comment or a general comment, the **Submit Review for Part N** button is enabled. Clicking it:
+When you're done reviewing all patches, click the **Generate Review Prompt** button. It:
 
-1. Writes `REVIEW_FEEDBACK_<worktree-name>.md` in the worktree (see format below)
-2. Opens a modal with the full prompt — click **Copy prompt** and paste it into Claude
+1. Writes `REVIEW_FEEDBACK_<worktree-name>.md` in the worktree covering all patches (see format below)
+2. Opens a modal with the prompt — click **Copy prompt** and paste it into Claude
+
+The button is enabled as soon as any patch has any activity (a comment, approval, denial, or skip).
 
 ## Auto-save and state persistence
 
-Your review state (comments, general feedback, approved/skipped status) is saved automatically to `REVIEW_STATE_<worktree-name>.json` in the worktree. When you reopen `firefox-review` for the same worktree, all your work is restored automatically.
+Your review state (comments, general feedback, approved/denied/skipped status) is saved automatically to `REVIEW_STATE_<worktree-name>.json` in the worktree. When you reopen `firefox-review` for the same worktree, all your work is restored automatically.
 
-### What triggers a state save and MD regeneration
+### What triggers what
 
-Every one of the following actions saves state and rewrites `REVIEW_FEEDBACK_<worktree-name>.md` (debounced 500 ms):
+| Action | State JSON | MD file |
+|---|---|---|
+| Add / edit / delete a line comment | ✓ auto-saved | ✗ |
+| Type in the General feedback textarea | ✓ auto-saved | ✗ |
+| Click **Approve** / **Unapprove** | ✓ auto-saved | ✗ |
+| Click **Deny** / **Undeny** | ✓ auto-saved | ✗ |
+| Click **Skip** / **Unskip** | ✓ auto-saved | ✗ |
+| Click **Generate Review Prompt** | ✓ | ✓ written/overwritten |
 
-| Action | Triggers save + MD |
-|---|---|
-| Add / edit / delete a line comment | ✓ |
-| Type in the General feedback textarea | ✓ |
-| Click **Approve** or **Undo approve** | ✓ |
-| Click **Deny** or **Undo deny** | ✓ |
-| Click **Skip** or **Undo skip** | ✓ |
-| Click **Submit Review** | ✓ (immediate) |
-
-The MD is written as long as there is **any activity** on any patch — text feedback, an approval, or a skip. If you have only opened the tool and not interacted yet, no MD is written.
+The MD is only ever written when you explicitly click the button.
 
 ### Copy current prompt bar
 
-If `REVIEW_FEEDBACK_<worktree-name>.md` already exists when you open the tool, a green **Copy current prompt** bar appears below the header. This lets you copy the prompt at any time without clicking Submit.
+Once all patches have been acted on (each approved, denied, or skipped), a green **Copy current prompt** bar appears below the header — this is populated the first time you click Generate Review Prompt and persists across reopens.
 
 ## Prompt format
 
@@ -168,10 +168,10 @@ commit unless a fix strictly requires touching other code. After making changes,
 summarize what you changed for each feedback item.
 ```
 
-- Approved patches are noted `[APPROVED — no issues]` in the series list — no feedback section
+- Approved patches are noted `[APPROVED — no issues]` in the series list; they still get a feedback section if they have comments
 - Denied patches are noted `[DENIED — requires significant changes]` and always get a feedback section (with a denial note), even without text comments
-- Skipped patches are noted `[SKIPPED — not reviewed]` — no feedback section
-- Only patches with actual feedback (or denial) get a `## Part N` section
+- Skipped patches are noted `[SKIPPED — not reviewed]` — no feedback section ever
+- Patches with no comments, no general comment, and not denied are omitted from the feedback sections entirely
 
 ## Development
 
