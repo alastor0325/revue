@@ -4,17 +4,17 @@ A local web UI for reviewing Claude-generated Firefox patches in git worktrees.
 
 ## The problem
 
-When you use Claude Code to implement a Firefox bug, the patches land in a dedicated git worktree (e.g. `~/firefox-1874041`). Reviewing those changes and sending feedback back to Claude is awkward — there's no clean way to annotate specific lines and hand the structured feedback off without manual copy-pasting.
+When you use Claude Code to implement a Firefox bug, the patches land in a dedicated git worktree (e.g. `~/firefox-bugABC`). Reviewing those changes and sending feedback back to Claude is awkward — there's no clean way to annotate specific lines and hand the structured feedback off without manual copy-pasting.
 
 `firefox-review` solves this with a GitHub-style diff viewer that runs locally, lets you leave inline comments, and generates a structured prompt that Claude can act on directly.
 
 ## How it works
 
 ```
-firefox-review 1874041
+firefox-review bugABC
 ```
 
-1. Finds the worktree at `~/firefox-1874041`
+1. Finds the worktree at `~/firefox-bugABC`
 2. Computes the diff — all commits above the merge-base with `~/firefox` (central)
 3. Starts a local web server and opens the diff viewer in your browser
 4. You click any diff line to leave an inline comment
@@ -25,7 +25,7 @@ firefox-review 1874041
 **Prerequisites:** Node.js ≥ 18, [Claude Code CLI](https://github.com/anthropics/claude-code)
 
 ```bash
-git clone https://github.com/alastorwu/firefox-review
+git clone https://github.com/alastor0325/firefox-review
 cd firefox-review
 npm install
 npm link          # makes `firefox-review` available globally
@@ -35,8 +35,8 @@ npm link          # makes `firefox-review` available globally
 
 ```
 ~/firefox/              ← main Firefox repo (central)
-~/firefox-1874041/      ← Claude-generated worktree for bug 1874041
-~/firefox-2000420/      ← another worktree
+~/firefox-bugABC/       ← Claude-generated worktree for bugABC
+~/firefox-bugXYZ/       ← another worktree
 ```
 
 ## Usage
@@ -45,8 +45,8 @@ npm link          # makes `firefox-review` available globally
 firefox-review <bug-id>
 
 # Examples:
-firefox-review 1874041
-firefox-review 2000420
+firefox-review bugABC
+firefox-review bugXYZ
 ```
 
 The browser opens at `http://localhost:7777` automatically.
@@ -65,12 +65,12 @@ After clicking Submit, the tool:
 1. Writes `REVIEW_FEEDBACK.md` to the worktree with this structure:
 
 ```
-You are being asked to revise your implementation of Bug 1874041.
+You are being asked to revise your implementation of bugABC.
 
 ## Your commits under review:
-- 578d8265 Bug 1874041 - Part 3: Fire togglecamera/togglemicrophone handlers...
-- 24ce64b1 Bug 1874041 - Part 2: Implement setCameraActive/setMicrophoneActive...
-- e9117170 Bug 1874041 - Part 1: Add togglemicrophone/togglecamera to WebIDL...
+- a1b2c3d4 bugABC - Part 3: Fire event handlers on global mute.
+- e5f6a7b8 bugABC - Part 2: Implement setActive with NotAllowedError semantics.
+- c9d0e1f2 bugABC - Part 1: Add new API to WebIDL and wire through utils.
 
 ## Reviewer feedback:
 
@@ -91,7 +91,7 @@ for each feedback item.
 2. Shows you the command to run:
 
 ```bash
-cd ~/firefox-1874041 && claude --print "$(cat REVIEW_FEEDBACK.md)"
+cd ~/firefox-bugABC && claude --print "$(cat REVIEW_FEEDBACK.md)"
 ```
 
 Claude receives clearly labeled `[YOUR CODE]` vs `[FEEDBACK]` sections — it never confuses your comments with the code it wrote.
