@@ -249,25 +249,33 @@ describe('POST /api/submit', () => {
 
 describe('GET /api/state', () => {
   let tmpDir;
-  beforeEach(() => { tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fxreview-state-')); });
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fxreview-state-'));
+    getDiffPerCommit.mockReset();
+    submitReview.mockReset();
+  });
   afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   function makeStateApp() {
     getDiffPerCommit.mockReturnValue(PATCHES);
+    submitReview.mockImplementation((_, name, _patches, _feedback) => ({
+      feedbackPath: `${tmpDir}/REVIEW_FEEDBACK_${name}.md`,
+      prompt: `You are being asked to revise your implementation in worktree firefox-${name}.`,
+    }));
     return createApp({ worktreeName: 'bugABC', worktreePath: tmpDir, mainRepoPath: '/fake/firefox' });
   }
 
-  test('returns empty object when no state file exists', async () => {
+  test('GET returns empty object when no state file exists', async () => {
     const app = makeStateApp();
     const res = await request(app).get('/api/state');
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({});
+    expect(res.body.prompt).toBeNull();
   });
 
-  test('returns ok and state can be retrieved via GET', async () => {
+  test('POST persists state and can be retrieved via GET', async () => {
     const app = makeStateApp();
     const payload = {
-      comments: { aaa111: { 'file.cpp': { n5: { text: 'fix this' } } } },
+      comments: { aaa111: { 'file.cpp': { n5: { file: 'file.cpp', line: 5, lineContent: 'x', text: 'fix this' } } } },
       generalComments: { aaa111: 'overall concern' },
       skipped: ['bbb222'],
       approved: [],
@@ -280,6 +288,42 @@ describe('GET /api/state', () => {
     expect(getRes.status).toBe(200);
     expect(getRes.body.skipped).toEqual(['bbb222']);
     expect(getRes.body.generalComments.aaa111).toBe('overall concern');
+  });
+
+  test('POST regenerates MD and returns prompt when feedback exists', async () => {
+    const app = makeStateApp();
+    const payload = {
+      comments: { aaa111: { 'file.cpp': { n5: { file: 'file.cpp', line: 5, lineContent: 'x', text: 'fix this' } } } },
+      generalComments: {},
+      skipped: [],
+      approved: [],
+    };
+    const postRes = await request(app).post('/api/state').send(payload);
+    expect(postRes.body.prompt).toBeTruthy();
+    expect(postRes.body.prompt).toContain('bugABC');
+    expect(submitReview).toHaveBeenCalled();
+    // allFeedback passed to submitReview should include the comment
+    const allFeedbackArg = submitReview.mock.calls[0][3];
+    expect(allFeedbackArg.find(f => f.hash === 'aaa111').comments).toHaveLength(1);
+  });
+
+  test('GET returns existing prompt from MD file', async () => {
+    const app = makeStateApp();
+    // Write MD file directly
+    const mdPath = require('path').join(tmpDir, 'REVIEW_FEEDBACK_bugABC.md');
+    require('fs').writeFileSync(mdPath, 'existing prompt content', 'utf8');
+    const res = await request(app).get('/api/state');
+    expect(res.body.prompt).toBe('existing prompt content');
+  });
+
+  test('POST does not regenerate MD when no feedback exists', async () => {
+    const app = makeStateApp();
+    const postRes = await request(app).post('/api/state').send({
+      comments: {}, generalComments: {}, skipped: [], approved: [],
+    });
+    expect(postRes.body.prompt).toBeNull();
+    const mdPath = require('path').join(tmpDir, 'REVIEW_FEEDBACK_bugABC.md');
+    expect(require('fs').existsSync(mdPath)).toBe(false);
   });
 
   test('approved hashes are persisted and retrieved', async () => {

@@ -36,7 +36,7 @@ async function saveState() {
   const indicator = $('#autosave-status');
   if (indicator) indicator.textContent = 'Saving…';
   try {
-    await fetch('/api/state', {
+    const res = await fetch('/api/state', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -46,6 +46,8 @@ async function saveState() {
         approved: [...state.approved],
       }),
     });
+    const data = await res.json();
+    if (data.prompt) updateCurrentPrompt(data.prompt);
     if (indicator) {
       indicator.textContent = 'Saved';
       setTimeout(() => { if (indicator) indicator.textContent = ''; }, 2000);
@@ -53,6 +55,13 @@ async function saveState() {
   } catch {
     if (indicator) indicator.textContent = 'Save failed';
   }
+}
+
+function updateCurrentPrompt(prompt) {
+  const bar = $('#current-prompt-bar');
+  if (!bar) return;
+  bar.dataset.prompt = prompt;
+  bar.style.display = '';
 }
 
 // ── Comment management ─────────────────────────────────────────────────────
@@ -560,6 +569,16 @@ async function init() {
     });
   });
 
+  $('#btn-copy-current-prompt').addEventListener('click', () => {
+    const bar = $('#current-prompt-bar');
+    const prompt = bar && bar.dataset.prompt;
+    if (!prompt) return;
+    navigator.clipboard.writeText(prompt).then(() => {
+      $('#btn-copy-current-prompt').textContent = 'Copied!';
+      setTimeout(() => { $('#btn-copy-current-prompt').textContent = 'Copy current prompt'; }, 2000);
+    });
+  });
+
   $('#btn-close-modal').addEventListener('click', () => {
     $('#result-overlay').classList.remove('visible');
   });
@@ -586,6 +605,7 @@ async function init() {
       if (saved.generalComments) state.generalComments = saved.generalComments;
       if (saved.skipped) state.skipped = new Set(saved.skipped);
       if (saved.approved) state.approved = new Set(saved.approved);
+      if (saved.prompt) updateCurrentPrompt(saved.prompt);
     }
 
     state.patches = data.patches || [];

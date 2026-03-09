@@ -81,26 +81,54 @@ function createApp({ worktreeName, worktreePath, mainRepoPath }) {
     }
   });
 
-  // GET /api/state — load persisted review state
+  // GET /api/state — load persisted review state, including existing prompt if available
   app.get('/api/state', (req, res) => {
     const statePath = path.join(worktreePath, `REVIEW_STATE_${worktreeName}.json`);
+    const mdPath = path.join(worktreePath, `REVIEW_FEEDBACK_${worktreeName}.md`);
     try {
-      if (fs.existsSync(statePath)) {
-        res.json(JSON.parse(fs.readFileSync(statePath, 'utf8')));
-      } else {
-        res.json({});
-      }
+      const state = fs.existsSync(statePath)
+        ? JSON.parse(fs.readFileSync(statePath, 'utf8'))
+        : {};
+      const prompt = fs.existsSync(mdPath)
+        ? fs.readFileSync(mdPath, 'utf8')
+        : null;
+      res.json({ ...state, prompt });
     } catch {
       res.json({});
     }
   });
 
-  // POST /api/state — persist review state
+  // POST /api/state — persist review state and regenerate MD file (best-effort)
   app.post('/api/state', (req, res) => {
     const statePath = path.join(worktreePath, `REVIEW_STATE_${worktreeName}.json`);
     try {
       fs.writeFileSync(statePath, JSON.stringify(req.body, null, 2), 'utf8');
-      res.json({ ok: true });
+
+      // Regenerate MD from current state so it's always in sync
+      let prompt = null;
+      try {
+        loadData();
+        const { comments = {}, generalComments = {}, skipped = [], approved = [] } = req.body;
+        const allFeedback = patchesCache.map((p) => {
+          const byFile = comments[p.hash] || {};
+          return {
+            hash: p.hash,
+            comments: Object.values(byFile).flatMap(Object.values),
+            generalComment: (generalComments[p.hash] || '').trim(),
+          };
+        });
+        const hasAnyFeedback = allFeedback.some(
+          (f) => f.comments.length > 0 || f.generalComment.length > 0
+        );
+        if (hasAnyFeedback) {
+          const result = submitReview(
+            worktreePath, worktreeName, patchesCache, allFeedback, skipped, approved
+          );
+          if (result) prompt = result.prompt;
+        }
+      } catch { /* best-effort: don't fail the state save if MD regeneration errors */ }
+
+      res.json({ ok: true, prompt });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
