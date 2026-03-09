@@ -928,33 +928,3 @@ async function init() {
 
 document.addEventListener('DOMContentLoaded', init);
 
-// ── Dev auto-reload ─────────────────────────────────────────────────────────
-// Connects to the server's SSE endpoint. If the server restarts (new start
-// token), the page reloads automatically. Silently gives up if the endpoint
-// doesn't exist (e.g. demo / production).
-(function connectAutoReload() {
-  let initialToken = null;
-  let retries = 0;
-  const MAX_RETRIES = 30;
-
-  function connect() {
-    const es = new EventSource('/api/reload');
-    es.onmessage = (e) => {
-      retries = 0;
-      if (initialToken === null) {
-        initialToken = e.data;
-      } else if (e.data !== initialToken) {
-        location.reload();
-      }
-    };
-    es.onerror = () => {
-      es.close();
-      // Only retry if we had a working connection before (not in demo/static)
-      if (initialToken !== null && retries < MAX_RETRIES) {
-        retries++;
-        setTimeout(connect, 1000);
-      }
-    };
-  }
-  connect();
-}());
