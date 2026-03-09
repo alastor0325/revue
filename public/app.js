@@ -38,7 +38,7 @@ async function saveState() {
   const indicator = $('#autosave-status');
   if (indicator) indicator.textContent = 'Saving…';
   try {
-    const res = await fetch('/api/state', {
+    await fetch('/api/state', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -49,8 +49,6 @@ async function saveState() {
         denied: [...state.denied],
       }),
     });
-    const data = await res.json();
-    if (data.prompt) updateCurrentPrompt(data.prompt);
     if (indicator) {
       indicator.textContent = 'Saved';
       setTimeout(() => { if (indicator) indicator.textContent = ''; }, 2000);
@@ -195,44 +193,22 @@ function unapprovePatch(hash) {
 function updateSubmitButton() {
   const btn = $('#btn-submit');
   const warn = $('#submit-warning');
-  const patch = currentPatch();
-  if (!patch) return;
 
-  const isSkipped = state.skipped.has(patch.hash);
-  const isApproved = state.approved.has(patch.hash);
-  const isDenied = state.denied.has(patch.hash);
-  const count = commentsForPatch(patch.hash).length;
-  const patchLabel = state.patches.length > 1 ? ` for Part ${state.currentPatchIdx + 1}` : '';
+  const hasActivity =
+    state.skipped.size > 0 ||
+    state.approved.size > 0 ||
+    state.denied.size > 0 ||
+    state.patches.some((p) =>
+      commentsForPatch(p.hash).length > 0 ||
+      getGeneralComment(p.hash).trim().length > 0
+    );
 
-  btn.textContent = `Submit Review${patchLabel} to Claude`;
-
-  const generalComment = getGeneralComment(patch.hash).trim();
-  const hasFeedback = count > 0 || generalComment.length > 0;
-
-  if (isSkipped) {
-    btn.disabled = true;
-    warn.textContent = 'Patch skipped — no review to submit';
-  } else if (isApproved) {
-    btn.disabled = true;
-    warn.textContent = 'Patch approved — no issues to submit';
-  } else if (isDenied && !hasFeedback) {
-    btn.disabled = true;
-    warn.textContent = 'Patch denied — add comments to explain';
-  } else if (isDenied && hasFeedback) {
+  if (hasActivity) {
     btn.disabled = false;
-    const parts = [];
-    if (generalComment) parts.push('general feedback');
-    if (count > 0) parts.push(`${count} line comment${count !== 1 ? 's' : ''}`);
-    warn.textContent = parts.join(' + ') + ' ready (denied)';
-  } else if (!hasFeedback) {
-    btn.disabled = true;
-    warn.textContent = 'Add a general comment or click a line to comment';
+    warn.textContent = '';
   } else {
-    btn.disabled = false;
-    const parts = [];
-    if (generalComment) parts.push('general feedback');
-    if (count > 0) parts.push(`${count} line comment${count !== 1 ? 's' : ''}`);
-    warn.textContent = parts.join(' + ') + ' ready';
+    btn.disabled = true;
+    warn.textContent = 'Review at least one patch before generating the prompt';
   }
 }
 
@@ -592,11 +568,6 @@ function renderCurrentPatch() {
 
 // ── Submit review ──────────────────────────────────────────────────────────
 async function submitReview() {
-  const patch = currentPatch();
-  const comments = patch ? commentsForPatch(patch.hash) : [];
-  const generalComment = patch ? getGeneralComment(patch.hash).trim() : '';
-  if (comments.length === 0 && !generalComment) return;
-
   const allFeedback = state.patches.map((p) => ({
     hash: p.hash,
     comments: commentsForPatch(p.hash),
@@ -605,18 +576,17 @@ async function submitReview() {
 
   const btn = $('#btn-submit');
   btn.disabled = true;
-  btn.textContent = 'Submitting…';
+  btn.textContent = 'Generating…';
 
   try {
     const res = await fetch('/api/submit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        patchHash: patch.hash,
         allFeedback,
-        skippedHashes: [...state.skipped],
+        skippedHashes:  [...state.skipped],
         approvedHashes: [...state.approved],
-        deniedHashes: [...state.denied],
+        deniedHashes:   [...state.denied],
       }),
     });
     const json = await res.json();
@@ -625,10 +595,11 @@ async function submitReview() {
     $('#result-feedback-path').textContent = json.feedbackPath;
     $('#result-prompt').value = json.prompt;
     $('#result-overlay').classList.add('visible');
+    updateCurrentPrompt(json.prompt);
 
     renderTabs();
   } catch (err) {
-    alert(`Error submitting review: ${err.message}`);
+    alert(`Error generating review: ${err.message}`);
   } finally {
     updateSubmitButton();
   }

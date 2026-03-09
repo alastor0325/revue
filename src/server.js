@@ -98,72 +98,44 @@ function createApp({ worktreeName, worktreePath, mainRepoPath }) {
     }
   });
 
-  // POST /api/state — persist review state and regenerate MD file (best-effort)
+  // POST /api/state — persist review state only (never touches the MD file)
   app.post('/api/state', (req, res) => {
     const statePath = path.join(worktreePath, `REVIEW_STATE_${worktreeName}.json`);
     try {
       fs.writeFileSync(statePath, JSON.stringify(req.body, null, 2), 'utf8');
-
-      // Regenerate MD from current state so it's always in sync
-      let prompt = null;
-      try {
-        loadData();
-        const { comments = {}, generalComments = {}, skipped = [], approved = [], denied = [] } = req.body;
-        const allFeedback = patchesCache.map((p) => {
-          const byFile = comments[p.hash] || {};
-          return {
-            hash: p.hash,
-            comments: Object.values(byFile).flatMap(Object.values),
-            generalComment: (generalComments[p.hash] || '').trim(),
-          };
-        });
-        const hasActivity = approved.length > 0 || skipped.length > 0 || denied.length > 0 ||
-          allFeedback.some((f) => f.comments.length > 0 || f.generalComment.length > 0);
-        if (hasActivity) {
-          const result = submitReview(
-            worktreePath, worktreeName, patchesCache, allFeedback, skipped, approved, denied
-          );
-          if (result) prompt = result.prompt;
-        }
-      } catch { /* best-effort: don't fail the state save if MD regeneration errors */ }
-
-      res.json({ ok: true, prompt });
+      res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  // POST /api/submit — write REVIEW_FEEDBACK_<worktreeName>.md and return the claude command
+  // POST /api/submit — write REVIEW_FEEDBACK_<worktreeName>.md and return the prompt
   app.post('/api/submit', (req, res) => {
-    const { patchHash, allFeedback } = req.body;
-
-    if (!patchHash) {
-      return res.status(400).json({ error: 'patchHash is required.' });
-    }
+    const { allFeedback } = req.body;
 
     if (!Array.isArray(allFeedback)) {
       return res.status(400).json({ error: 'allFeedback is required.' });
     }
 
-    const currentFeedback = allFeedback.find((f) => f.hash === patchHash);
-    const hasLineComments = currentFeedback && Array.isArray(currentFeedback.comments) && currentFeedback.comments.length > 0;
-    const hasGeneralComment = currentFeedback && (currentFeedback.generalComment || '').trim().length > 0;
-    const deniedHashes = Array.isArray(req.body.deniedHashes) ? req.body.deniedHashes : [];
-    const isDenied = deniedHashes.includes(patchHash);
+    const skippedHashes  = Array.isArray(req.body.skippedHashes)  ? req.body.skippedHashes  : [];
+    const approvedHashes = Array.isArray(req.body.approvedHashes) ? req.body.approvedHashes : [];
+    const deniedHashes   = Array.isArray(req.body.deniedHashes)   ? req.body.deniedHashes   : [];
 
-    if (!hasLineComments && !hasGeneralComment && !isDenied) {
-      return res.status(400).json({ error: 'No comments provided.' });
+    const hasActivity =
+      skippedHashes.length > 0 ||
+      approvedHashes.length > 0 ||
+      deniedHashes.length > 0 ||
+      allFeedback.some(
+        (f) => (Array.isArray(f.comments) && f.comments.length > 0) ||
+               (f.generalComment || '').trim().length > 0
+      );
+
+    if (!hasActivity) {
+      return res.status(400).json({ error: 'No feedback to submit.' });
     }
 
     try {
       loadData();
-      const patch = patchesCache.find((p) => p.hash === patchHash);
-      if (!patch) {
-        return res.status(404).json({ error: `Patch ${patchHash} not found.` });
-      }
-
-      const skippedHashes = Array.isArray(req.body.skippedHashes) ? req.body.skippedHashes : [];
-      const approvedHashes = Array.isArray(req.body.approvedHashes) ? req.body.approvedHashes : [];
       const { feedbackPath, prompt } = submitReview(
         worktreePath,
         worktreeName,

@@ -134,11 +134,10 @@ describe('POST /api/submit', () => {
   ];
 
   const validBody = {
-    patchHash: 'aaa111',
     allFeedback: validAllFeedback,
   };
 
-  test('returns 200 with ok, feedbackPath, and command on valid input', async () => {
+  test('returns 200 with ok, feedbackPath, and prompt on valid input', async () => {
     const app = makeApp();
     const res = await request(app).post('/api/submit').send(validBody);
     expect(res.status).toBe(200);
@@ -158,24 +157,16 @@ describe('POST /api/submit', () => {
     expect(allFeedback[0].comments[0].text).toBe('Use camelCase');
   });
 
-  test('returns 400 when patchHash is missing', async () => {
-    const app = makeApp();
-    const res = await request(app).post('/api/submit').send({ allFeedback: validAllFeedback });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBeTruthy();
-  });
-
   test('returns 400 when allFeedback is missing', async () => {
     const app = makeApp();
-    const res = await request(app).post('/api/submit').send({ patchHash: 'aaa111' });
+    const res = await request(app).post('/api/submit').send({});
     expect(res.status).toBe(400);
     expect(res.body.error).toBeTruthy();
   });
 
-  test('returns 400 when current patch has no comments and no general comment', async () => {
+  test('returns 400 when no activity at all', async () => {
     const app = makeApp();
     const res = await request(app).post('/api/submit').send({
-      patchHash: 'aaa111',
       allFeedback: [
         { hash: 'aaa111', comments: [], generalComment: '' },
         { hash: 'bbb222', comments: [], generalComment: '' },
@@ -185,10 +176,9 @@ describe('POST /api/submit', () => {
     expect(res.body.error).toBeTruthy();
   });
 
-  test('returns 200 when only generalComment is provided for current patch', async () => {
+  test('returns 200 when only generalComment is provided', async () => {
     const app = makeApp();
     const res = await request(app).post('/api/submit').send({
-      patchHash: 'aaa111',
       allFeedback: [
         { hash: 'aaa111', comments: [], generalComment: 'Please use RAII.' },
         { hash: 'bbb222', comments: [], generalComment: '' },
@@ -198,14 +188,17 @@ describe('POST /api/submit', () => {
     expect(res.body.ok).toBe(true);
   });
 
-  test('returns 404 when patchHash does not match any patch', async () => {
+  test('returns 200 for denied patches even without text feedback', async () => {
     const app = makeApp();
     const res = await request(app).post('/api/submit').send({
-      patchHash: 'zzz999',
-      allFeedback: [{ hash: 'zzz999', comments: [{ file: 'f', line: 1, lineContent: 'x', text: 'y' }], generalComment: '' }],
+      allFeedback: [
+        { hash: 'aaa111', comments: [], generalComment: '' },
+        { hash: 'bbb222', comments: [], generalComment: '' },
+      ],
+      deniedHashes: ['aaa111'],
     });
-    expect(res.status).toBe(404);
-    expect(res.body.error).toContain('zzz999');
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
   });
 
   test('passes skippedHashes to submitReview', async () => {
@@ -236,26 +229,9 @@ describe('POST /api/submit', () => {
     expect(approvedArg).toEqual([]);
   });
 
-  test('allows submit for a denied patch even without text feedback', async () => {
-    const app = makeApp();
-    const res = await request(app).post('/api/submit').send({
-      patchHash: 'aaa111',
-      allFeedback: [
-        { hash: 'aaa111', comments: [], generalComment: '' },
-        { hash: 'bbb222', comments: [], generalComment: '' },
-      ],
-      deniedHashes: ['aaa111'],
-    });
-    expect(res.status).toBe(200);
-    expect(res.body.ok).toBe(true);
-  });
-
   test('passes deniedHashes to submitReview', async () => {
     const app = makeApp();
-    await request(app).post('/api/submit').send({
-      ...validBody,
-      deniedHashes: ['bbb222'],
-    });
+    await request(app).post('/api/submit').send({ ...validBody, deniedHashes: ['bbb222'] });
     const deniedArg = submitReview.mock.calls[0][6];
     expect(deniedArg).toEqual(['bbb222']);
   });
@@ -289,10 +265,6 @@ describe('GET /api/state', () => {
 
   function makeStateApp() {
     getDiffPerCommit.mockReturnValue(PATCHES);
-    submitReview.mockImplementation((_, name, _patches, _feedback) => ({
-      feedbackPath: `${tmpDir}/REVIEW_FEEDBACK_${name}.md`,
-      prompt: `You are being asked to revise your implementation in worktree firefox-${name}.`,
-    }));
     return createApp({ worktreeName: 'bugABC', worktreePath: tmpDir, mainRepoPath: '/fake/firefox' });
   }
 
@@ -314,6 +286,7 @@ describe('GET /api/state', () => {
     const postRes = await request(app).post('/api/state').send(payload);
     expect(postRes.status).toBe(200);
     expect(postRes.body.ok).toBe(true);
+    expect(postRes.body.prompt).toBeUndefined();
 
     const getRes = await request(app).get('/api/state');
     expect(getRes.status).toBe(200);
@@ -321,57 +294,22 @@ describe('GET /api/state', () => {
     expect(getRes.body.generalComments.aaa111).toBe('overall concern');
   });
 
-  test('POST regenerates MD and returns prompt when feedback exists', async () => {
+  test('POST never calls submitReview', async () => {
     const app = makeStateApp();
-    const payload = {
-      comments: { aaa111: { 'file.cpp': { n5: { file: 'file.cpp', line: 5, lineContent: 'x', text: 'fix this' } } } },
-      generalComments: {},
-      skipped: [],
-      approved: [],
-    };
-    const postRes = await request(app).post('/api/state').send(payload);
-    expect(postRes.body.prompt).toBeTruthy();
-    expect(postRes.body.prompt).toContain('bugABC');
-    expect(submitReview).toHaveBeenCalled();
-    // allFeedback passed to submitReview should include the comment
-    const allFeedbackArg = submitReview.mock.calls[0][3];
-    expect(allFeedbackArg.find(f => f.hash === 'aaa111').comments).toHaveLength(1);
+    const postRes = await request(app).post('/api/state').send({
+      comments: { aaa111: { 'file.cpp': { n5: { file: 'file.cpp', line: 5, lineContent: 'x', text: 'fix' } } } },
+      generalComments: {}, skipped: [], approved: [], denied: ['aaa111'],
+    });
+    expect(postRes.body.ok).toBe(true);
+    expect(submitReview).not.toHaveBeenCalled();
   });
 
   test('GET returns existing prompt from MD file', async () => {
     const app = makeStateApp();
-    // Write MD file directly
     const mdPath = require('path').join(tmpDir, 'REVIEW_FEEDBACK_bugABC.md');
     require('fs').writeFileSync(mdPath, 'existing prompt content', 'utf8');
     const res = await request(app).get('/api/state');
     expect(res.body.prompt).toBe('existing prompt content');
-  });
-
-  test('POST does not regenerate MD when there is no activity at all', async () => {
-    const app = makeStateApp();
-    const postRes = await request(app).post('/api/state').send({
-      comments: {}, generalComments: {}, skipped: [], approved: [],
-    });
-    expect(postRes.body.prompt).toBeNull();
-    expect(submitReview).not.toHaveBeenCalled();
-  });
-
-  test('POST regenerates MD when patches are approved even with no text feedback', async () => {
-    const app = makeStateApp();
-    const postRes = await request(app).post('/api/state').send({
-      comments: {}, generalComments: {}, skipped: [], approved: ['aaa111'],
-    });
-    expect(postRes.body.prompt).toBeTruthy();
-    expect(submitReview).toHaveBeenCalled();
-  });
-
-  test('POST regenerates MD when patches are skipped even with no text feedback', async () => {
-    const app = makeStateApp();
-    const postRes = await request(app).post('/api/state').send({
-      comments: {}, generalComments: {}, skipped: ['bbb222'], approved: [],
-    });
-    expect(postRes.body.prompt).toBeTruthy();
-    expect(submitReview).toHaveBeenCalled();
   });
 
   test('approved hashes are persisted and retrieved', async () => {
@@ -379,15 +317,6 @@ describe('GET /api/state', () => {
     await request(app).post('/api/state').send({ approved: ['aaa111'], skipped: [], comments: {}, generalComments: {} });
     const res = await request(app).get('/api/state');
     expect(res.body.approved).toEqual(['aaa111']);
-  });
-
-  test('POST regenerates MD when patches are denied', async () => {
-    const app = makeStateApp();
-    const postRes = await request(app).post('/api/state').send({
-      comments: {}, generalComments: {}, skipped: [], approved: [], denied: ['aaa111'],
-    });
-    expect(postRes.body.prompt).toBeTruthy();
-    expect(submitReview).toHaveBeenCalled();
   });
 });
 

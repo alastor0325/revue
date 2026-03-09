@@ -109,11 +109,18 @@ describe('formatCombinedPrompt', () => {
     expect(approvedLine).toContain('[APPROVED — no issues]');
   });
 
-  test('omits feedback section for approved patches', () => {
+  test('includes feedback section for approved patches that have feedback', () => {
     const feedback = makeFeedback([{ hash: 'bbb222', comments: comments2 }]);
     const out = formatCombinedPrompt('bugABC', allPatches, feedback, [], [patch2.hash]);
     const afterSeries = out.slice(out.indexOf('---'));
-    expect(afterSeries).not.toContain(patch2.hash);
+    expect(afterSeries).toContain(patch2.hash);
+    expect(afterSeries).toContain('[FEEDBACK]  : Handle the error');
+  });
+
+  test('omits feedback section for approved patches with no feedback', () => {
+    const out = formatCombinedPrompt('bugABC', allPatches, makeFeedback(), [], [patch3.hash]);
+    const afterSeries = out.slice(out.indexOf('---'));
+    expect(afterSeries).not.toContain(patch3.hash);
   });
 
   test('skipped takes priority over approved for the same patch', () => {

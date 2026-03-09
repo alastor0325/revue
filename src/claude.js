@@ -33,7 +33,7 @@ function formatCombinedPrompt(worktreeName, allPatches, allFeedback, skippedHash
 
   const feedbackSections = allPatches
     .filter((p) => {
-      if (skipped.has(p.hash) || approved.has(p.hash)) return false;
+      if (skipped.has(p.hash)) return false;
       const fb = feedbackMap[p.hash];
       if (!fb) return false;
       const hasFeedback = fb.comments.length > 0 || (fb.generalComment || '').trim().length > 0;
