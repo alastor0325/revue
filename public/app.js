@@ -28,6 +28,15 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+// ── Comment draft cache ────────────────────────────────────────────────────
+// Keyed by "patchHash/filePath/lineKey". Drafts survive form close/cancel
+// and are cleared only when the comment is saved.
+const drafts = {};
+
+function draftKey(patchHash, filePath, key) {
+  return `${patchHash}/${filePath}/${key}`;
+}
+
 // ── Auto-save ──────────────────────────────────────────────────────────────
 let saveTimer = null;
 let savedPromptText = null;
@@ -241,15 +250,19 @@ function showCommentForm(tr, patchHash, filePath, line, key) {
   tr.after(formRow);
 
   const textarea = formRow.querySelector('textarea');
+  const dk = draftKey(patchHash, filePath, key);
   const existing = getComment(patchHash, filePath, key);
-  if (existing) textarea.value = existing.text;
+  textarea.value = existing ? existing.text : (drafts[dk] || '');
   textarea.focus();
+
+  textarea.addEventListener('input', () => { drafts[dk] = textarea.value; });
 
   formRow.querySelector('.btn-cancel').addEventListener('click', () => formRow.remove());
 
   formRow.querySelector('.btn-save').addEventListener('click', () => {
     const text = textarea.value.trim();
     if (!text) return;
+    delete drafts[dk];
     const commentObj = {
       patchHash,
       file: filePath,
@@ -368,14 +381,17 @@ function renderCommitMessageSection(container, patchHash, commitMessage, disable
           <button class="btn-save">Save comment</button>
         </div>
       </div>`;
+    const dk = draftKey(patchHash, COMMIT_FILE, COMMIT_KEY);
     const existing = getComment(patchHash, COMMIT_FILE, COMMIT_KEY);
     const ta = formEl.querySelector('textarea');
-    if (existing) ta.value = existing.text;
+    ta.value = existing ? existing.text : (drafts[dk] || '');
     ta.focus();
+    ta.addEventListener('input', () => { drafts[dk] = ta.value; });
     formEl.querySelector('.btn-cancel').addEventListener('click', () => { formEl.innerHTML = ''; });
     formEl.querySelector('.btn-save').addEventListener('click', () => {
       const text = ta.value.trim();
       if (!text) return;
+      delete drafts[dk];
       setComment(patchHash, COMMIT_FILE, COMMIT_KEY, {
         patchHash, file: COMMIT_FILE, line: 0, lineContent: commitMessage, text,
       });
