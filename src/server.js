@@ -117,10 +117,9 @@ function createApp({ worktreeName, worktreePath, mainRepoPath }) {
             generalComment: (generalComments[p.hash] || '').trim(),
           };
         });
-        const hasAnyFeedback = allFeedback.some(
-          (f) => f.comments.length > 0 || f.generalComment.length > 0
-        );
-        if (hasAnyFeedback) {
+        const hasActivity = approved.length > 0 || skipped.length > 0 ||
+          allFeedback.some((f) => f.comments.length > 0 || f.generalComment.length > 0);
+        if (hasActivity) {
           const result = submitReview(
             worktreePath, worktreeName, patchesCache, allFeedback, skipped, approved
           );

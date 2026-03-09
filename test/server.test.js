@@ -316,14 +316,31 @@ describe('GET /api/state', () => {
     expect(res.body.prompt).toBe('existing prompt content');
   });
 
-  test('POST does not regenerate MD when no feedback exists', async () => {
+  test('POST does not regenerate MD when there is no activity at all', async () => {
     const app = makeStateApp();
     const postRes = await request(app).post('/api/state').send({
       comments: {}, generalComments: {}, skipped: [], approved: [],
     });
     expect(postRes.body.prompt).toBeNull();
-    const mdPath = require('path').join(tmpDir, 'REVIEW_FEEDBACK_bugABC.md');
-    expect(require('fs').existsSync(mdPath)).toBe(false);
+    expect(submitReview).not.toHaveBeenCalled();
+  });
+
+  test('POST regenerates MD when patches are approved even with no text feedback', async () => {
+    const app = makeStateApp();
+    const postRes = await request(app).post('/api/state').send({
+      comments: {}, generalComments: {}, skipped: [], approved: ['aaa111'],
+    });
+    expect(postRes.body.prompt).toBeTruthy();
+    expect(submitReview).toHaveBeenCalled();
+  });
+
+  test('POST regenerates MD when patches are skipped even with no text feedback', async () => {
+    const app = makeStateApp();
+    const postRes = await request(app).post('/api/state').send({
+      comments: {}, generalComments: {}, skipped: ['bbb222'], approved: [],
+    });
+    expect(postRes.body.prompt).toBeTruthy();
+    expect(submitReview).toHaveBeenCalled();
   });
 
   test('approved hashes are persisted and retrieved', async () => {
