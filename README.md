@@ -2,6 +2,8 @@
 
 A local web UI for reviewing Claude-generated Firefox patches in git worktrees.
 
+**[→ Interactive demo](https://alastor0325.github.io/firefox-review/docs/)**
+
 ## The problem
 
 When you use Claude Code to implement a Firefox bug, the patches land in a dedicated git worktree (e.g. `~/firefox-my-feature`). Reviewing those changes and sending feedback back to Claude is awkward — there's no clean way to annotate specific lines and hand the structured feedback off without manual copy-pasting.
