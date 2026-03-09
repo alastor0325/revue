@@ -13,7 +13,7 @@ const state = {
   currentPatchIdx: 0,
   revisions: [],        // [{ savedAt, patches: [{hash, message}] }] — persisted
   updatedPatches: {},   // { patchIdx: { oldHash, oldMessage } } — computed on init, not persisted
-  showPrevRevision: {}, // { patchIdx: bool } — ephemeral toggle state
+  showRevision: {},     // { patchIdx: hash | null } — null means current; ephemeral toggle state
 };
 
 // ── DOM helpers ────────────────────────────────────────────────────────────
@@ -427,6 +427,21 @@ function detectRevisionChanges() {
   }
 }
 
+// Returns [{hash, savedAt}] ordered oldest-to-newest for the given patch position.
+// The last entry is always the current revision.
+function getRevisionList(patchIdx) {
+  const seen = new Set();
+  const list = [];
+  for (const rev of state.revisions) {
+    const p = rev.patches[patchIdx];
+    if (p && !seen.has(p.hash)) {
+      seen.add(p.hash);
+      list.push({ hash: p.hash, savedAt: rev.savedAt });
+    }
+  }
+  return list;
+}
+
 // ── Patch tab rendering ─────────────────────────────────────────────────────
 function renderTabs() {
   const tabsBar = $('#patch-tabs-bar');
@@ -548,26 +563,35 @@ function renderCurrentPatch() {
   heading.appendChild(btnGroup);
   container.appendChild(heading);
 
-  // Revision toggle bar — shown when this patch was updated since last review
-  const updateInfo = state.updatedPatches[state.currentPatchIdx];
-  if (updateInfo) {
+  // Revision toggle bar — shown when this patch has multiple recorded revisions
+  const revList = getRevisionList(state.currentPatchIdx);
+  const selectedHash = state.showRevision[state.currentPatchIdx] ?? null;
+  const effectiveHash = selectedHash ?? patch.hash;
+
+  if (revList.length > 1) {
     const revBar = document.createElement('div');
     revBar.className = 'revision-toggle-bar';
-    const isShowingPrev = !!state.showPrevRevision[state.currentPatchIdx];
-    revBar.innerHTML = `
-      <span class="revision-toggle-label">
-        ${isShowingPrev
-          ? `Showing: <strong>Previous revision</strong> (${updateInfo.oldHash})`
-          : `Showing: <strong>Current revision</strong> (${escapeHtml(patch.hash)})`}
-      </span>
-      <button class="btn-toggle-revision">
-        ${isShowingPrev ? '→ Show current revision' : '← Show previous revision'}
-      </button>`;
-    revBar.querySelector('.btn-toggle-revision').addEventListener('click', () => {
-      state.showPrevRevision[state.currentPatchIdx] = !isShowingPrev;
-      renderCurrentPatch();
-      renderTabs();
+
+    const label = document.createElement('span');
+    label.className = 'revision-toggle-label';
+    label.textContent = 'Revision:';
+    revBar.appendChild(label);
+
+    revList.forEach((rev, i) => {
+      const isCurrent = (i === revList.length - 1);
+      const isSelected = (rev.hash === effectiveHash) || (isCurrent && selectedHash === null);
+      const btn = document.createElement('button');
+      btn.className = 'btn-toggle-revision' + (isSelected ? ' active' : '');
+      btn.textContent = `Rev ${i + 1}${isCurrent ? ' · current' : ''}`;
+      btn.title = rev.hash + (rev.savedAt ? `  ·  ${new Date(rev.savedAt).toLocaleString()}` : '');
+      btn.addEventListener('click', () => {
+        state.showRevision[state.currentPatchIdx] = isCurrent ? null : rev.hash;
+        renderCurrentPatch();
+        renderTabs();
+      });
+      revBar.appendChild(btn);
     });
+
     container.appendChild(revBar);
   }
 
@@ -618,37 +642,38 @@ function renderCurrentPatch() {
     return;
   }
 
-  if (state.showPrevRevision[state.currentPatchIdx] && state.updatedPatches[state.currentPatchIdx]) {
-    const oldHash = state.updatedPatches[state.currentPatchIdx].oldHash;
+  if (effectiveHash !== patch.hash) {
+    const revIdx = revList.findIndex((r) => r.hash === effectiveHash);
+    const revLabel = revIdx >= 0 ? `Rev ${revIdx + 1}` : 'Previous revision';
     const prevHeader = document.createElement('div');
     prevHeader.className = 'diff-revision-header diff-revision-previous';
-    prevHeader.textContent = `Previous revision — ${oldHash}`;
+    prevHeader.textContent = `${revLabel} — ${effectiveHash}`;
     container.appendChild(prevHeader);
 
     const placeholder = document.createElement('div');
     placeholder.className = 'diff-revision-loading';
-    placeholder.textContent = 'Loading previous revision…';
+    placeholder.textContent = 'Loading revision…';
     container.appendChild(placeholder);
 
-    fetch(`/api/patchdiff/${oldHash}`)
+    fetch(`/api/patchdiff/${effectiveHash}`)
       .then((r) => r.json())
       .then((data) => {
         placeholder.remove();
         if (data.error) {
           const err = document.createElement('p');
           err.style.cssText = 'color:#f85149;padding:8px 24px;';
-          err.textContent = `Could not load previous revision: ${data.error}`;
+          err.textContent = `Could not load revision: ${data.error}`;
           container.appendChild(err);
           return;
         }
         for (const fileData of (data.files || [])) {
-          const block = renderFile(fileData, oldHash);
+          const block = renderFile(fileData, effectiveHash);
           block.classList.add('diff-previous-revision');
           container.appendChild(block);
         }
       })
       .catch(() => {
-        placeholder.textContent = 'Failed to load previous revision.';
+        placeholder.textContent = 'Failed to load revision.';
       });
   } else {
     if (patch.files.length === 0) {

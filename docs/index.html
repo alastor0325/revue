@@ -206,8 +206,8 @@
     ],
   };
 
-  // Previous revision for Part 2 (before ClearLead tracking was added)
-  const MOCK_OLD_DIFF_PART2 = {
+  // Rev 2 for Part 2 (added MOZ_ASSERT + basic ClearLead tracking, before the full implementation)
+  const MOCK_OLD_DIFF_PART2_REV2 = {
     hash: 'old_e5f6',
     files: [
       {
@@ -226,6 +226,32 @@
               { type: 'context', content: '  mCDMProxy = std::move(aProxy);', oldLineNum: 244, newLineNum: 245 },
               { type: 'context', content: '  mCDMProxy->SetEventTarget(mTaskQueue);', oldLineNum: 245, newLineNum: 246 },
               { type: 'context', content: '}', oldLineNum: 246, newLineNum: 247 },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  // Rev 1 for Part 2 (original — no MOZ_ASSERT, no ClearLead tracking at all)
+  const MOCK_OLD_DIFF_PART2_REV1 = {
+    hash: 'rev1_e5f6',
+    files: [
+      {
+        oldPath: 'dom/media/ExternalEngineStateMachine.cpp',
+        newPath: 'dom/media/ExternalEngineStateMachine.cpp',
+        binary: false,
+        hunks: [
+          {
+            header: '@@ -241,4 +241,6 @@',
+            oldStart: 241, oldCount: 4, newStart: 241, newCount: 6,
+            lines: [
+              { type: 'context', content: 'void ExternalEngineStateMachine::OnCDMProxyReady(', oldLineNum: 241, newLineNum: 241 },
+              { type: 'context', content: '    RefPtr<CDMProxy> aProxy)', oldLineNum: 242, newLineNum: 242 },
+              { type: 'context', content: '{', oldLineNum: 243, newLineNum: 243 },
+              { type: 'added',   content: '  mCDMProxy = std::move(aProxy);', oldLineNum: null, newLineNum: 244 },
+              { type: 'added',   content: '  mCDMProxy->SetEventTarget(mTaskQueue);', oldLineNum: null, newLineNum: 245 },
+              { type: 'context', content: '}', oldLineNum: 244, newLineNum: 246 },
             ],
           },
         ],
@@ -260,13 +286,29 @@
     skipped: [],
     approved: ['a1b2c3d4'],
     denied: ['c9d0e1f2'],
-    // Revision history — Part 2 had a different hash in the previous review session
+    // Revision history — Part 2 has been amended twice
     revisions: [
+      {
+        savedAt: '2025-01-12T14:30:00Z',
+        patches: [
+          { hash: 'a1b2c3d4', message: 'Bug 1234567 - Part 1: Add waitingforkey IDL and event dispatch' },
+          { hash: 'rev1_e5f6', message: 'Bug 1234567 - Part 2: Handle ClearLead in ExternalEngineStateMachine' },
+          { hash: 'c9d0e1f2', message: 'Bug 1234567 - Part 3: Refresh CDM proxy trusted input on proxy set' },
+        ],
+      },
       {
         savedAt: '2025-01-14T09:15:00Z',
         patches: [
           { hash: 'a1b2c3d4', message: 'Bug 1234567 - Part 1: Add waitingforkey IDL and event dispatch' },
           { hash: 'old_e5f6', message: 'Bug 1234567 - Part 2: Handle ClearLead in ExternalEngineStateMachine' },
+          { hash: 'c9d0e1f2', message: 'Bug 1234567 - Part 3: Refresh CDM proxy trusted input on proxy set' },
+        ],
+      },
+      {
+        savedAt: '2025-01-15T16:42:00Z',
+        patches: [
+          { hash: 'a1b2c3d4', message: 'Bug 1234567 - Part 1: Add waitingforkey IDL and event dispatch' },
+          { hash: 'e5f6a7b8', message: 'Bug 1234567 - Part 2: Handle ClearLead in ExternalEngineStateMachine' },
           { hash: 'c9d0e1f2', message: 'Bug 1234567 - Part 3: Refresh CDM proxy trusted input on proxy set' },
         ],
       },
@@ -309,12 +351,15 @@
         }),
       });
     }
-    // GET /api/patchdiff/:hash (previous revision diff)
+    // GET /api/patchdiff/:hash (historical revision diffs)
     if (url.startsWith('/api/patchdiff/')) {
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(MOCK_OLD_DIFF_PART2),
-      });
+      const hash = url.split('/api/patchdiff/')[1];
+      const diffMap = {
+        'old_e5f6':  MOCK_OLD_DIFF_PART2_REV2,
+        'rev1_e5f6': MOCK_OLD_DIFF_PART2_REV1,
+      };
+      const diff = diffMap[hash] || { hash, files: [], error: `No mock diff for ${hash}` };
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(diff) });
     }
     // Fallback — should not happen in demo
     return Promise.reject(new Error(`Unmocked fetch: ${url}`));

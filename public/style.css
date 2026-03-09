@@ -717,7 +717,7 @@ tr.comment-display-row td {
   color: #8b949e;
 }
 
-.revision-toggle-label strong { color: #e6edf3; }
+.revision-toggle-label { color: #8b949e; margin-right: 4px; }
 
 .btn-toggle-revision {
   background: #21262d;
@@ -729,6 +729,11 @@ tr.comment-display-row td {
   cursor: pointer;
 }
 .btn-toggle-revision:hover { background: #30363d; }
+.btn-toggle-revision.active {
+  background: #1f4b8e;
+  border-color: #388bfd;
+  color: #79c0ff;
+}
 
 .diff-revision-header {
   padding: 6px 24px;
