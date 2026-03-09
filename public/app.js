@@ -8,6 +8,7 @@ const state = {
   generalComments: {},  // free-form patch-level feedback, keyed by patchHash
   skipped: new Set(),   // patchHashes the reviewer chose to skip
   approved: new Set(),  // patchHashes the reviewer approved
+  denied: new Set(),    // patchHashes the reviewer denied
   patches: [],
   currentPatchIdx: 0,
 };
@@ -44,6 +45,7 @@ async function saveState() {
         generalComments: state.generalComments,
         skipped: [...state.skipped],
         approved: [...state.approved],
+        denied: [...state.denied],
       }),
     });
     const data = await res.json();
@@ -133,6 +135,23 @@ function unskipPatch(hash) {
   scheduleAutoSave();
 }
 
+// ── Deny management ────────────────────────────────────────────────────────
+function denyPatch(hash) {
+  state.denied.add(hash);
+  renderTabs();
+  renderCurrentPatch();
+  updateSubmitButton();
+  scheduleAutoSave();
+}
+
+function undenyPatch(hash) {
+  state.denied.delete(hash);
+  renderTabs();
+  renderCurrentPatch();
+  updateSubmitButton();
+  scheduleAutoSave();
+}
+
 // ── Approve management ─────────────────────────────────────────────────────
 function approvePatch(hash) {
   state.approved.add(hash);
@@ -159,6 +178,7 @@ function updateSubmitButton() {
 
   const isSkipped = state.skipped.has(patch.hash);
   const isApproved = state.approved.has(patch.hash);
+  const isDenied = state.denied.has(patch.hash);
   const count = commentsForPatch(patch.hash).length;
   const patchLabel = state.patches.length > 1 ? ` for Part ${state.currentPatchIdx + 1}` : '';
 
@@ -173,6 +193,15 @@ function updateSubmitButton() {
   } else if (isApproved) {
     btn.disabled = true;
     warn.textContent = 'Patch approved — no issues to submit';
+  } else if (isDenied && !hasFeedback) {
+    btn.disabled = true;
+    warn.textContent = 'Patch denied — add comments to explain';
+  } else if (isDenied && hasFeedback) {
+    btn.disabled = false;
+    const parts = [];
+    if (generalComment) parts.push('general feedback');
+    if (count > 0) parts.push(`${count} line comment${count !== 1 ? 's' : ''}`);
+    warn.textContent = parts.join(' + ') + ' ready (denied)';
   } else if (!hasFeedback) {
     btn.disabled = true;
     warn.textContent = 'Add a general comment or click a line to comment';
@@ -378,21 +407,24 @@ function renderTabs() {
   state.patches.forEach((patch, idx) => {
     const isSkipped = state.skipped.has(patch.hash);
     const isApproved = state.approved.has(patch.hash);
+    const isDenied = state.denied.has(patch.hash);
     const commentCount = commentsForPatch(patch.hash).length;
 
     const tab = document.createElement('button');
     tab.className = 'patch-tab' +
       (idx === state.currentPatchIdx ? ' active' : '') +
       (isSkipped ? ' skipped' : '') +
-      (isApproved ? ' approved' : '');
+      (isApproved ? ' approved' : '') +
+      (isDenied ? ' denied' : '');
 
     const badge = commentCount > 0 && !isSkipped && !isApproved
       ? ` <span class="tab-badge">${commentCount}</span>`
       : '';
     const skippedIcon = isSkipped ? ' <span class="tab-skipped-icon">⊘</span>' : '';
     const approvedIcon = isApproved ? ' <span class="tab-approved-icon">✓</span>' : '';
+    const deniedIcon = isDenied ? ' <span class="tab-denied-icon">✗</span>' : '';
 
-    tab.innerHTML = `<span class="tab-part">Part ${idx + 1}</span><span class="tab-msg">${escapeHtml(patch.message)}${badge}${skippedIcon}${approvedIcon}</span>`;
+    tab.innerHTML = `<span class="tab-part">Part ${idx + 1}</span><span class="tab-msg">${escapeHtml(patch.message)}${badge}${skippedIcon}${approvedIcon}${deniedIcon}</span>`;
     tab.addEventListener('click', () => switchPatch(idx));
     tabsEl.appendChild(tab);
   });
@@ -418,6 +450,7 @@ function renderCurrentPatch() {
 
   const isSkipped = state.skipped.has(patch.hash);
   const isApproved = state.approved.has(patch.hash);
+  const isDenied = state.denied.has(patch.hash);
   const patchNum = state.currentPatchIdx + 1;
   const total = state.patches.length;
 
@@ -425,7 +458,8 @@ function renderCurrentPatch() {
   const heading = document.createElement('div');
   heading.className = 'patch-heading' +
     (isSkipped ? ' patch-heading-skipped' : '') +
-    (isApproved ? ' patch-heading-approved' : '');
+    (isApproved ? ' patch-heading-approved' : '') +
+    (isDenied ? ' patch-heading-denied' : '');
   heading.innerHTML = `
     <span class="patch-heading-label">Part ${patchNum}${total > 1 ? ` of ${total}` : ''}</span>
     <span class="patch-heading-msg">${escapeHtml(patch.message)}</span>
@@ -446,6 +480,17 @@ function renderCurrentPatch() {
     }
   });
 
+  const denyBtn = document.createElement('button');
+  denyBtn.className = isDenied ? 'btn-undeny' : 'btn-deny';
+  denyBtn.textContent = isDenied ? 'Denied ✗' : 'Deny';
+  denyBtn.addEventListener('click', () => {
+    if (state.denied.has(patch.hash)) {
+      undenyPatch(patch.hash);
+    } else {
+      denyPatch(patch.hash);
+    }
+  });
+
   const skipBtn = document.createElement('button');
   skipBtn.className = isSkipped ? 'btn-unskip' : 'btn-skip';
   skipBtn.textContent = isSkipped ? 'Undo skip' : 'Skip';
@@ -458,6 +503,7 @@ function renderCurrentPatch() {
   });
 
   btnGroup.appendChild(approveBtn);
+  btnGroup.appendChild(denyBtn);
   btnGroup.appendChild(skipBtn);
   heading.appendChild(btnGroup);
   container.appendChild(heading);
@@ -476,6 +522,16 @@ function renderCurrentPatch() {
   const textarea = generalBox.querySelector('textarea');
   if (isSkipped || isApproved) textarea.disabled = true;
   textarea.addEventListener('input', () => setGeneralComment(patch.hash, textarea.value));
+
+  // Deny notice — show below general comment box but before diff
+  if (isDenied) {
+    const denyNotice = document.createElement('div');
+    denyNotice.className = 'deny-notice';
+    denyNotice.innerHTML = `
+      <span class="deny-notice-icon">✗</span>
+      <span>This patch was denied — it requires significant changes. Add comments above to explain.</span>`;
+    container.appendChild(denyNotice);
+  }
 
   // Approved notice — show instead of diff
   if (isApproved) {
@@ -538,6 +594,7 @@ async function submitReview() {
         allFeedback,
         skippedHashes: [...state.skipped],
         approvedHashes: [...state.approved],
+        deniedHashes: [...state.denied],
       }),
     });
     const json = await res.json();
@@ -605,6 +662,7 @@ async function init() {
       if (saved.generalComments) state.generalComments = saved.generalComments;
       if (saved.skipped) state.skipped = new Set(saved.skipped);
       if (saved.approved) state.approved = new Set(saved.approved);
+      if (saved.denied) state.denied = new Set(saved.denied);
       if (saved.prompt) updateCurrentPrompt(saved.prompt);
     }
 

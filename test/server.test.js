@@ -236,6 +236,37 @@ describe('POST /api/submit', () => {
     expect(approvedArg).toEqual([]);
   });
 
+  test('allows submit for a denied patch even without text feedback', async () => {
+    const app = makeApp();
+    const res = await request(app).post('/api/submit').send({
+      patchHash: 'aaa111',
+      allFeedback: [
+        { hash: 'aaa111', comments: [], generalComment: '' },
+        { hash: 'bbb222', comments: [], generalComment: '' },
+      ],
+      deniedHashes: ['aaa111'],
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+  });
+
+  test('passes deniedHashes to submitReview', async () => {
+    const app = makeApp();
+    await request(app).post('/api/submit').send({
+      ...validBody,
+      deniedHashes: ['bbb222'],
+    });
+    const deniedArg = submitReview.mock.calls[0][6];
+    expect(deniedArg).toEqual(['bbb222']);
+  });
+
+  test('passes empty deniedHashes when not provided', async () => {
+    const app = makeApp();
+    await request(app).post('/api/submit').send(validBody);
+    const deniedArg = submitReview.mock.calls[0][6];
+    expect(deniedArg).toEqual([]);
+  });
+
   test('returns 500 when submitReview throws', async () => {
     submitReview.mockImplementation(() => { throw new Error('write failed'); });
     const app = makeApp();
@@ -348,6 +379,15 @@ describe('GET /api/state', () => {
     await request(app).post('/api/state').send({ approved: ['aaa111'], skipped: [], comments: {}, generalComments: {} });
     const res = await request(app).get('/api/state');
     expect(res.body.approved).toEqual(['aaa111']);
+  });
+
+  test('POST regenerates MD when patches are denied', async () => {
+    const app = makeStateApp();
+    const postRes = await request(app).post('/api/state').send({
+      comments: {}, generalComments: {}, skipped: [], approved: [], denied: ['aaa111'],
+    });
+    expect(postRes.body.prompt).toBeTruthy();
+    expect(submitReview).toHaveBeenCalled();
   });
 });
 

@@ -108,7 +108,7 @@ function createApp({ worktreeName, worktreePath, mainRepoPath }) {
       let prompt = null;
       try {
         loadData();
-        const { comments = {}, generalComments = {}, skipped = [], approved = [] } = req.body;
+        const { comments = {}, generalComments = {}, skipped = [], approved = [], denied = [] } = req.body;
         const allFeedback = patchesCache.map((p) => {
           const byFile = comments[p.hash] || {};
           return {
@@ -117,11 +117,11 @@ function createApp({ worktreeName, worktreePath, mainRepoPath }) {
             generalComment: (generalComments[p.hash] || '').trim(),
           };
         });
-        const hasActivity = approved.length > 0 || skipped.length > 0 ||
+        const hasActivity = approved.length > 0 || skipped.length > 0 || denied.length > 0 ||
           allFeedback.some((f) => f.comments.length > 0 || f.generalComment.length > 0);
         if (hasActivity) {
           const result = submitReview(
-            worktreePath, worktreeName, patchesCache, allFeedback, skipped, approved
+            worktreePath, worktreeName, patchesCache, allFeedback, skipped, approved, denied
           );
           if (result) prompt = result.prompt;
         }
@@ -148,8 +148,10 @@ function createApp({ worktreeName, worktreePath, mainRepoPath }) {
     const currentFeedback = allFeedback.find((f) => f.hash === patchHash);
     const hasLineComments = currentFeedback && Array.isArray(currentFeedback.comments) && currentFeedback.comments.length > 0;
     const hasGeneralComment = currentFeedback && (currentFeedback.generalComment || '').trim().length > 0;
+    const deniedHashes = Array.isArray(req.body.deniedHashes) ? req.body.deniedHashes : [];
+    const isDenied = deniedHashes.includes(patchHash);
 
-    if (!hasLineComments && !hasGeneralComment) {
+    if (!hasLineComments && !hasGeneralComment && !isDenied) {
       return res.status(400).json({ error: 'No comments provided.' });
     }
 
@@ -168,7 +170,8 @@ function createApp({ worktreeName, worktreePath, mainRepoPath }) {
         patchesCache,
         allFeedback,
         skippedHashes,
-        approvedHashes
+        approvedHashes,
+        deniedHashes
       );
       res.json({ ok: true, feedbackPath, prompt });
     } catch (err) {

@@ -12,11 +12,13 @@ const path = require('path');
  * @param {Array<{ hash: string, comments: Array, generalComment: string }>} allFeedback
  * @param {string[]} skippedHashes
  * @param {string[]} approvedHashes
+ * @param {string[]} deniedHashes
  * @returns {string}
  */
-function formatCombinedPrompt(worktreeName, allPatches, allFeedback, skippedHashes = [], approvedHashes = []) {
+function formatCombinedPrompt(worktreeName, allPatches, allFeedback, skippedHashes = [], approvedHashes = [], deniedHashes = []) {
   const skipped = new Set(skippedHashes);
   const approved = new Set(approvedHashes);
+  const denied = new Set(deniedHashes);
   const feedbackMap = Object.fromEntries(allFeedback.map((f) => [f.hash, f]));
 
   const seriesList = allPatches
@@ -24,6 +26,7 @@ function formatCombinedPrompt(worktreeName, allPatches, allFeedback, skippedHash
       let suffix = '';
       if (skipped.has(p.hash)) suffix = '  [SKIPPED — not reviewed]';
       else if (approved.has(p.hash)) suffix = '  [APPROVED — no issues]';
+      else if (denied.has(p.hash)) suffix = '  [DENIED — requires significant changes]';
       return `- ${p.hash} ${p.message}${suffix}`;
     })
     .join('\n');
@@ -33,7 +36,8 @@ function formatCombinedPrompt(worktreeName, allPatches, allFeedback, skippedHash
       if (skipped.has(p.hash) || approved.has(p.hash)) return false;
       const fb = feedbackMap[p.hash];
       if (!fb) return false;
-      return fb.comments.length > 0 || (fb.generalComment || '').trim().length > 0;
+      const hasFeedback = fb.comments.length > 0 || (fb.generalComment || '').trim().length > 0;
+      return hasFeedback || denied.has(p.hash);
     })
     .map((p) => {
       const patchNum = allPatches.findIndex((x) => x.hash === p.hash) + 1;
@@ -56,7 +60,11 @@ function formatCombinedPrompt(worktreeName, allPatches, allFeedback, skippedHash
         ? `### Line-level feedback:\n\n${lineFeedbackItems}\n`
         : '';
 
-      return `## Part ${patchNum} (${p.hash}) — ${p.message}\n\n${generalSection}${lineSection}`;
+      const deniedNote = denied.has(p.hash)
+        ? '\n⚠ This patch was denied — it requires significant changes.\n'
+        : '';
+
+      return `## Part ${patchNum} (${p.hash}) — ${p.message}\n${deniedNote}\n${generalSection}${lineSection}`;
     })
     .join('\n---\n\n');
 
@@ -81,10 +89,11 @@ For each part with feedback above, apply changes only to files modified in that 
  * @param {Array<{ hash: string, comments: Array, generalComment: string }>} allFeedback
  * @param {string[]} skippedHashes
  * @param {string[]} approvedHashes
+ * @param {string[]} deniedHashes
  * @returns {{ feedbackPath: string, prompt: string }}
  */
-function submitReview(worktreePath, worktreeName, allPatches, allFeedback, skippedHashes = [], approvedHashes = []) {
-  const prompt = formatCombinedPrompt(worktreeName, allPatches, allFeedback, skippedHashes, approvedHashes);
+function submitReview(worktreePath, worktreeName, allPatches, allFeedback, skippedHashes = [], approvedHashes = [], deniedHashes = []) {
+  const prompt = formatCombinedPrompt(worktreeName, allPatches, allFeedback, skippedHashes, approvedHashes, deniedHashes);
   const filename = `REVIEW_FEEDBACK_${worktreeName}.md`;
   const feedbackPath = path.join(worktreePath, filename);
   fs.writeFileSync(feedbackPath, prompt, 'utf8');

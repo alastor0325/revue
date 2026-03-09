@@ -75,14 +75,15 @@ Each tab shows a comment-count badge, a `✓` if approved, or a `⊘` if skipped
 
 ### Per-patch actions
 
-Each patch has two buttons in the heading:
+Each patch has three buttons in the heading:
 
 | Button | Meaning |
 |---|---|
 | **Approve** | Patch looks good — no issues. Turns green `Approved ✓`. |
+| **Deny** | Patch requires significant changes. Diff stays visible for comments. |
 | **Skip** | Patch won't be reviewed. Turns gray with strikethrough. |
 
-Both can be undone by clicking again.
+All can be undone by clicking again.
 
 ### Adding comments
 
@@ -111,6 +112,7 @@ Every one of the following actions saves state and rewrites `REVIEW_FEEDBACK_<wo
 | Add / edit / delete a line comment | ✓ |
 | Type in the General feedback textarea | ✓ |
 | Click **Approve** or **Undo approve** | ✓ |
+| Click **Deny** or **Undo deny** | ✓ |
 | Click **Skip** or **Undo skip** | ✓ |
 | Click **Submit Review** | ✓ (immediate) |
 
@@ -128,9 +130,21 @@ If `REVIEW_FEEDBACK_<worktree-name>.md` already exists when you open the tool, a
 You are being asked to revise your implementation in worktree firefox-my-feature.
 
 ## Full patch series:
-- aaa111 my-feature - Part 1: Add WebIDL  [APPROVED — no issues]
+- aaa111 my-feature - Part 1: Add WebIDL  [DENIED — requires significant changes]
 - bbb222 my-feature - Part 2: Implement logic
 - ccc333 my-feature - Part 3: Fire events  [SKIPPED — not reviewed]
+
+---
+
+## Part 1 (aaa111) — my-feature - Part 1: Add WebIDL
+
+⚠ This patch was denied — it requires significant changes.
+
+### Line-level feedback:
+
+#### dom/media/Foo.webidl : line 2
+[YOUR CODE] :   void toggle();
+[FEEDBACK]  : Use camelCase
 
 ---
 
@@ -155,8 +169,9 @@ summarize what you changed for each feedback item.
 ```
 
 - Approved patches are noted `[APPROVED — no issues]` in the series list — no feedback section
+- Denied patches are noted `[DENIED — requires significant changes]` and always get a feedback section (with a denial note), even without text comments
 - Skipped patches are noted `[SKIPPED — not reviewed]` — no feedback section
-- Only patches with actual feedback get a `## Part N` section
+- Only patches with actual feedback (or denial) get a `## Part N` section
 
 ## Development
 

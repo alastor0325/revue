@@ -124,6 +124,32 @@ describe('formatCombinedPrompt', () => {
     expect(line).not.toContain('[APPROVED');
   });
 
+  test('marks denied patches with [DENIED] in the series list', () => {
+    const out = formatCombinedPrompt('bugABC', allPatches, makeFeedback(), [], [], [patch3.hash]);
+    const lines = out.split('\n');
+    const deniedLine = lines.find((l) => l.includes(patch3.hash));
+    expect(deniedLine).toContain('[DENIED — requires significant changes]');
+  });
+
+  test('includes feedback section for denied patch even without text feedback', () => {
+    const out = formatCombinedPrompt('bugABC', allPatches, makeFeedback(), [], [], [patch2.hash]);
+    expect(out).toContain('⚠ This patch was denied');
+    expect(out).toContain(patch2.hash);
+  });
+
+  test('denied does not override skipped in series list', () => {
+    const out = formatCombinedPrompt('bugABC', allPatches, makeFeedback(), [patch3.hash], [], [patch3.hash]);
+    const lines = out.split('\n');
+    const line = lines.find((l) => l.includes(patch3.hash));
+    expect(line).toContain('[SKIPPED');
+    expect(line).not.toContain('[DENIED');
+  });
+
+  test('deniedHashes defaults to empty — no DENIED markers when omitted', () => {
+    const out = formatCombinedPrompt('bugABC', allPatches, makeFeedback());
+    expect(out).not.toContain('DENIED');
+  });
+
   test('works with a single patch', () => {
     const feedback = [{ hash: 'aaa111', comments: comments1, generalComment: '' }];
     const out = formatCombinedPrompt('bugXYZ', [patch1], feedback);
@@ -197,5 +223,11 @@ describe('submitReview', () => {
     submitReview(tmpDir, 'bugABC', allPatches, makeFeedback(), [], [patch3.hash]);
     const content = fs.readFileSync(path.join(tmpDir, 'REVIEW_FEEDBACK_bugABC.md'), 'utf8');
     expect(content).toContain('[APPROVED — no issues]');
+  });
+
+  test('reflects denied patches in the file', () => {
+    submitReview(tmpDir, 'bugABC', allPatches, makeFeedback(), [], [], [patch2.hash]);
+    const content = fs.readFileSync(path.join(tmpDir, 'REVIEW_FEEDBACK_bugABC.md'), 'utf8');
+    expect(content).toContain('[DENIED');
   });
 });
