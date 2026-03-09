@@ -761,7 +761,7 @@ async function init() {
     state.patches = data.patches || [];
     state.currentPatchIdx = 0;
 
-    $('#bug-id-display').textContent = data.bugId;
+    $('#bug-id-display').textContent = data.worktreeName;
     $('#worktree-path').textContent = data.worktreePath;
 
     loading.style.display = 'none';

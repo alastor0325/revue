@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>firefox-review — interactive demo</title>
+  <link rel="stylesheet" href="../public/style.css" />
+  <style>
+    #demo-banner {
+      background: #388bfd22;
+      border-bottom: 1px solid #388bfd55;
+      padding: 8px 24px;
+      font-size: 13px;
+      color: #79c0ff;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    #demo-banner strong { color: #e6edf3; }
+    #demo-banner a { color: #79c0ff; }
+    #demo-banner .demo-note { color: #8b949e; }
+  </style>
+</head>
+<body>
+
+  <div id="demo-banner">
+    <strong>Interactive demo</strong>
+    <span class="demo-note">Fake patch data — all UI interactions work. Saves are no-ops.</span>
+    <a href="https://github.com/alastor0325/firefox-review" style="margin-left:auto;">View on GitHub →</a>
+  </div>
+
+  <!-- ── Header ── -->
+  <div id="header">
+    <div id="header-left">
+      <h1>firefox-review · <span id="bug-id-display"></span></h1>
+      <div id="worktree-path"></div>
+    </div>
+    <div id="submit-area">
+      <button id="btn-submit" disabled>Generate Review Prompt</button>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;">
+        <span id="submit-warning">Review at least one patch before generating the prompt</span>
+        <span id="autosave-status"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Current prompt bar ── -->
+  <div id="current-prompt-bar" style="display:none;">
+    <span id="current-prompt-label">Review prompt ready</span>
+    <button id="btn-copy-current-prompt">Copy current prompt</button>
+  </div>
+
+  <!-- ── Patch tabs ── -->
+  <div id="patch-tabs-bar" style="display:none;">
+    <div id="patch-tabs"></div>
+  </div>
+
+  <!-- ── Loading / error ── -->
+  <div id="loading">Loading diff…</div>
+  <div id="error-msg" style="display:none;"></div>
+
+  <!-- ── Files changed ── -->
+  <div id="files-changed" style="display:none;"></div>
+
+  <!-- ── Result overlay ── -->
+  <div id="result-overlay">
+    <div id="result-modal">
+      <h3>Review saved!</h3>
+      <p>Saved to: <code id="result-feedback-path"></code></p>
+      <textarea id="result-prompt" readonly></textarea>
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        <button id="btn-copy-prompt">Copy prompt</button>
+        <button id="btn-close-modal">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  // ── Demo mock data ──────────────────────────────────────────────────────────
+
+  const MOCK_DIFF = {
+    worktreeName: 'bug-1234567',
+    worktreePath: '/Users/dev/firefox-bug-1234567',
+    patches: [
+      {
+        hash: 'a1b2c3d4',
+        message: 'Bug 1234567 - Part 1: Add waitingforkey IDL and event dispatch',
+        files: [
+          {
+            oldPath: 'dom/media/HTMLMediaElement.cpp',
+            newPath: 'dom/media/HTMLMediaElement.cpp',
+            binary: false,
+            hunks: [
+              {
+                header: '@@ -108,6 +108,13 @@',
+                oldStart: 108, oldCount: 6, newStart: 108, newCount: 13,
+                lines: [
+                  { type: 'context', content: 'void HTMLMediaElement::HandleKeyNeeded(', oldLineNum: 108, newLineNum: 108 },
+                  { type: 'context', content: '    eme::MediaKeyNeededEventInit& aInit)', oldLineNum: 109, newLineNum: 109 },
+                  { type: 'context', content: '{', oldLineNum: 110, newLineNum: 110 },
+                  { type: 'added',   content: '  if (!mMediaKeys) {', oldLineNum: null, newLineNum: 111 },
+                  { type: 'added',   content: '    // Fire waitingforkey per EME spec §2.4.1', oldLineNum: null, newLineNum: 112 },
+                  { type: 'added',   content: '    DispatchAsyncEvent(u"waitingforkey"_ns);', oldLineNum: null, newLineNum: 113 },
+                  { type: 'added',   content: '    mPendingKeyNeededEvents.AppendElement(aInit);', oldLineNum: null, newLineNum: 114 },
+                  { type: 'added',   content: '    return;', oldLineNum: null, newLineNum: 115 },
+                  { type: 'added',   content: '  }', oldLineNum: null, newLineNum: 116 },
+                  { type: 'context', content: '  RefPtr<MediaKeySession> session;', oldLineNum: 111, newLineNum: 117 },
+                  { type: 'context', content: '  mMediaKeys->GetKeyForRequest(aInit, getter_AddRefs(session));', oldLineNum: 112, newLineNum: 118 },
+                  { type: 'context', content: '}', oldLineNum: 113, newLineNum: 119 },
+                ],
+              },
+            ],
+          },
+          {
+            oldPath: 'dom/media/HTMLMediaElement.webidl',
+            newPath: 'dom/media/HTMLMediaElement.webidl',
+            binary: false,
+            hunks: [
+              {
+                header: '@@ -62,6 +62,7 @@',
+                oldStart: 62, oldCount: 6, newStart: 62, newCount: 7,
+                lines: [
+                  { type: 'context', content: '  attribute EventHandler onencrypted;', oldLineNum: 62, newLineNum: 62 },
+                  { type: 'added',   content: '  attribute EventHandler onwaitingforkey;', oldLineNum: null, newLineNum: 63 },
+                  { type: 'context', content: '};', oldLineNum: 63, newLineNum: 64 },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      {
+        hash: 'e5f6a7b8',
+        message: 'Bug 1234567 - Part 2: Handle ClearLead in ExternalEngineStateMachine',
+        files: [
+          {
+            oldPath: 'dom/media/ExternalEngineStateMachine.cpp',
+            newPath: 'dom/media/ExternalEngineStateMachine.cpp',
+            binary: false,
+            hunks: [
+              {
+                header: '@@ -241,7 +241,15 @@',
+                oldStart: 241, oldCount: 7, newStart: 241, newCount: 15,
+                lines: [
+                  { type: 'context', content: 'void ExternalEngineStateMachine::OnCDMProxyReady(', oldLineNum: 241, newLineNum: 241 },
+                  { type: 'context', content: '    RefPtr<CDMProxy> aProxy)', oldLineNum: 242, newLineNum: 242 },
+                  { type: 'context', content: '{', oldLineNum: 243, newLineNum: 243 },
+                  { type: 'added',   content: '  MOZ_ASSERT(OnTaskQueue());', oldLineNum: null, newLineNum: 244 },
+                  { type: 'added',   content: '  mClearLeadState = ClearLeadState::eNone;', oldLineNum: null, newLineNum: 245 },
+                  { type: 'added',   content: '  if (mInfo.HasEncryptedTracks()) {', oldLineNum: null, newLineNum: 246 },
+                  { type: 'added',   content: '    mClearLeadState = ClearLeadState::ePossible;', oldLineNum: null, newLineNum: 247 },
+                  { type: 'added',   content: '  }', oldLineNum: null, newLineNum: 248 },
+                  { type: 'context', content: '  mCDMProxy = std::move(aProxy);', oldLineNum: 244, newLineNum: 249 },
+                  { type: 'context', content: '  mCDMProxy->SetEventTarget(mTaskQueue);', oldLineNum: 245, newLineNum: 250 },
+                  { type: 'context', content: '}', oldLineNum: 246, newLineNum: 251 },
+                ],
+              },
+              {
+                header: '@@ -308,5 +316,8 @@',
+                oldStart: 308, oldCount: 5, newStart: 316, newCount: 8,
+                lines: [
+                  { type: 'context', content: 'void ExternalEngineStateMachine::WaitingForKey()', oldLineNum: 308, newLineNum: 316 },
+                  { type: 'context', content: '{', oldLineNum: 309, newLineNum: 317 },
+                  { type: 'added',   content: '  MOZ_ASSERT(mCDMProxy);', oldLineNum: null, newLineNum: 318 },
+                  { type: 'added',   content: '  MOZ_ASSERT(OnTaskQueue());', oldLineNum: null, newLineNum: 319 },
+                  { type: 'context', content: '  SetState(DECODER_STATE_WAITING_FOR_KEY);', oldLineNum: 310, newLineNum: 320 },
+                  { type: 'context', content: '}', oldLineNum: 311, newLineNum: 321 },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      {
+        hash: 'c9d0e1f2',
+        message: 'Bug 1234567 - Part 3: Refresh CDM proxy trusted input on proxy set',
+        files: [
+          {
+            oldPath: 'dom/media/platforms/wmf/MFCDMProxy.cpp',
+            newPath: 'dom/media/platforms/wmf/MFCDMProxy.cpp',
+            binary: false,
+            hunks: [
+              {
+                header: '@@ -85,6 +85,14 @@',
+                oldStart: 85, oldCount: 6, newStart: 85, newCount: 14,
+                lines: [
+                  { type: 'context', content: 'void MFCDMProxy::OnCDMProxySet(', oldLineNum: 85, newLineNum: 85 },
+                  { type: 'context', content: '    RefPtr<MFCDMProxyCallback> aCallback)', oldLineNum: 86, newLineNum: 86 },
+                  { type: 'context', content: '{', oldLineNum: 87, newLineNum: 87 },
+                  { type: 'added',   content: '  MOZ_ASSERT(NS_IsMainThread());', oldLineNum: null, newLineNum: 88 },
+                  { type: 'added',   content: '  if (const auto cdmParent = mCDMParent.get()) {', oldLineNum: null, newLineNum: 89 },
+                  { type: 'added',   content: '    cdmParent->RefreshTrustedInput();', oldLineNum: null, newLineNum: 90 },
+                  { type: 'added',   content: '  }', oldLineNum: null, newLineNum: 91 },
+                  { type: 'removed', content: '  if (mCallback) {', oldLineNum: 88, newLineNum: null },
+                  { type: 'removed', content: '    mCallback->OnCDMProxySet();', oldLineNum: 89, newLineNum: null },
+                  { type: 'removed', content: '  }', oldLineNum: 90, newLineNum: null },
+                  { type: 'added',   content: '  if (mCallback) { mCallback->OnCDMProxySet(); }', oldLineNum: null, newLineNum: 92 },
+                  { type: 'context', content: '  mCallback = std::move(aCallback);', oldLineNum: 91, newLineNum: 93 },
+                  { type: 'context', content: '}', oldLineNum: 92, newLineNum: 94 },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  // Previous revision for Part 2 (before ClearLead tracking was added)
+  const MOCK_OLD_DIFF_PART2 = {
+    hash: 'old_e5f6',
+    files: [
+      {
+        oldPath: 'dom/media/ExternalEngineStateMachine.cpp',
+        newPath: 'dom/media/ExternalEngineStateMachine.cpp',
+        binary: false,
+        hunks: [
+          {
+            header: '@@ -241,5 +241,8 @@',
+            oldStart: 241, oldCount: 5, newStart: 241, newCount: 8,
+            lines: [
+              { type: 'context', content: 'void ExternalEngineStateMachine::OnCDMProxyReady(', oldLineNum: 241, newLineNum: 241 },
+              { type: 'context', content: '    RefPtr<CDMProxy> aProxy)', oldLineNum: 242, newLineNum: 242 },
+              { type: 'context', content: '{', oldLineNum: 243, newLineNum: 243 },
+              { type: 'added',   content: '  MOZ_ASSERT(OnTaskQueue());', oldLineNum: null, newLineNum: 244 },
+              { type: 'context', content: '  mCDMProxy = std::move(aProxy);', oldLineNum: 244, newLineNum: 245 },
+              { type: 'context', content: '  mCDMProxy->SetEventTarget(mTaskQueue);', oldLineNum: 245, newLineNum: 246 },
+              { type: 'context', content: '}', oldLineNum: 246, newLineNum: 247 },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  const MOCK_STATE = {
+    comments: {
+      'e5f6a7b8': {
+        'dom/media/ExternalEngineStateMachine.cpp': {
+          'n245': {
+            patchHash: 'e5f6a7b8',
+            file: 'dom/media/ExternalEngineStateMachine.cpp',
+            line: 245,
+            lineContent: '  mClearLeadState = ClearLeadState::eNone;',
+            text: 'Should this reset to eNone or ePossible here? The check on line 246 overrides this anyway when HasEncryptedTracks().',
+          },
+          'n318': {
+            patchHash: 'e5f6a7b8',
+            file: 'dom/media/ExternalEngineStateMachine.cpp',
+            line: 318,
+            lineContent: '  MOZ_ASSERT(mCDMProxy);',
+            text: 'Add a failure message: MOZ_ASSERT(mCDMProxy, "CDM proxy must be set before waiting for key")',
+          },
+        },
+      },
+    },
+    generalComments: {
+      'c9d0e1f2': 'The removal and re-addition of the callback check is unnecessary churn. Please only add the RefreshTrustedInput() call without restructuring the existing code.',
+    },
+    skipped: [],
+    approved: ['a1b2c3d4'],
+    denied: ['c9d0e1f2'],
+    // Revision history — Part 2 had a different hash in the previous review session
+    revisions: [
+      {
+        savedAt: '2025-01-14T09:15:00Z',
+        patches: [
+          { hash: 'a1b2c3d4', message: 'Bug 1234567 - Part 1: Add waitingforkey IDL and event dispatch' },
+          { hash: 'old_e5f6', message: 'Bug 1234567 - Part 2: Handle ClearLead in ExternalEngineStateMachine' },
+          { hash: 'c9d0e1f2', message: 'Bug 1234567 - Part 3: Refresh CDM proxy trusted input on proxy set' },
+        ],
+      },
+    ],
+    prompt: null,
+  };
+
+  // ── Mock fetch ────────────────────────────────────────────────────────────
+
+  window.fetch = function(url, opts) {
+    // GET /api/diff
+    if (url === '/api/diff') {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(MOCK_DIFF),
+      });
+    }
+    // GET /api/state
+    if (url === '/api/state' && (!opts || opts.method !== 'POST')) {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(MOCK_STATE),
+      });
+    }
+    // POST /api/state (auto-save — no-op in demo)
+    if (url === '/api/state' && opts && opts.method === 'POST') {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ ok: true }),
+      });
+    }
+    // POST /api/submit
+    if (url === '/api/submit') {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          ok: true,
+          feedbackPath: '/Users/dev/firefox-bug-1234567/REVIEW_FEEDBACK_bug-1234567.md',
+          prompt: 'Please read the review feedback at /Users/dev/firefox-bug-1234567/REVIEW_FEEDBACK_bug-1234567.md and apply all the changes described there to your implementation in worktree firefox-bug-1234567.',
+        }),
+      });
+    }
+    // GET /api/patchdiff/:hash (previous revision diff)
+    if (url.startsWith('/api/patchdiff/')) {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(MOCK_OLD_DIFF_PART2),
+      });
+    }
+    // Fallback — should not happen in demo
+    return Promise.reject(new Error(`Unmocked fetch: ${url}`));
+  };
+  </script>
+
+  <script src="../public/app.js"></script>
+</body>
+</html>
