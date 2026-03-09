@@ -5,7 +5,7 @@ jest.mock('child_process', () => ({
 }));
 
 const { execSync } = require('child_process');
-const { parseDiff, parseWorktreeList, getDiffForCommit } = require('../src/git');
+const { parseDiff, parseWorktreeList, getDiffForCommit, parseCommitBody } = require('../src/git');
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -316,5 +316,51 @@ diff --git a/foo.js b/foo.js
   test('throws when git returns an error', () => {
     execSync.mockImplementation(() => { throw new Error('unknown revision'); });
     expect(() => getDiffForCommit(WORKTREE, HASH)).toThrow('unknown revision');
+  });
+});
+
+// ── parseCommitBody ────────────────────────────────────────────────────────
+
+describe('parseCommitBody', () => {
+  test('extracts subject-only message', () => {
+    const raw = `commit abc1234
+Author: Dev <dev@example.com>
+Date:   Mon Jan 13 10:00:00 2025 +0000
+
+    Bug 123 - Part 1: Add WebIDL
+
+diff --git a/foo.js b/foo.js
+--- a/foo.js
++++ b/foo.js`;
+    expect(parseCommitBody(raw)).toBe('Bug 123 - Part 1: Add WebIDL');
+  });
+
+  test('extracts subject + body', () => {
+    const raw = `commit abc1234
+Author: Dev <dev@example.com>
+Date:   Mon Jan 13 10:00:00 2025 +0000
+
+    Bug 123 - Part 1: Add WebIDL
+
+    Fire the event when media is encrypted.
+    Also expose the IDL attribute.
+
+diff --git a/foo.js b/foo.js`;
+    expect(parseCommitBody(raw)).toBe(
+      'Bug 123 - Part 1: Add WebIDL\n\nFire the event when media is encrypted.\nAlso expose the IDL attribute.'
+    );
+  });
+
+  test('trims trailing blank lines', () => {
+    const raw = `commit abc1234
+Author: Dev <dev@example.com>
+Date:   Mon Jan 13 10:00:00 2025 +0000
+
+    Subject only
+
+diff --git a/foo.js b/foo.js`;
+    const result = parseCommitBody(raw);
+    expect(result).toBe('Subject only');
+    expect(result).not.toMatch(/\n$/);
   });
 });

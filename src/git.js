@@ -183,6 +183,29 @@ function parseDiff(diffText) {
 }
 
 /**
+ * Extract the full commit message body from `git show` output.
+ * The output has headers (commit/Author/Date), a blank line, then the
+ * message indented with 4 spaces, then the diff starting with "diff --git".
+ */
+function parseCommitBody(raw) {
+  const lines = raw.split('\n');
+  let pastHeaders = false;
+  const msgLines = [];
+  for (const line of lines) {
+    if (line.startsWith('diff --git ')) break;
+    if (!pastHeaders) {
+      if (line === '') pastHeaders = true;
+      continue;
+    }
+    msgLines.push(line.startsWith('    ') ? line.slice(4) : line);
+  }
+  while (msgLines.length > 0 && msgLines[msgLines.length - 1].trim() === '') {
+    msgLines.pop();
+  }
+  return msgLines.join('\n');
+}
+
+/**
  * Get the diff for a single commit by hash.
  * @param {string} worktreePath
  * @param {string} hash
@@ -198,7 +221,9 @@ function getDiffForCommit(worktreePath, hash) {
 
 /**
  * Get per-commit diffs. Returns an array of patch objects (oldest first):
- * { hash, message, files }
+ * { hash, message, body, files }
+ * message — subject line only (first line)
+ * body    — full commit message (subject + blank line + body if present)
  */
 function getDiffPerCommit(worktreePath, mainRepoPath) {
   const commits = getCommits(worktreePath, mainRepoPath);
@@ -212,6 +237,7 @@ function getDiffPerCommit(worktreePath, mainRepoPath) {
     return {
       hash: commit.hash,
       message: commit.message,
+      body: parseCommitBody(raw),
       files: parseDiff(raw),
     };
   });
@@ -262,4 +288,4 @@ function discoverWorktrees(mainRepoPath) {
   return parseWorktreeList(output, mainRepoPath);
 }
 
-module.exports = { getCommits, getDiffPerCommit, getDiffForCommit, getMergeBase, parseDiff, parseWorktreeList, discoverWorktrees };
+module.exports = { getCommits, getDiffPerCommit, getDiffForCommit, getMergeBase, parseDiff, parseCommitBody, parseWorktreeList, discoverWorktrees };

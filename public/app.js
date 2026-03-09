@@ -678,7 +678,7 @@ function renderCurrentPatch() {
   }
 
   // Commit message section — always shown, disabled when skipped/approved
-  renderCommitMessageSection(container, patch.hash, patch.message, isSkipped || isApproved);
+  renderCommitMessageSection(container, patch.hash, patch.body || patch.message, isSkipped || isApproved);
 
   // General comment box (always shown so user can read it even when skipped/approved)
   const generalBox = document.createElement('div');

@@ -85,6 +85,7 @@
       {
         hash: 'a1b2c3d4',
         message: 'Bug 1234567 - Part 1: Add waitingforkey IDL and event dispatch',
+        body: 'Bug 1234567 - Part 1: Add waitingforkey IDL and event dispatch\n\nFire the waitingforkey event when encrypted media is encountered but no\nMediaKeys object is attached yet, per the EME spec §2.4.1.\n\nAlso expose onwaitingforkey as an event handler attribute in the IDL.',
         files: [
           {
             oldPath: 'dom/media/HTMLMediaElement.cpp',
@@ -132,6 +133,7 @@
       {
         hash: 'e5f6a7b8',
         message: 'Bug 1234567 - Part 2: Handle ClearLead in ExternalEngineStateMachine',
+        body: 'Bug 1234567 - Part 2: Handle ClearLead in ExternalEngineStateMachine\n\nTrack ClearLead state in ExternalEngineStateMachine so we know when a\nstream transitions from unencrypted to encrypted segments.\n\nSet mClearLeadState to ePossible when the media has encrypted tracks,\nand assert task-queue correctness in WaitingForKey.',
         files: [
           {
             oldPath: 'dom/media/ExternalEngineStateMachine.cpp',
@@ -174,6 +176,7 @@
       {
         hash: 'c9d0e1f2',
         message: 'Bug 1234567 - Part 3: Refresh CDM proxy trusted input on proxy set',
+        body: 'Bug 1234567 - Part 3: Refresh CDM proxy trusted input on proxy set\n\nCall RefreshTrustedInput() on the CDM parent whenever a new CDM proxy is\nset, so the GPU process has up-to-date trusted input state.',
         files: [
           {
             oldPath: 'dom/media/platforms/wmf/MFCDMProxy.cpp',
