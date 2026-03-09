@@ -175,6 +175,35 @@ describe('POST /api/submit', () => {
     expect(res.status).toBe(400);
   });
 
+  test('returns 200 when only generalComment is provided (no line comments)', async () => {
+    const app = makeApp();
+    const res = await request(app).post('/api/submit').send({
+      patchHash: 'aaa111',
+      comments: [],
+      generalComment: 'Please use RAII throughout this patch.',
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+  });
+
+  test('passes generalComment to submitReview', async () => {
+    const app = makeApp();
+    await request(app).post('/api/submit').send({
+      patchHash: 'aaa111',
+      comments: [],
+      generalComment: 'Use RAII.',
+    });
+    const generalArg = submitReview.mock.calls[0][6];
+    expect(generalArg).toBe('Use RAII.');
+  });
+
+  test('passes empty string for generalComment when not provided', async () => {
+    const app = makeApp();
+    await request(app).post('/api/submit').send(validBody);
+    const generalArg = submitReview.mock.calls[0][6];
+    expect(generalArg).toBe('');
+  });
+
   test('returns 404 when patchHash does not match any patch', async () => {
     const app = makeApp();
     const res = await request(app).post('/api/submit').send({

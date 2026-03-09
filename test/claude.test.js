@@ -75,7 +75,9 @@ describe('formatPrompt', () => {
   test('works with empty comments array', () => {
     const out = formatPrompt('bugABC', patch1, allPatches, []);
     expect(out).toContain('bugABC');
-    expect(out).toContain('## Reviewer feedback:');
+    // No general or line feedback sections when both are empty
+    expect(out).not.toContain('## General feedback');
+    expect(out).not.toContain('## Line-level feedback');
   });
 
   test('marks skipped patches with [SKIPPED] in the series list', () => {
@@ -108,6 +110,45 @@ describe('formatPrompt', () => {
   test('skippedHashes defaults to empty — no markers shown when omitted', () => {
     const out = formatPrompt('bugABC', patch1, allPatches, comments);
     expect(out).not.toContain('SKIPPED');
+  });
+
+  test('includes general feedback section when generalComment is provided', () => {
+    const out = formatPrompt('bugABC', patch1, allPatches, comments, [], 'Please use RAII throughout.');
+    expect(out).toContain('## General feedback for Part 1:');
+    expect(out).toContain('Please use RAII throughout.');
+  });
+
+  test('general feedback section is patch-scoped — includes the part number', () => {
+    const out = formatPrompt('bugABC', patch2, allPatches, comments, [], 'Refactor error handling.');
+    expect(out).toContain('## General feedback for Part 2:');
+  });
+
+  test('line-level section is labeled with part number', () => {
+    const out = formatPrompt('bugABC', patch1, allPatches, comments, [], '');
+    expect(out).toContain('## Line-level feedback for Part 1:');
+  });
+
+  test('omits general feedback section when generalComment is empty', () => {
+    const out = formatPrompt('bugABC', patch1, allPatches, comments, [], '');
+    expect(out).not.toContain('## General feedback');
+  });
+
+  test('omits line-level section when comments array is empty', () => {
+    const out = formatPrompt('bugABC', patch1, allPatches, [], [], 'Only a general comment.');
+    expect(out).not.toContain('## Line-level feedback');
+    expect(out).toContain('Only a general comment.');
+  });
+
+  test('includes both sections when both are provided', () => {
+    const out = formatPrompt('bugABC', patch1, allPatches, comments, [], 'General concern here.');
+    expect(out).toContain('## General feedback for Part 1:');
+    expect(out).toContain('## Line-level feedback for Part 1:');
+    expect(out).toContain('[YOUR CODE]');
+  });
+
+  test('instructions mention Part N scope regardless of which sections are present', () => {
+    const out = formatPrompt('bugABC', patch2, allPatches, [], [], 'General only.');
+    expect(out).toContain('Part 2 only');
   });
 });
 
@@ -151,6 +192,15 @@ describe('submitReview', () => {
     expect(typeof command).toBe('string');
     expect(command.length).toBeGreaterThan(0);
     expect(command).toContain(`REVIEW_FEEDBACK_${patch1.hash}.md`);
+  });
+
+  test('passes generalComment to formatPrompt — content appears in file', () => {
+    submitReview(tmpDir, 'bugABC', patch1, allPatches, comments, [], 'Please use RAII.');
+    const content = fs.readFileSync(
+      path.join(tmpDir, `REVIEW_FEEDBACK_${patch1.hash}.md`), 'utf8'
+    );
+    expect(content).toContain('Please use RAII.');
+    expect(content).toContain('## General feedback for Part 1:');
   });
 
   test('passes skippedHashes to formatPrompt — content reflects skipped patches', () => {

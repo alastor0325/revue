@@ -2,8 +2,10 @@
 
 // ── State ──────────────────────────────────────────────────────────────────
 // comments[patchHash][filePath][lineKey] = { file, line, lineContent, text, patchHash }
+// generalComments[patchHash] = string
 const state = {
   comments: {},
+  generalComments: {},  // free-form patch-level feedback, keyed by patchHash
   skipped: new Set(),   // patchHashes the reviewer chose to skip
   patches: [],
   currentPatchIdx: 0,
@@ -61,6 +63,15 @@ function currentPatch() {
   return state.patches[state.currentPatchIdx] || null;
 }
 
+function getGeneralComment(patchHash) {
+  return state.generalComments[patchHash] || '';
+}
+
+function setGeneralComment(patchHash, text) {
+  state.generalComments[patchHash] = text;
+  updateSubmitButton();
+}
+
 // ── Skip management ────────────────────────────────────────────────────────
 function skipPatch(hash) {
   state.skipped.add(hash);
@@ -89,15 +100,21 @@ function updateSubmitButton() {
 
   btn.textContent = `Submit Review${patchLabel} to Claude`;
 
+  const generalComment = patch ? getGeneralComment(patch.hash).trim() : '';
+  const hasFeedback = count > 0 || generalComment.length > 0;
+
   if (isSkipped) {
     btn.disabled = true;
     warn.textContent = 'Patch skipped — no review to submit';
-  } else if (count === 0) {
+  } else if (!hasFeedback) {
     btn.disabled = true;
-    warn.textContent = 'Add at least one comment first';
+    warn.textContent = 'Add a general comment or click a line to comment';
   } else {
     btn.disabled = false;
-    warn.textContent = `${count} comment${count !== 1 ? 's' : ''} ready`;
+    const parts = [];
+    if (generalComment) parts.push('general feedback');
+    if (count > 0) parts.push(`${count} line comment${count !== 1 ? 's' : ''}`);
+    warn.textContent = parts.join(' + ') + ' ready';
   }
 }
 
@@ -355,6 +372,21 @@ function renderCurrentPatch() {
   heading.appendChild(skipBtn);
   container.appendChild(heading);
 
+  // General comment box (always shown, even when skipped so user can read it)
+  const generalBox = document.createElement('div');
+  generalBox.className = 'general-comment-box';
+  generalBox.innerHTML = `
+    <div class="general-comment-label">
+      General feedback for Part ${patchNum}
+      <span class="general-comment-hint">Feedback here is scoped to this patch only. Use this for overall concerns not tied to a specific line.</span>
+    </div>
+    <textarea class="general-comment-textarea" placeholder="e.g. This approach should use RAII. Please refactor the error handling throughout this patch…">${escapeHtml(getGeneralComment(patch.hash))}</textarea>`;
+  container.appendChild(generalBox);
+
+  const textarea = generalBox.querySelector('textarea');
+  if (isSkipped) textarea.disabled = true;
+  textarea.addEventListener('input', () => setGeneralComment(patch.hash, textarea.value));
+
   // If skipped, show a notice instead of the diff
   if (isSkipped) {
     const notice = document.createElement('div');
@@ -396,6 +428,7 @@ async function submitReview() {
       body: JSON.stringify({
         patchHash: patch.hash,
         comments,
+        generalComment: getGeneralComment(patch.hash).trim(),
         skippedHashes: [...state.skipped],
       }),
     });

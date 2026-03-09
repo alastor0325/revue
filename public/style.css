@@ -179,6 +179,54 @@ body {
   flex: 0 0 auto;
 }
 
+/* ── General comment box ── */
+.general-comment-box {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+
+.general-comment-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.general-comment-hint {
+  font-size: 11px;
+  font-weight: 400;
+  color: #484f58;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.general-comment-textarea {
+  width: 100%;
+  background: #0d1117;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  resize: vertical;
+  min-height: 80px;
+  outline: none;
+  line-height: 1.5;
+}
+
+.general-comment-textarea:focus { border-color: #58a6ff; }
+.general-comment-textarea:disabled { opacity: 0.4; cursor: not-allowed; }
+.general-comment-textarea::placeholder { color: #484f58; }
+
 /* ── Skip / Unskip buttons ── */
 .btn-skip {
   background: transparent;

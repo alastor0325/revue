@@ -14,7 +14,7 @@ const path = require('path');
  * @param {string[]} skippedHashes - hashes of patches the reviewer chose to skip
  * @returns {string}
  */
-function formatPrompt(worktreeName, patch, allPatches, comments, skippedHashes = []) {
+function formatPrompt(worktreeName, patch, allPatches, comments, skippedHashes = [], generalComment = '') {
   const skipped = new Set(skippedHashes);
   const patchNum = allPatches.findIndex((p) => p.hash === patch.hash) + 1;
   const totalPatches = allPatches.length;
@@ -28,15 +28,21 @@ function formatPrompt(worktreeName, patch, allPatches, comments, skippedHashes =
     })
     .join('\n');
 
-  const feedbackItems = comments
-    .map((c) => {
-      return [
-        `### ${c.file} : line ${c.line}`,
-        `[YOUR CODE] : ${c.lineContent}`,
-        `[FEEDBACK]  : ${c.text}`,
-      ].join('\n');
-    })
+  const generalSection = generalComment.trim()
+    ? `## General feedback for Part ${patchNum}:\n\n${generalComment.trim()}\n`
+    : '';
+
+  const lineFeedbackItems = comments
+    .map((c) => [
+      `### ${c.file} : line ${c.line}`,
+      `[YOUR CODE] : ${c.lineContent}`,
+      `[FEEDBACK]  : ${c.text}`,
+    ].join('\n'))
     .join('\n\n');
+
+  const lineSection = lineFeedbackItems
+    ? `## Line-level feedback for Part ${patchNum}:\n\n${lineFeedbackItems}\n`
+    : '';
 
   return `You are being asked to revise your implementation in worktree firefox-${worktreeName}.
 
@@ -46,12 +52,9 @@ function formatPrompt(worktreeName, patch, allPatches, comments, skippedHashes =
 ## Full patch series for context:
 ${seriesList}
 
-## Reviewer feedback:
-
-${feedbackItems}
-
+${generalSection}${lineSection}
 ## Instructions:
-Address each FEEDBACK item above. This feedback is for Part ${patchNum} only — modify only files changed in that commit unless a fix strictly requires touching other code. After making changes, summarize what you changed for each feedback item.
+All feedback above is scoped to Part ${patchNum} only — modify only files changed in that commit unless a fix strictly requires touching other code. After making changes, summarize what you changed for each feedback item.
 `;
 }
 
@@ -66,8 +69,8 @@ Address each FEEDBACK item above. This feedback is for Part ${patchNum} only —
  * @param {string[]} skippedHashes
  * @returns {{ feedbackPath: string, command: string }}
  */
-function submitReview(worktreePath, worktreeName, patch, allPatches, comments, skippedHashes = []) {
-  const prompt = formatPrompt(worktreeName, patch, allPatches, comments, skippedHashes);
+function submitReview(worktreePath, worktreeName, patch, allPatches, comments, skippedHashes = [], generalComment = '') {
+  const prompt = formatPrompt(worktreeName, patch, allPatches, comments, skippedHashes, generalComment);
   const filename = `REVIEW_FEEDBACK_${patch.hash}.md`;
   const feedbackPath = path.join(worktreePath, filename);
   fs.writeFileSync(feedbackPath, prompt, 'utf8');

@@ -87,7 +87,13 @@ function createApp({ worktreeName, worktreePath, mainRepoPath }) {
     if (!patchHash) {
       return res.status(400).json({ error: 'patchHash is required.' });
     }
-    if (!comments || !Array.isArray(comments) || comments.length === 0) {
+
+    const generalComment = typeof req.body.generalComment === 'string'
+      ? req.body.generalComment.trim()
+      : '';
+    const hasLineComments = Array.isArray(comments) && comments.length > 0;
+
+    if (!hasLineComments && !generalComment) {
       return res.status(400).json({ error: 'No comments provided.' });
     }
 
@@ -105,7 +111,8 @@ function createApp({ worktreeName, worktreePath, mainRepoPath }) {
         patch,
         patchesCache,
         comments,
-        skippedHashes
+        skippedHashes,
+        generalComment
       );
       res.json({ ok: true, feedbackPath, command });
     } catch (err) {
