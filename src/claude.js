@@ -93,10 +93,11 @@ For each part with feedback above, apply changes only to files modified in that 
  * @returns {{ feedbackPath: string, prompt: string }}
  */
 function submitReview(worktreePath, worktreeName, allPatches, allFeedback, skippedHashes = [], approvedHashes = [], deniedHashes = []) {
-  const prompt = formatCombinedPrompt(worktreeName, allPatches, allFeedback, skippedHashes, approvedHashes, deniedHashes);
+  const fileContent = formatCombinedPrompt(worktreeName, allPatches, allFeedback, skippedHashes, approvedHashes, deniedHashes);
   const filename = `REVIEW_FEEDBACK_${worktreeName}.md`;
   const feedbackPath = path.join(worktreePath, filename);
-  fs.writeFileSync(feedbackPath, prompt, 'utf8');
+  fs.writeFileSync(feedbackPath, fileContent, 'utf8');
+  const prompt = `Please read the review feedback at ${feedbackPath} and apply all the changes described there to your implementation in worktree firefox-${worktreeName}.`;
   return { feedbackPath, prompt };
 }
 
