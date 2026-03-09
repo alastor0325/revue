@@ -202,4 +202,4 @@ function getDiffPerCommit(worktreePath, mainRepoPath) {
   });
 }
 
-module.exports = { getCommits, getDiffPerCommit, getMergeBase };
+module.exports = { getCommits, getDiffPerCommit, getMergeBase, parseDiff };

@@ -40,14 +40,15 @@ function findAvailablePort(preferred) {
 }
 
 /**
- * Start the review web server.
+ * Create and return the Express app without starting the server.
+ * Exported separately so tests can import it without side effects.
  */
-async function startServer({ bugId, worktreePath, mainRepoPath }) {
+function createApp({ bugId, worktreePath, mainRepoPath }) {
   const app = express();
   app.use(express.json());
   app.use(express.static(path.join(__dirname, '..', 'public')));
 
-  // Cache patches so we only compute once
+  // Cache patches so we only compute once per app instance
   let patchesCache = null;
 
   function loadData() {
@@ -110,6 +111,14 @@ async function startServer({ bugId, worktreePath, mainRepoPath }) {
     }
   });
 
+  return app;
+}
+
+/**
+ * Start the review web server.
+ */
+async function startServer({ bugId, worktreePath, mainRepoPath }) {
+  const app = createApp({ bugId, worktreePath, mainRepoPath });
   const port = await findAvailablePort(7777);
 
   app.listen(port, '127.0.0.1', () => {
@@ -120,4 +129,4 @@ async function startServer({ bugId, worktreePath, mainRepoPath }) {
   });
 }
 
-module.exports = { startServer };
+module.exports = { startServer, createApp };
