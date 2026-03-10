@@ -693,7 +693,7 @@ function renderCurrentPatch() {
         state.compareRevision[patchIdx] = { from: hash, to: state.compareRevision[patchIdx].to };
         renderCurrentPatch();
       });
-      fromBar.prepend(exitBtn);
+      fromBar.appendChild(exitBtn);
 
       const toBar = makeRevBarEl('To:', compareRev.to, (hash) => {
         state.compareRevision[patchIdx] = { from: state.compareRevision[patchIdx].from, to: hash };
@@ -717,7 +717,7 @@ function renderCurrentPatch() {
         renderCurrentPatch();
         renderTabs();
       });
-      revBar.prepend(compareBtn);
+      revBar.appendChild(compareBtn);
       container.appendChild(revBar);
     }
   }
