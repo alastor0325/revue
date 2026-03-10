@@ -211,6 +211,103 @@
           },
         ],
       },
+      {
+        hash: 'd3e4f5a6',
+        message: 'Bug 1234567 - Part 4: Add GTest for WaitingForKey event dispatch',
+        body: 'Bug 1234567 - Part 4: Add GTest for WaitingForKey event dispatch\n\nVerify that HandleKeyNeeded fires the waitingforkey event when no\nMediaKeys object is attached, and enqueues the init data.',
+        files: [
+          {
+            oldPath: 'dom/media/gtest/TestEMEWaitingForKey.cpp',
+            newPath: 'dom/media/gtest/TestEMEWaitingForKey.cpp',
+            binary: false,
+            hunks: [
+              {
+                header: '@@ -0,0 +1,32 @@',
+                oldStart: 0, oldCount: 0, newStart: 1, newCount: 32,
+                lines: [
+                  { type: 'added', content: '/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil -*- */', oldLineNum: null, newLineNum: 1 },
+                  { type: 'added', content: '/* This Source Code Form is subject to the terms of the Mozilla Public', oldLineNum: null, newLineNum: 2 },
+                  { type: 'added', content: ' * License, v. 2.0. If a copy of the MPL was not distributed with this', oldLineNum: null, newLineNum: 3 },
+                  { type: 'added', content: ' * file, You can obtain one at http://mozilla.org/MPL/2.0/. */', oldLineNum: null, newLineNum: 4 },
+                  { type: 'added', content: '#include "gtest/gtest.h"', oldLineNum: null, newLineNum: 5 },
+                  { type: 'added', content: '#include "HTMLMediaElement.h"', oldLineNum: null, newLineNum: 6 },
+                  { type: 'added', content: '', oldLineNum: null, newLineNum: 7 },
+                  { type: 'added', content: 'TEST(EMEWaitingForKey, FiresWhenNoMediaKeys) {', oldLineNum: null, newLineNum: 8 },
+                  { type: 'added', content: '  MockHTMLMediaElement el;', oldLineNum: null, newLineNum: 9 },
+                  { type: 'added', content: '  eme::MediaKeyNeededEventInit init;', oldLineNum: null, newLineNum: 10 },
+                  { type: 'added', content: '  EXPECT_FALSE(el.HasMediaKeys());', oldLineNum: null, newLineNum: 11 },
+                  { type: 'added', content: '  el.HandleKeyNeeded(init);', oldLineNum: null, newLineNum: 12 },
+                  { type: 'added', content: '  EXPECT_TRUE(el.WaitingForKeyEventFired());', oldLineNum: null, newLineNum: 13 },
+                  { type: 'added', content: '  EXPECT_EQ(el.PendingKeyNeededEvents().Length(), 1u);', oldLineNum: null, newLineNum: 14 },
+                  { type: 'added', content: '}', oldLineNum: null, newLineNum: 15 },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      {
+        hash: 'f7a8b9c0',
+        message: 'Bug 1234567 - Part 5: Update mochitest for waitingforkey',
+        body: 'Bug 1234567 - Part 5: Update mochitest for waitingforkey\n\nExtend the existing EME mochitest to cover the waitingforkey event\npath, ensuring the event fires before MediaKeys is set.',
+        files: [
+          {
+            oldPath: 'dom/media/test/test_eme_waitingforkey.html',
+            newPath: 'dom/media/test/test_eme_waitingforkey.html',
+            binary: false,
+            hunks: [
+              {
+                header: '@@ -44,6 +44,18 @@',
+                oldStart: 44, oldCount: 6, newStart: 44, newCount: 18,
+                lines: [
+                  { type: 'context', content: '  // Verify encrypted event fires', oldLineNum: 44, newLineNum: 44 },
+                  { type: 'context', content: '  await once(video, "encrypted");', oldLineNum: 45, newLineNum: 45 },
+                  { type: 'context', content: '  ok(true, "encrypted event fired");', oldLineNum: 46, newLineNum: 46 },
+                  { type: 'added',   content: '', oldLineNum: null, newLineNum: 47 },
+                  { type: 'added',   content: '  // Verify waitingforkey fires before MediaKeys is attached', oldLineNum: null, newLineNum: 48 },
+                  { type: 'added',   content: '  const wfkPromise = once(video, "waitingforkey");', oldLineNum: null, newLineNum: 49 },
+                  { type: 'added',   content: '  video.src = EMEHelper.getEncryptedVideoSrc();', oldLineNum: null, newLineNum: 50 },
+                  { type: 'added',   content: '  await wfkPromise;', oldLineNum: null, newLineNum: 51 },
+                  { type: 'added',   content: '  ok(true, "waitingforkey fired before MediaKeys set");', oldLineNum: null, newLineNum: 52 },
+                  { type: 'added',   content: '  await setMediaKeys(video);', oldLineNum: null, newLineNum: 53 },
+                  { type: 'added',   content: '  ok(video.mediaKeys, "MediaKeys set after waitingforkey");', oldLineNum: null, newLineNum: 54 },
+                  { type: 'context', content: '  SimpleTest.finish();', oldLineNum: 47, newLineNum: 55 },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      {
+        hash: 'b1c2d3e4',
+        message: 'Bug 1234567 - Part 6: Update EME telemetry probes',
+        body: 'Bug 1234567 - Part 6: Update EME telemetry probes\n\nAdd a new USE_COUNTER probe for waitingforkey usage so we can track\nhow often sites rely on the event in the wild.',
+        files: [
+          {
+            oldPath: 'toolkit/components/telemetry/Histograms.json',
+            newPath: 'toolkit/components/telemetry/Histograms.json',
+            binary: false,
+            hunks: [
+              {
+                header: '@@ -12450,6 +12450,14 @@',
+                oldStart: 12450, oldCount: 6, newStart: 12450, newCount: 14,
+                lines: [
+                  { type: 'context', content: '  "EME_KEY_SESSION_CLOSE_EXCEPTION": {', oldLineNum: 12450, newLineNum: 12450 },
+                  { type: 'context', content: '    "record_in_processes": ["main"],', oldLineNum: 12451, newLineNum: 12451 },
+                  { type: 'context', content: '    "description": "Exceptions thrown by MediaKeySession.close()"', oldLineNum: 12452, newLineNum: 12452 },
+                  { type: 'context', content: '  },', oldLineNum: 12453, newLineNum: 12453 },
+                  { type: 'added',   content: '  "EME_WAITING_FOR_KEY_EVENT_FIRED": {', oldLineNum: null, newLineNum: 12454 },
+                  { type: 'added',   content: '    "record_in_processes": ["main"],', oldLineNum: null, newLineNum: 12455 },
+                  { type: 'added',   content: '    "kind": "boolean",', oldLineNum: null, newLineNum: 12456 },
+                  { type: 'added',   content: '    "description": "Whether the waitingforkey event was fired during EME playback"', oldLineNum: null, newLineNum: 12457 },
+                  { type: 'added',   content: '  },', oldLineNum: null, newLineNum: 12458 },
+                  { type: 'context', content: '  "EME_GENERATE_REQUEST_FAILED": {', oldLineNum: 12454, newLineNum: 12459 },
+                ],
+              },
+            ],
+          },
+        ],
+      },
     ],
   };
 
@@ -298,12 +395,23 @@
           },
         },
       },
+      'b1c2d3e4': {
+        'toolkit/components/telemetry/Histograms.json': {
+          'n12457': {
+            patchHash: 'b1c2d3e4',
+            file: 'toolkit/components/telemetry/Histograms.json',
+            line: 12457,
+            lineContent: '    "description": "Whether the waitingforkey event was fired during EME playback"',
+            text: 'Telemetry probes for EME events need a data review. Please file a separate bug and link it here.',
+          },
+        },
+      },
     },
     generalComments: {
       'c9d0e1f2': 'The removal and re-addition of the callback check is unnecessary churn. Please only add the RefreshTrustedInput() call without restructuring the existing code.',
     },
-    approved: ['a1b2c3d4'],
-    denied: ['c9d0e1f2'],
+    approved: ['a1b2c3d4', 'd3e4f5a6', 'f7a8b9c0'],
+    denied: ['e5f6a7b8', 'c9d0e1f2', 'b1c2d3e4'],
     // Revision history — Part 2 has been amended twice
     revisions: [
       {
@@ -312,6 +420,9 @@
           { hash: 'a1b2c3d4', message: 'Bug 1234567 - Part 1: Add waitingforkey IDL and event dispatch' },
           { hash: 'rev1_e5f6', message: 'Bug 1234567 - Part 2: Handle ClearLead in ExternalEngineStateMachine' },
           { hash: 'c9d0e1f2', message: 'Bug 1234567 - Part 3: Refresh CDM proxy trusted input on proxy set' },
+          { hash: 'd3e4f5a6', message: 'Bug 1234567 - Part 4: Add GTest for WaitingForKey event dispatch' },
+          { hash: 'f7a8b9c0', message: 'Bug 1234567 - Part 5: Update mochitest for waitingforkey' },
+          { hash: 'b1c2d3e4', message: 'Bug 1234567 - Part 6: Update EME telemetry probes' },
         ],
       },
       {
@@ -320,6 +431,9 @@
           { hash: 'a1b2c3d4', message: 'Bug 1234567 - Part 1: Add waitingforkey IDL and event dispatch' },
           { hash: 'old_e5f6', message: 'Bug 1234567 - Part 2: Handle ClearLead in ExternalEngineStateMachine' },
           { hash: 'c9d0e1f2', message: 'Bug 1234567 - Part 3: Refresh CDM proxy trusted input on proxy set' },
+          { hash: 'd3e4f5a6', message: 'Bug 1234567 - Part 4: Add GTest for WaitingForKey event dispatch' },
+          { hash: 'f7a8b9c0', message: 'Bug 1234567 - Part 5: Update mochitest for waitingforkey' },
+          { hash: 'b1c2d3e4', message: 'Bug 1234567 - Part 6: Update EME telemetry probes' },
         ],
       },
       {
@@ -328,10 +442,13 @@
           { hash: 'a1b2c3d4', message: 'Bug 1234567 - Part 1: Add waitingforkey IDL and event dispatch' },
           { hash: 'e5f6a7b8', message: 'Bug 1234567 - Part 2: Handle ClearLead in ExternalEngineStateMachine' },
           { hash: 'c9d0e1f2', message: 'Bug 1234567 - Part 3: Refresh CDM proxy trusted input on proxy set' },
+          { hash: 'd3e4f5a6', message: 'Bug 1234567 - Part 4: Add GTest for WaitingForKey event dispatch' },
+          { hash: 'f7a8b9c0', message: 'Bug 1234567 - Part 5: Update mochitest for waitingforkey' },
+          { hash: 'b1c2d3e4', message: 'Bug 1234567 - Part 6: Update EME telemetry probes' },
         ],
       },
     ],
-    prompt: null,
+    prompt: 'You are being asked to revise your implementation in worktree firefox-bug-1234567.\n\n## Full patch series:\n- a1b2c3d4 Bug 1234567 - Part 1: Add waitingforkey IDL and event dispatch  [APPROVED — no issues]\n- e5f6a7b8 Bug 1234567 - Part 2: Handle ClearLead in ExternalEngineStateMachine  [DENIED — requires significant changes]\n- c9d0e1f2 Bug 1234567 - Part 3: Refresh CDM proxy trusted input on proxy set  [DENIED — requires significant changes]\n- d3e4f5a6 Bug 1234567 - Part 4: Add GTest for WaitingForKey event dispatch  [APPROVED — no issues]\n- f7a8b9c0 Bug 1234567 - Part 5: Update mochitest for waitingforkey  [APPROVED — no issues]\n- b1c2d3e4 Bug 1234567 - Part 6: Update EME telemetry probes  [DENIED — requires significant changes]',
   };
 
   // ── Mock fetch ────────────────────────────────────────────────────────────
