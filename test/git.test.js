@@ -381,23 +381,43 @@ describe('getHeadHash', () => {
 // ── getDiffBetweenCommits ──────────────────────────────────────────────────
 
 describe('getDiffBetweenCommits', () => {
-  test('calls git diff with from and to hashes and returns parsed files', () => {
-    const { getDiffBetweenCommits } = require('../src/git');
-    const diffOutput = `diff --git a/foo.cpp b/foo.cpp
---- a/foo.cpp
-+++ b/foo.cpp
-@@ -1,3 +1,4 @@
- line1
-+newline
- line2
- line3`;
-    execSync.mockReturnValue(diffOutput);
+  const { getDiffBetweenCommits } = require('../src/git');
+
+  function makeShowOutput(addedLines) {
+    const body = addedLines.map((l) => `+${l}`).join('\n');
+    return `commit abc\n\n    Subject\n\ndiff --git a/foo.cpp b/foo.cpp\n--- a/foo.cpp\n+++ b/foo.cpp\n@@ -1,3 +1,${3 + addedLines.length} @@\n line1\n${body}\n line2\n line3`;
+  }
+
+  test('returns empty array when both patches are identical', () => {
+    const show = makeShowOutput(['  MOZ_ASSERT(x);']);
+    execSync.mockReturnValue(show); // same for both calls
     const files = getDiffBetweenCommits('/repo', 'abc111', 'def222');
-    expect(execSync).toHaveBeenCalledWith(
-      'git -C "/repo" diff abc111 def222',
-      expect.objectContaining({ encoding: 'utf8' })
-    );
+    expect(files).toHaveLength(0);
+  });
+
+  test('shows added lines when new patch adds more than old', () => {
+    const fromShow = makeShowOutput(['  MOZ_ASSERT(x);']);
+    const toShow   = makeShowOutput(['  MOZ_ASSERT(x);', '  newLine();']);
+    execSync
+      .mockReturnValueOnce(fromShow) // getDiffForCommit(fromHash)
+      .mockReturnValueOnce(toShow);  // getDiffForCommit(toHash)
+    const files = getDiffBetweenCommits('/repo', 'abc111', 'def222');
     expect(files).toHaveLength(1);
     expect(files[0].newPath).toBe('foo.cpp');
+    const lines = files[0].hunks[0].lines;
+    expect(lines.find((l) => l.type === 'added'  && l.content === '  newLine();')).toBeTruthy();
+    expect(lines.find((l) => l.type === 'context' && l.content === '  MOZ_ASSERT(x);')).toBeTruthy();
+  });
+
+  test('shows removed lines when new patch drops a line from the old', () => {
+    const fromShow = makeShowOutput(['  MOZ_ASSERT(x);', '  droppedLine();']);
+    const toShow   = makeShowOutput(['  MOZ_ASSERT(x);']);
+    execSync
+      .mockReturnValueOnce(fromShow)
+      .mockReturnValueOnce(toShow);
+    const files = getDiffBetweenCommits('/repo', 'abc111', 'def222');
+    expect(files).toHaveLength(1);
+    const lines = files[0].hunks[0].lines;
+    expect(lines.find((l) => l.type === 'removed' && l.content === '  droppedLine();')).toBeTruthy();
   });
 });

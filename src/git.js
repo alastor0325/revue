@@ -215,15 +215,99 @@ function parseCommitBody(raw) {
 }
 
 /**
- * Get the diff between two commit hashes (git diff fromHash toHash).
- * Useful for comparing two revisions of the same patch.
+ * Collect only the non-context lines (added/removed) from a parsed file diff.
+ * These represent what the commit actually changes.
+ */
+function getPatchLines(file) {
+  const lines = [];
+  for (const hunk of (file ? file.hunks : [])) {
+    for (const line of hunk.lines) {
+      if (line.type !== 'context') {
+        lines.push({ type: line.type, content: line.content });
+      }
+    }
+  }
+  return lines;
+}
+
+/**
+ * LCS-based diff of two sequences of patch lines.
+ * Returns array of { inFrom, inTo, type, content }.
+ */
+function lcsCompare(fromLines, toLines) {
+  const fromKeys = fromLines.map((l) => l.type + ':' + l.content);
+  const toKeys   = toLines.map((l) => l.type + ':' + l.content);
+  const m = fromKeys.length;
+  const n = toKeys.length;
+
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = fromKeys[i - 1] === toKeys[j - 1]
+        ? dp[i - 1][j - 1] + 1
+        : Math.max(dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+
+  const result = [];
+  let i = m, j = n;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && fromKeys[i - 1] === toKeys[j - 1]) {
+      result.unshift({ inFrom: true,  inTo: true,  ...fromLines[i - 1] });
+      i--; j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      result.unshift({ inFrom: false, inTo: true,  ...toLines[j - 1] });
+      j--;
+    } else {
+      result.unshift({ inFrom: true,  inTo: false, ...fromLines[i - 1] });
+      i--;
+    }
+  }
+  return result;
+}
+
+/**
+ * Compare two revisions of the same patch by diffing what each commit
+ * introduces (git show) rather than comparing full tree states.
+ * This avoids including changes from other commits in the series.
+ *
+ * Returns file diffs in the same format as parseDiff, where:
+ *   added   = line is new to toHash's patch
+ *   removed = line was in fromHash's patch but dropped in toHash's
+ *   context = line appears in both patch versions unchanged
+ * Line numbers are null (not meaningful across patch versions).
  */
 function getDiffBetweenCommits(worktreePath, fromHash, toHash) {
-  const raw = execSync(
-    `git -C "${worktreePath}" diff ${fromHash} ${toHash}`,
-    { encoding: 'utf8', maxBuffer: 50 * 1024 * 1024 }
-  );
-  return parseDiff(raw);
+  const fromFiles = getDiffForCommit(worktreePath, fromHash);
+  const toFiles   = getDiffForCommit(worktreePath, toHash);
+
+  const fromMap = new Map(fromFiles.map((f) => [f.newPath || f.oldPath, f]));
+  const toMap   = new Map(toFiles.map((f)   => [f.newPath || f.oldPath, f]));
+  const allPaths = [...new Set([...fromMap.keys(), ...toMap.keys()])];
+
+  const result = [];
+  for (const filePath of allPaths) {
+    const fromLines = getPatchLines(fromMap.get(filePath));
+    const toLines   = getPatchLines(toMap.get(filePath));
+    const compared  = lcsCompare(fromLines, toLines);
+
+    if (!compared.some((d) => d.inFrom !== d.inTo)) continue; // no delta
+
+    const lines = compared.map((d) => ({
+      type:       d.inFrom && d.inTo ? 'context' : d.inTo ? 'added' : 'removed',
+      content:    d.content,
+      oldLineNum: null,
+      newLineNum: null,
+    }));
+
+    result.push({
+      oldPath: filePath,
+      newPath: filePath,
+      binary: false,
+      hunks: [{ header: '@@ patch delta @@', oldStart: 1, oldCount: 0, newStart: 1, newCount: 0, lines }],
+    });
+  }
+  return result;
 }
 
 /**
