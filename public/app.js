@@ -676,6 +676,9 @@ function renderCurrentPatch() {
     });
 
     container.appendChild(revBar);
+    addDragScroll(revBar);
+    // Scroll so the latest (rightmost) revision is always visible on render
+    requestAnimationFrame(() => { revBar.scrollLeft = revBar.scrollWidth; });
   }
 
   // Commit message section — always shown, disabled when approved
@@ -806,33 +809,36 @@ async function submitReview() {
   }
 }
 
-// ── Drag-to-scroll on patch tabs bar ───────────────────────────────────────
-function initTabsDragScroll() {
-  const bar = $('#patch-tabs-bar');
-  if (!bar) return;
+// ── Drag-to-scroll (shared) ─────────────────────────────────────────────────
+function addDragScroll(el) {
   let dragging = false;
   let startX = 0;
   let startScroll = 0;
 
-  bar.addEventListener('mousedown', (e) => {
+  el.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
     dragging = true;
     startX = e.clientX;
-    startScroll = bar.scrollLeft;
-    bar.style.cursor = 'grabbing';
+    startScroll = el.scrollLeft;
+    el.style.cursor = 'grabbing';
     e.preventDefault();
   });
 
   document.addEventListener('mousemove', (e) => {
     if (!dragging) return;
-    bar.scrollLeft = startScroll - (e.clientX - startX);
+    el.scrollLeft = startScroll - (e.clientX - startX);
   });
 
   document.addEventListener('mouseup', () => {
     if (!dragging) return;
     dragging = false;
-    bar.style.cursor = '';
+    el.style.cursor = '';
   });
+}
+
+function initTabsDragScroll() {
+  const bar = $('#patch-tabs-bar');
+  if (bar) addDragScroll(bar);
 }
 
 // ── Boot ───────────────────────────────────────────────────────────────────

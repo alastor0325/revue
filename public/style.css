@@ -736,17 +736,24 @@ tr.comment-display-row td {
 .revision-toggle-bar {
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 12px;
   padding: 8px 24px;
   background: #1c2128;
   border-bottom: 1px solid #30363d;
   font-size: 13px;
   color: #8b949e;
+  overflow-x: auto;
+  cursor: grab;
+  user-select: none;
+  scrollbar-width: thin;
+  scrollbar-color: #484f58 #1c2128;
 }
 
-.revision-toggle-label { color: #8b949e; margin-right: 4px; }
+.revision-toggle-label { color: #8b949e; margin-right: 4px; flex-shrink: 0; }
 
 .btn-toggle-revision {
+  flex-shrink: 0;
   background: #21262d;
   color: #e6edf3;
   border: 1px solid #30363d;
