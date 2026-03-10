@@ -689,13 +689,18 @@ function renderCurrentPatch() {
         renderCurrentPatch();
       });
 
-      const fromBar = makeRevBarEl('From:', compareRev.from, (hash) => {
+      const fromIdx = revList.findIndex((r) => r.hash === compareRev.from);
+      const toIdx   = revList.findIndex((r) => r.hash === compareRev.to);
+      const fromLabelText = `From: Rev ${fromIdx + 1} ·`;
+      const toLabelText   = `To: Rev ${toIdx + 1}${toIdx === revList.length - 1 ? ' · current' : ''} ·`;
+
+      const fromBar = makeRevBarEl(fromLabelText, compareRev.from, (hash) => {
         state.compareRevision[patchIdx] = { from: hash, to: state.compareRevision[patchIdx].to };
         renderCurrentPatch();
       });
       fromBar.appendChild(exitBtn);
 
-      const toBar = makeRevBarEl('To:', compareRev.to, (hash) => {
+      const toBar = makeRevBarEl(toLabelText, compareRev.to, (hash) => {
         state.compareRevision[patchIdx] = { from: state.compareRevision[patchIdx].from, to: hash };
         renderCurrentPatch();
       });

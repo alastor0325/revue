@@ -750,7 +750,16 @@ tr.comment-display-row td {
   scrollbar-color: #484f58 #1c2128;
 }
 
-.revision-toggle-label { color: #8b949e; margin-right: 4px; flex-shrink: 0; }
+.revision-toggle-label {
+  color: #8b949e;
+  flex-shrink: 0;
+  position: sticky;
+  left: 0;
+  background: #1c2128;
+  padding-right: 12px;
+  z-index: 1;
+  box-shadow: 6px 0 8px #1c2128;
+}
 
 .btn-compare-toggle {
   flex-shrink: 0;
