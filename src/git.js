@@ -215,6 +215,18 @@ function parseCommitBody(raw) {
 }
 
 /**
+ * Get the diff between two commit hashes (git diff fromHash toHash).
+ * Useful for comparing two revisions of the same patch.
+ */
+function getDiffBetweenCommits(worktreePath, fromHash, toHash) {
+  const raw = execSync(
+    `git -C "${worktreePath}" diff ${fromHash} ${toHash}`,
+    { encoding: 'utf8', maxBuffer: 50 * 1024 * 1024 }
+  );
+  return parseDiff(raw);
+}
+
+/**
  * Get the diff for a single commit by hash.
  * @param {string} worktreePath
  * @param {string} hash
@@ -297,4 +309,4 @@ function discoverWorktrees(mainRepoPath) {
   return parseWorktreeList(output, mainRepoPath);
 }
 
-module.exports = { getHeadHash, getCommits, getDiffPerCommit, getDiffForCommit, getMergeBase, parseDiff, parseCommitBody, parseWorktreeList, discoverWorktrees };
+module.exports = { getHeadHash, getCommits, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getMergeBase, parseDiff, parseCommitBody, parseWorktreeList, discoverWorktrees };

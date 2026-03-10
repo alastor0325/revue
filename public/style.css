@@ -752,6 +752,20 @@ tr.comment-display-row td {
 
 .revision-toggle-label { color: #8b949e; margin-right: 4px; flex-shrink: 0; }
 
+.btn-compare-toggle {
+  flex-shrink: 0;
+  background: #21262d;
+  color: #8b949e;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 3px 7px;
+  font-size: 13px;
+  cursor: pointer;
+  margin-right: 4px;
+}
+.btn-compare-toggle:hover { background: #30363d; color: #e6edf3; }
+.btn-compare-toggle.active { background: #1f4b8e; border-color: #388bfd; color: #79c0ff; }
+
 .btn-toggle-revision {
   flex-shrink: 0;
   background: #21262d;
@@ -783,6 +797,9 @@ tr.comment-display-row td {
   border-bottom: 1px solid #30363d;
 }
 .diff-revision-previous { background: #2d1b00; color: #f0883e; }
+.diff-revision-compare  { background: #1a1f4b; color: #79c0ff; }
+
+.diff-compare-readonly { pointer-events: none; }
 
 .diff-revision-loading {
   padding: 16px 24px;

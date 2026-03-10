@@ -8,7 +8,7 @@ const net = require('net');
 const os = require('os');
 const fs = require('fs');
 const { execSync } = require('child_process');
-const { getHeadHash, getDiffPerCommit, getDiffForCommit } = require('./git');
+const { getHeadHash, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits } = require('./git');
 const { submitReview } = require('./claude');
 
 /**
@@ -170,6 +170,21 @@ function createApp({ worktreeName, worktreePath, mainRepoPath }) {
     res.write(`data: ${SERVER_START}\n\n`);
     const interval = setInterval(() => res.write(': ping\n\n'), 15000);
     req.on('close', () => clearInterval(interval));
+  });
+
+  // GET /api/revdiff?from=hash1&to=hash2 — diff between two commit hashes (compare two revisions)
+  app.get('/api/revdiff', (req, res) => {
+    const { from, to } = req.query;
+    const hashRe = /^[0-9a-f]{4,40}$/i;
+    if (!from || !to || !hashRe.test(from) || !hashRe.test(to)) {
+      return res.status(400).json({ error: 'Invalid hash format.' });
+    }
+    try {
+      const files = getDiffBetweenCommits(worktreePath, from, to);
+      res.json({ from, to, files });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // GET /api/patchdiff/:hash — return diff for a single commit hash (for revision comparison)

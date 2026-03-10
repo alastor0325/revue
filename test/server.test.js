@@ -13,13 +13,14 @@ jest.mock('../src/git', () => ({
   getHeadHash: jest.fn(),
   getDiffPerCommit: jest.fn(),
   getDiffForCommit: jest.fn(),
+  getDiffBetweenCommits: jest.fn(),
 }));
 
 jest.mock('../src/claude', () => ({
   submitReview: jest.fn(),
 }));
 
-const { getHeadHash, getDiffPerCommit, getDiffForCommit } = require('../src/git');
+const { getHeadHash, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits } = require('../src/git');
 const { submitReview }     = require('../src/claude');
 const { createApp, findAvailablePort } = require('../src/server');
 
@@ -384,6 +385,49 @@ describe('GET /api/patchdiff/:hash', () => {
     const res = await request(app).get('/api/patchdiff/abc9999');
     expect(res.status).toBe(404);
     expect(res.body.error).toContain('abc9999');
+  });
+});
+
+// ── GET /api/revdiff ───────────────────────────────────────────────────────
+
+describe('GET /api/revdiff', () => {
+  const SAMPLE_FILES = [{ oldPath: 'dom/media/Foo.cpp', newPath: 'dom/media/Foo.cpp', binary: false, hunks: [] }];
+
+  beforeEach(() => {
+    getHeadHash.mockReturnValue('abc123');
+    getDiffBetweenCommits.mockReset();
+  });
+
+  test('returns 200 with from, to, and files on valid hashes', async () => {
+    getDiffBetweenCommits.mockReturnValue(SAMPLE_FILES);
+    const app = makeApp();
+    const res = await request(app).get('/api/revdiff?from=aaa1111&to=bbb2222');
+    expect(res.status).toBe(200);
+    expect(res.body.from).toBe('aaa1111');
+    expect(res.body.to).toBe('bbb2222');
+    expect(res.body.files).toHaveLength(1);
+    expect(getDiffBetweenCommits).toHaveBeenCalledWith('/fake/worktree', 'aaa1111', 'bbb2222');
+  });
+
+  test('returns 400 when from hash is invalid', async () => {
+    const app = makeApp();
+    const res = await request(app).get('/api/revdiff?from=bad!!&to=bbb2222');
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('Invalid hash format');
+  });
+
+  test('returns 400 when to hash is missing', async () => {
+    const app = makeApp();
+    const res = await request(app).get('/api/revdiff?from=aaa1111');
+    expect(res.status).toBe(400);
+  });
+
+  test('returns 500 when git throws', async () => {
+    getDiffBetweenCommits.mockImplementation(() => { throw new Error('bad object'); });
+    const app = makeApp();
+    const res = await request(app).get('/api/revdiff?from=aaa1111&to=bbb2222');
+    expect(res.status).toBe(500);
+    expect(res.body.error).toContain('bad object');
   });
 });
 

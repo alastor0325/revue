@@ -13,6 +13,7 @@ const state = {
   revisions: [],        // [{ savedAt, patches: [{hash, message}] }] — persisted
   updatedPatches: {},   // { patchIdx: { oldHash, oldMessage } } — computed on init, not persisted
   showRevision: {},     // { patchIdx: hash | null } — null means current; ephemeral toggle state
+  compareRevision: {},  // { patchIdx: { from: hash, to: hash } | absent } — compare mode
 };
 
 // ── DOM helpers ────────────────────────────────────────────────────────────
@@ -645,40 +646,80 @@ function renderCurrentPatch() {
 
   // Revision toggle bar — shown when this patch has multiple recorded revisions
   const revList = getRevisionList(state.currentPatchIdx);
-  const selectedHash = state.showRevision[state.currentPatchIdx] ?? null;
-  const effectiveHash = selectedHash ?? patch.hash;
+  const patchIdx = state.currentPatchIdx;
+  const compareRev = state.compareRevision[patchIdx] ?? null;
+  const isCompareMode = compareRev !== null;
+  const selectedHash = state.showRevision[patchIdx] ?? null;
+  const effectiveHash = isCompareMode ? patch.hash : (selectedHash ?? patch.hash);
 
   if (revList.length > 1) {
-    const revBar = document.createElement('div');
-    revBar.className = 'revision-toggle-bar';
+    const currentRevHash = revList[revList.length - 1].hash;
 
-    const label = document.createElement('span');
-    label.className = 'revision-toggle-label';
-    label.textContent = 'Revision:';
-    revBar.appendChild(label);
+    const makeRevBarEl = (labelText, activeHash, onSelect) => {
+      const bar = document.createElement('div');
+      bar.className = 'revision-toggle-bar';
+      const label = document.createElement('span');
+      label.className = 'revision-toggle-label';
+      label.textContent = labelText;
+      bar.appendChild(label);
+      revList.forEach((rev, i) => {
+        const isCurrent = (i === revList.length - 1);
+        const btn = document.createElement('button');
+        btn.className = 'btn-toggle-revision' + (rev.hash === activeHash ? ' active' : '');
+        const dateStr = rev.savedAt
+          ? new Date(rev.savedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+          : '';
+        btn.innerHTML = `<span class="rev-btn-label">Rev ${i + 1}${isCurrent ? ' · current' : ''}</span>${dateStr ? `<span class="rev-btn-date">${escapeHtml(dateStr)}</span>` : ''}`;
+        btn.title = rev.hash;
+        btn.addEventListener('click', () => onSelect(rev.hash));
+        bar.appendChild(btn);
+      });
+      addDragScroll(bar);
+      requestAnimationFrame(() => { bar.scrollLeft = bar.scrollWidth; });
+      return bar;
+    };
 
-    revList.forEach((rev, i) => {
-      const isCurrent = (i === revList.length - 1);
-      const isSelected = (rev.hash === effectiveHash) || (isCurrent && selectedHash === null);
-      const btn = document.createElement('button');
-      btn.className = 'btn-toggle-revision' + (isSelected ? ' active' : '');
-      const dateStr = rev.savedAt
-        ? new Date(rev.savedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-        : '';
-      btn.innerHTML = `<span class="rev-btn-label">Rev ${i + 1}${isCurrent ? ' · current' : ''}</span>${dateStr ? `<span class="rev-btn-date">${escapeHtml(dateStr)}</span>` : ''}`;
-      btn.title = rev.hash;
-      btn.addEventListener('click', () => {
-        state.showRevision[state.currentPatchIdx] = isCurrent ? null : rev.hash;
+    if (isCompareMode) {
+      const exitBtn = document.createElement('button');
+      exitBtn.className = 'btn-compare-toggle active';
+      exitBtn.title = 'Exit compare mode';
+      exitBtn.textContent = '⇄';
+      exitBtn.addEventListener('click', () => {
+        delete state.compareRevision[patchIdx];
+        renderCurrentPatch();
+      });
+
+      const fromBar = makeRevBarEl('From:', compareRev.from, (hash) => {
+        state.compareRevision[patchIdx] = { from: hash, to: state.compareRevision[patchIdx].to };
+        renderCurrentPatch();
+      });
+      fromBar.prepend(exitBtn);
+
+      const toBar = makeRevBarEl('To:', compareRev.to, (hash) => {
+        state.compareRevision[patchIdx] = { from: state.compareRevision[patchIdx].from, to: hash };
+        renderCurrentPatch();
+      });
+
+      container.appendChild(fromBar);
+      container.appendChild(toBar);
+    } else {
+      const compareBtn = document.createElement('button');
+      compareBtn.className = 'btn-compare-toggle';
+      compareBtn.title = 'Compare two revisions';
+      compareBtn.textContent = '⇄';
+      compareBtn.addEventListener('click', () => {
+        state.compareRevision[patchIdx] = { from: revList[0].hash, to: currentRevHash };
+        renderCurrentPatch();
+      });
+
+      const revBar = makeRevBarEl('Revision:', effectiveHash, (hash) => {
+        state.showRevision[patchIdx] = (hash === currentRevHash) ? null : hash;
         renderCurrentPatch();
         renderTabs();
       });
-      revBar.appendChild(btn);
-    });
-
-    container.appendChild(revBar);
-    addDragScroll(revBar);
-    // Scroll so the latest (rightmost) revision is always visible on render
-    requestAnimationFrame(() => { revBar.scrollLeft = revBar.scrollWidth; });
+      revBar.prepend(compareBtn);
+      container.appendChild(revBar);
+    }
   }
 
   // Commit message section — always shown, disabled when approved
@@ -719,7 +760,51 @@ function renderCurrentPatch() {
     container.appendChild(notice);
   }
 
-  if (effectiveHash !== patch.hash) {
+  if (isCompareMode) {
+    const fromIdx = revList.findIndex((r) => r.hash === compareRev.from);
+    const toIdx   = revList.findIndex((r) => r.hash === compareRev.to);
+    const fromLabel = fromIdx >= 0 ? `Rev ${fromIdx + 1}` : compareRev.from;
+    const toLabel   = toIdx   >= 0 ? `Rev ${toIdx   + 1}` : compareRev.to;
+
+    const compareHeader = document.createElement('div');
+    compareHeader.className = 'diff-revision-header diff-revision-compare';
+    compareHeader.textContent = `Comparing ${fromLabel} → ${toLabel}`;
+    container.appendChild(compareHeader);
+
+    const placeholder = document.createElement('div');
+    placeholder.className = 'diff-revision-loading';
+    placeholder.textContent = 'Loading comparison…';
+    container.appendChild(placeholder);
+
+    fetch(`/api/revdiff?from=${compareRev.from}&to=${compareRev.to}`)
+      .then((r) => r.json())
+      .then((data) => {
+        placeholder.remove();
+        if (data.error) {
+          const err = document.createElement('p');
+          err.style.cssText = 'color:#f85149;padding:8px 24px;';
+          err.textContent = `Could not load comparison: ${data.error}`;
+          container.appendChild(err);
+          return;
+        }
+        if ((data.files || []).length === 0) {
+          const msg = document.createElement('p');
+          msg.style.cssText = 'color:#8b949e;padding:16px 24px;';
+          msg.textContent = 'No differences between these revisions.';
+          container.appendChild(msg);
+          return;
+        }
+        const wrap = document.createElement('div');
+        wrap.className = 'diff-compare-readonly';
+        for (const fileData of data.files) {
+          wrap.appendChild(renderFile(fileData, `compare:${compareRev.from}:${compareRev.to}`));
+        }
+        container.appendChild(wrap);
+      })
+      .catch(() => {
+        placeholder.textContent = 'Failed to load comparison.';
+      });
+  } else if (effectiveHash !== patch.hash) {
     const revIdx = revList.findIndex((r) => r.hash === effectiveHash);
     const revLabel = revIdx >= 0 ? `Rev ${revIdx + 1}` : 'Previous revision';
     const prevHeader = document.createElement('div');

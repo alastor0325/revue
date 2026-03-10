@@ -492,6 +492,86 @@
         }),
       });
     }
+    // GET /api/revdiff?from=X&to=Y (compare two revisions)
+    if (url.startsWith('/api/revdiff?')) {
+      const params = new URLSearchParams(url.split('?')[1]);
+      const from = params.get('from');
+      const to   = params.get('to');
+      // Mock: Rev1→Rev2 shows the MOZ_ASSERT addition; anything else is empty
+      const files = (from === 'rev1_e5f6' && to === 'old_e5f6') ? [
+        {
+          oldPath: 'dom/media/ExternalEngineStateMachine.cpp',
+          newPath: 'dom/media/ExternalEngineStateMachine.cpp',
+          binary: false,
+          hunks: [
+            {
+              header: '@@ -241,6 +241,7 @@',
+              oldStart: 241, oldCount: 6, newStart: 241, newCount: 7,
+              lines: [
+                { type: 'context', content: 'void ExternalEngineStateMachine::OnCDMProxyReady(', oldLineNum: 241, newLineNum: 241 },
+                { type: 'context', content: '    RefPtr<CDMProxy> aProxy)', oldLineNum: 242, newLineNum: 242 },
+                { type: 'context', content: '{', oldLineNum: 243, newLineNum: 243 },
+                { type: 'added',   content: '  MOZ_ASSERT(OnTaskQueue());', oldLineNum: null, newLineNum: 244 },
+                { type: 'context', content: '  mCDMProxy = std::move(aProxy);', oldLineNum: 244, newLineNum: 245 },
+                { type: 'context', content: '  mCDMProxy->SetEventTarget(mTaskQueue);', oldLineNum: 245, newLineNum: 246 },
+                { type: 'context', content: '}', oldLineNum: 246, newLineNum: 247 },
+              ],
+            },
+          ],
+        },
+      ] : (from === 'old_e5f6' && to === 'e5f6a7b8') ? [
+        {
+          oldPath: 'dom/media/ExternalEngineStateMachine.cpp',
+          newPath: 'dom/media/ExternalEngineStateMachine.cpp',
+          binary: false,
+          hunks: [
+            {
+              header: '@@ -241,7 +241,15 @@',
+              oldStart: 241, oldCount: 7, newStart: 241, newCount: 15,
+              lines: [
+                { type: 'context', content: 'void ExternalEngineStateMachine::OnCDMProxyReady(', oldLineNum: 241, newLineNum: 241 },
+                { type: 'context', content: '    RefPtr<CDMProxy> aProxy)', oldLineNum: 242, newLineNum: 242 },
+                { type: 'context', content: '{', oldLineNum: 243, newLineNum: 243 },
+                { type: 'context', content: '  MOZ_ASSERT(OnTaskQueue());', oldLineNum: 244, newLineNum: 244 },
+                { type: 'added',   content: '  mClearLeadState = ClearLeadState::eNone;', oldLineNum: null, newLineNum: 245 },
+                { type: 'added',   content: '  if (mInfo.HasEncryptedTracks()) {', oldLineNum: null, newLineNum: 246 },
+                { type: 'added',   content: '    mClearLeadState = ClearLeadState::ePossible;', oldLineNum: null, newLineNum: 247 },
+                { type: 'added',   content: '  }', oldLineNum: null, newLineNum: 248 },
+                { type: 'context', content: '  mCDMProxy = std::move(aProxy);', oldLineNum: 245, newLineNum: 249 },
+                { type: 'context', content: '  mCDMProxy->SetEventTarget(mTaskQueue);', oldLineNum: 246, newLineNum: 250 },
+                { type: 'context', content: '}', oldLineNum: 247, newLineNum: 251 },
+              ],
+            },
+          ],
+        },
+      ] : (from === 'rev1_e5f6' && to === 'e5f6a7b8') ? [
+        {
+          oldPath: 'dom/media/ExternalEngineStateMachine.cpp',
+          newPath: 'dom/media/ExternalEngineStateMachine.cpp',
+          binary: false,
+          hunks: [
+            {
+              header: '@@ -241,6 +241,15 @@',
+              oldStart: 241, oldCount: 6, newStart: 241, newCount: 15,
+              lines: [
+                { type: 'context', content: 'void ExternalEngineStateMachine::OnCDMProxyReady(', oldLineNum: 241, newLineNum: 241 },
+                { type: 'context', content: '    RefPtr<CDMProxy> aProxy)', oldLineNum: 242, newLineNum: 242 },
+                { type: 'context', content: '{', oldLineNum: 243, newLineNum: 243 },
+                { type: 'added',   content: '  MOZ_ASSERT(OnTaskQueue());', oldLineNum: null, newLineNum: 244 },
+                { type: 'added',   content: '  mClearLeadState = ClearLeadState::eNone;', oldLineNum: null, newLineNum: 245 },
+                { type: 'added',   content: '  if (mInfo.HasEncryptedTracks()) {', oldLineNum: null, newLineNum: 246 },
+                { type: 'added',   content: '    mClearLeadState = ClearLeadState::ePossible;', oldLineNum: null, newLineNum: 247 },
+                { type: 'added',   content: '  }', oldLineNum: null, newLineNum: 248 },
+                { type: 'context', content: '  mCDMProxy = std::move(aProxy);', oldLineNum: 244, newLineNum: 249 },
+                { type: 'context', content: '  mCDMProxy->SetEventTarget(mTaskQueue);', oldLineNum: 245, newLineNum: 250 },
+                { type: 'context', content: '}', oldLineNum: 246, newLineNum: 251 },
+              ],
+            },
+          ],
+        },
+      ] : [];
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ from, to, files }) });
+    }
     // GET /api/headhash (update detection — always returns same hash in demo)
     if (url === '/api/headhash') {
       return Promise.resolve({

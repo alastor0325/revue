@@ -377,3 +377,27 @@ describe('getHeadHash', () => {
     );
   });
 });
+
+// ── getDiffBetweenCommits ──────────────────────────────────────────────────
+
+describe('getDiffBetweenCommits', () => {
+  test('calls git diff with from and to hashes and returns parsed files', () => {
+    const { getDiffBetweenCommits } = require('../src/git');
+    const diffOutput = `diff --git a/foo.cpp b/foo.cpp
+--- a/foo.cpp
++++ b/foo.cpp
+@@ -1,3 +1,4 @@
+ line1
++newline
+ line2
+ line3`;
+    execSync.mockReturnValue(diffOutput);
+    const files = getDiffBetweenCommits('/repo', 'abc111', 'def222');
+    expect(execSync).toHaveBeenCalledWith(
+      'git -C "/repo" diff abc111 def222',
+      expect.objectContaining({ encoding: 'utf8' })
+    );
+    expect(files).toHaveLength(1);
+    expect(files[0].newPath).toBe('foo.cpp');
+  });
+});
