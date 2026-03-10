@@ -703,7 +703,7 @@ function renderCurrentPatch() {
     container.appendChild(denyNotice);
   }
 
-  // Approved notice — show instead of diff
+  // Approved notice — shown above the diff (diff still visible but read-only)
   if (isApproved) {
     const notice = document.createElement('div');
     notice.className = 'approve-notice';
@@ -711,7 +711,6 @@ function renderCurrentPatch() {
       <span class="approve-notice-icon">✓</span>
       <span>This patch was approved — no issues found. Click <strong>Approved ✓</strong> to undo.</span>`;
     container.appendChild(notice);
-    return;
   }
 
   if (effectiveHash !== patch.hash) {
@@ -754,9 +753,12 @@ function renderCurrentPatch() {
       msg.textContent = 'No changed files in this patch.';
       container.appendChild(msg);
     } else {
+      const diffWrap = document.createElement('div');
+      if (isApproved) diffWrap.className = 'diff-approved-readonly';
       for (const fileData of patch.files) {
-        container.appendChild(renderFile(fileData, patch.hash));
+        diffWrap.appendChild(renderFile(fileData, patch.hash));
       }
+      container.appendChild(diffWrap);
     }
   }
 }

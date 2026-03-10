@@ -354,6 +354,8 @@ body {
 
 .approve-notice-icon { font-size: 20px; }
 
+.diff-approved-readonly { opacity: 0.5; pointer-events: none; }
+
 /* ── Autosave status ── */
 #autosave-status {
   font-size: 11px;
