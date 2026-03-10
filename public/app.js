@@ -658,10 +658,16 @@ function renderCurrentPatch() {
     const makeRevBarEl = (labelText, activeHash, onSelect) => {
       const bar = document.createElement('div');
       bar.className = 'revision-toggle-bar';
+
       const label = document.createElement('span');
       label.className = 'revision-toggle-label';
       label.textContent = labelText;
       bar.appendChild(label);
+
+      // Buttons live in a separate inner scroll container so the label
+      // is never covered and buttons fade in cleanly from the left edge.
+      const scroll = document.createElement('div');
+      scroll.className = 'revision-toggle-scroll';
       revList.forEach((rev, i) => {
         const isCurrent = (i === revList.length - 1);
         const btn = document.createElement('button');
@@ -672,10 +678,12 @@ function renderCurrentPatch() {
         btn.innerHTML = `<span class="rev-btn-label">Rev ${i + 1}${isCurrent ? ' · current' : ''}</span>${dateStr ? `<span class="rev-btn-date">${escapeHtml(dateStr)}</span>` : ''}`;
         btn.title = rev.hash;
         btn.addEventListener('click', () => onSelect(rev.hash));
-        bar.appendChild(btn);
+        scroll.appendChild(btn);
       });
-      addDragScroll(bar);
-      requestAnimationFrame(() => { bar.scrollLeft = bar.scrollWidth; });
+      bar.appendChild(scroll);
+      addDragScroll(scroll);
+      requestAnimationFrame(() => { scroll.scrollLeft = scroll.scrollWidth; });
+      bar._scroll = scroll; // expose scroll container for extra button appends
       return bar;
     };
 
@@ -698,7 +706,7 @@ function renderCurrentPatch() {
         state.compareRevision[patchIdx] = { from: hash, to: state.compareRevision[patchIdx].to };
         renderCurrentPatch();
       });
-      fromBar.appendChild(exitBtn);
+      fromBar._scroll.appendChild(exitBtn);
 
       const toBar = makeRevBarEl(toLabelText, compareRev.to, (hash) => {
         state.compareRevision[patchIdx] = { from: state.compareRevision[patchIdx].from, to: hash };
@@ -722,7 +730,7 @@ function renderCurrentPatch() {
         renderCurrentPatch();
         renderTabs();
       });
-      revBar.appendChild(compareBtn);
+      revBar._scroll.appendChild(compareBtn);
       container.appendChild(revBar);
     }
   }
