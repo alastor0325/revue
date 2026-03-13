@@ -140,6 +140,11 @@ describe('formatCombinedPrompt', () => {
     expect(out).toContain('## Instructions:');
   });
 
+  test('instructions include guidance to list disagreed feedback', () => {
+    const out = formatCombinedPrompt('bugABC', allPatches, makeFeedback());
+    expect(out).toContain('## Feedback I disagree with');
+  });
+
   test('renders commit message feedback as a dedicated section', () => {
     const commitComment = { file: '__commit__', line: 0, lineContent: 'bugABC - Part 1: Add WebIDL', text: 'Fix commit message format' };
     const feedback = makeFeedback([{ hash: 'aaa111', comments: [commitComment] }]);

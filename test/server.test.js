@@ -14,13 +14,15 @@ jest.mock('../src/git', () => ({
   getDiffPerCommit: jest.fn(),
   getDiffForCommit: jest.fn(),
   getDiffBetweenCommits: jest.fn(),
+  getFileLines: jest.fn(),
+  discoverWorktrees: jest.fn(),
 }));
 
 jest.mock('../src/claude', () => ({
   submitReview: jest.fn(),
 }));
 
-const { getHeadHash, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits } = require('../src/git');
+const { getHeadHash, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getFileLines, discoverWorktrees } = require('../src/git');
 const { submitReview }     = require('../src/claude');
 const { createApp, findAvailablePort } = require('../src/server');
 
@@ -448,5 +450,181 @@ describe('findAvailablePort', () => {
     } finally {
       await new Promise((resolve) => blocker.close(resolve));
     }
+  });
+});
+
+// ── GET /api/filecontext ───────────────────────────────────────────────────
+
+describe('GET /api/filecontext', () => {
+  const SAMPLE_RESULT = {
+    lines: [
+      { type: 'context', content: 'void Foo::Bar() {', newLineNum: 10, oldLineNum: 10 },
+      { type: 'context', content: '  return true;',    newLineNum: 11, oldLineNum: 11 },
+    ],
+    totalLines: 200,
+  };
+
+  beforeEach(() => {
+    getHeadHash.mockReturnValue('abc123');
+    getFileLines.mockReset();
+  });
+
+  test('returns 200 with lines and totalLines on valid request', async () => {
+    getFileLines.mockReturnValue(SAMPLE_RESULT);
+    const app = makeApp();
+    const res = await request(app).get('/api/filecontext?hash=abc1234&file=dom/media/Foo.cpp&start=10&end=11');
+    expect(res.status).toBe(200);
+    expect(res.body.lines).toHaveLength(2);
+    expect(res.body.totalLines).toBe(200);
+    expect(getFileLines).toHaveBeenCalledWith('/fake/worktree', 'abc1234', 'dom/media/Foo.cpp', 10, 11);
+  });
+
+  test('returns 400 when hash is missing', async () => {
+    const app = makeApp();
+    const res = await request(app).get('/api/filecontext?file=dom/media/Foo.cpp&start=1&end=5');
+    expect(res.status).toBe(400);
+  });
+
+  test('returns 400 when hash has invalid format', async () => {
+    const app = makeApp();
+    const res = await request(app).get('/api/filecontext?hash=not-valid!!&file=dom/media/Foo.cpp&start=1&end=5');
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBeTruthy();
+  });
+
+  test('returns 400 when file is missing', async () => {
+    const app = makeApp();
+    const res = await request(app).get('/api/filecontext?hash=abc1234&start=1&end=5');
+    expect(res.status).toBe(400);
+  });
+
+  test('returns 400 when start is 0 (not a valid line number)', async () => {
+    const app = makeApp();
+    const res = await request(app).get('/api/filecontext?hash=abc1234&file=dom/media/Foo.cpp&start=0&end=5');
+    expect(res.status).toBe(400);
+  });
+
+  test('returns 400 when end is less than start', async () => {
+    const app = makeApp();
+    const res = await request(app).get('/api/filecontext?hash=abc1234&file=dom/media/Foo.cpp&start=10&end=5');
+    expect(res.status).toBe(400);
+  });
+
+  test('returns 400 when start and end are non-numeric', async () => {
+    const app = makeApp();
+    const res = await request(app).get('/api/filecontext?hash=abc1234&file=dom/media/Foo.cpp&start=abc&end=def');
+    expect(res.status).toBe(400);
+  });
+
+  test('returns 404 when git throws', async () => {
+    getFileLines.mockImplementation(() => { throw new Error('path not found in tree'); });
+    const app = makeApp();
+    const res = await request(app).get('/api/filecontext?hash=abc1234&file=dom/media/Foo.cpp&start=1&end=5');
+    expect(res.status).toBe(404);
+    expect(res.body.error).toContain('path not found in tree');
+  });
+});
+
+// ── GET /api/worktrees ─────────────────────────────────────────────────────
+
+describe('GET /api/worktrees', () => {
+  const WORKTREES = [
+    { path: '/fake/firefox-bugABC', branch: 'bug-ABC', worktreeName: 'bugABC' },
+    { path: '/fake/firefox-bugXYZ', branch: 'bug-XYZ', worktreeName: 'bugXYZ' },
+  ];
+
+  beforeEach(() => {
+    getHeadHash.mockReturnValue('abc123');
+    discoverWorktrees.mockReset();
+  });
+
+  test('returns 200 with current worktree and full list including main repo', async () => {
+    discoverWorktrees.mockReturnValue(WORKTREES);
+    const app = makeApp();
+    const res = await request(app).get('/api/worktrees');
+    expect(res.status).toBe(200);
+    expect(res.body.current).toBe('bugABC');
+    // list includes main repo (path.basename('/fake/firefox') = 'firefox') + two worktrees
+    expect(res.body.worktrees).toHaveLength(3);
+    expect(res.body.worktrees[0].isMain).toBe(true);
+    expect(res.body.worktrees.map((w) => w.worktreeName)).toContain('bugABC');
+    expect(res.body.worktrees.map((w) => w.worktreeName)).toContain('bugXYZ');
+  });
+
+  test('returns current worktree name matching the one the app was started with', async () => {
+    discoverWorktrees.mockReturnValue([]);
+    const app = makeApp(); // started with worktreeName: 'bugABC'
+    const res = await request(app).get('/api/worktrees');
+    expect(res.body.current).toBe('bugABC');
+  });
+
+  test('returns 500 when discoverWorktrees throws', async () => {
+    discoverWorktrees.mockImplementation(() => { throw new Error('git error'); });
+    const app = makeApp();
+    const res = await request(app).get('/api/worktrees');
+    expect(res.status).toBe(500);
+    expect(res.body.error).toContain('git error');
+  });
+});
+
+// ── POST /api/switch ───────────────────────────────────────────────────────
+
+describe('POST /api/switch', () => {
+  const WORKTREES = [
+    { path: '/fake/firefox-bugABC', branch: 'bug-ABC', worktreeName: 'bugABC' },
+    { path: '/fake/firefox-bugXYZ', branch: 'bug-XYZ', worktreeName: 'bugXYZ' },
+  ];
+
+  beforeEach(() => {
+    getHeadHash.mockReturnValue('abc123');
+    getDiffPerCommit.mockReturnValue(PATCHES);
+    discoverWorktrees.mockReset();
+    discoverWorktrees.mockReturnValue(WORKTREES);
+  });
+
+  test('returns 200 with ok, new worktreeName, and worktreePath on valid switch', async () => {
+    const app = makeApp();
+    const res = await request(app).post('/api/switch').send({ worktreeName: 'bugXYZ' });
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.worktreeName).toBe('bugXYZ');
+    expect(res.body.worktreePath).toBe('/fake/firefox-bugXYZ');
+  });
+
+  test('can switch to the main repo entry', async () => {
+    const app = makeApp();
+    // path.basename('/fake/firefox') = 'firefox' — the main repo entry
+    const res = await request(app).post('/api/switch').send({ worktreeName: 'firefox' });
+    expect(res.status).toBe(200);
+    expect(res.body.worktreeName).toBe('firefox');
+  });
+
+  test('subsequent /api/diff uses the switched worktree', async () => {
+    const app = makeApp();
+    await request(app).post('/api/switch').send({ worktreeName: 'bugXYZ' });
+    await request(app).get('/api/diff');
+    // getDiffPerCommit should be called with the new worktreePath
+    expect(getDiffPerCommit).toHaveBeenCalledWith('/fake/firefox-bugXYZ', expect.any(String));
+  });
+
+  test('returns 404 when the requested worktree does not exist', async () => {
+    const app = makeApp();
+    const res = await request(app).post('/api/switch').send({ worktreeName: 'doesNotExist' });
+    expect(res.status).toBe(404);
+    expect(res.body.error).toContain('doesNotExist');
+  });
+
+  test('returns 400 when worktreeName is missing', async () => {
+    const app = makeApp();
+    const res = await request(app).post('/api/switch').send({});
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBeTruthy();
+  });
+
+  test('returns 500 when discoverWorktrees throws', async () => {
+    discoverWorktrees.mockImplementation(() => { throw new Error('git error'); });
+    const app = makeApp();
+    const res = await request(app).post('/api/switch').send({ worktreeName: 'bugXYZ' });
+    expect(res.status).toBe(500);
   });
 });

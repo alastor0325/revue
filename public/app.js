@@ -207,7 +207,11 @@ function updateSubmitButton() {
 // ── Inline comment form ────────────────────────────────────────────────────
 function removeExistingForm() {
   const existing = $('.comment-form-row');
-  if (existing) existing.remove();
+  if (existing) {
+    const ctx = existing._draftContext;
+    existing.remove();
+    if (ctx) renderDraftDisplay(ctx.tr, ctx.patchHash, ctx.filePath, ctx.line, ctx.key);
+  }
 }
 
 function showCommentForm(tr, patchHash, filePath, line, key) {
@@ -228,6 +232,7 @@ function showCommentForm(tr, patchHash, filePath, line, key) {
     </td>`;
 
   tr.after(formRow);
+  formRow._draftContext = { tr, patchHash, filePath, line, key };
 
   const textarea = formRow.querySelector('textarea');
   const dk = draftKey(patchHash, filePath, key);
@@ -237,7 +242,10 @@ function showCommentForm(tr, patchHash, filePath, line, key) {
 
   textarea.addEventListener('input', () => { drafts[dk] = textarea.value; });
 
-  formRow.querySelector('.btn-cancel').addEventListener('click', () => formRow.remove());
+  formRow.querySelector('.btn-cancel').addEventListener('click', () => {
+    formRow.remove();
+    renderDraftDisplay(tr, patchHash, filePath, line, key);
+  });
 
   formRow.querySelector('.btn-discard').addEventListener('click', () => {
     delete drafts[dk];
@@ -299,6 +307,40 @@ function renderCommentDisplay(trLine, patchHash, filePath, line, key) {
   });
 }
 
+function renderDraftDisplay(trLine, patchHash, filePath, line, key) {
+  // Remove any existing draft row for this line first
+  const next = trLine.nextElementSibling;
+  if (next && next.classList.contains('comment-draft-row') && next.dataset.lineKey === key) {
+    next.remove();
+  }
+
+  const dk = draftKey(patchHash, filePath, key);
+  const text = drafts[dk];
+  if (!text || !text.trim()) return;
+  if (getComment(patchHash, filePath, key)) return; // saved comment takes precedence
+
+  const lineNum = line.newLineNum != null ? line.newLineNum : line.oldLineNum;
+  const displayRow = document.createElement('tr');
+  displayRow.className = 'comment-draft-row';
+  displayRow.dataset.lineKey = key;
+  displayRow.innerHTML = `
+    <td colspan="3">
+      <div class="comment-draft-inner">
+        <div style="flex:1">
+          <div class="comment-meta"><span class="draft-badge">Draft</span> Line ${lineNum} · ${escapeHtml(filePath)}</div>
+          <div class="comment-body comment-draft-body">${escapeHtml(text)}</div>
+        </div>
+      </div>
+    </td>`;
+
+  trLine.after(displayRow);
+
+  displayRow.querySelector('.comment-draft-inner').addEventListener('click', () => {
+    displayRow.remove();
+    showCommentForm(trLine, patchHash, filePath, line, key);
+  });
+}
+
 // ── Commit message comment section ─────────────────────────────────────────
 const COMMIT_FILE = '__commit__';
 const COMMIT_KEY  = 'msg';
@@ -336,8 +378,23 @@ function renderCommitMessageSection(container, patchHash, commitMessage, disable
 
   function refreshComment() {
     commentEl.innerHTML = '';
+    commentEl.className = '';
     const c = getComment(patchHash, COMMIT_FILE, COMMIT_KEY);
-    if (!c) return;
+    if (!c) {
+      const draftText = drafts[draftKey(patchHash, COMMIT_FILE, COMMIT_KEY)];
+      if (draftText && draftText.trim()) {
+        commentEl.className = 'comment-draft-row';
+        commentEl.innerHTML = `
+          <div class="comment-draft-inner" style="cursor:pointer">
+            <div style="flex:1">
+              <div class="comment-meta"><span class="draft-badge">Draft</span> Commit message</div>
+              <div class="comment-body comment-draft-body">${escapeHtml(draftText)}</div>
+            </div>
+          </div>`;
+        commentEl.querySelector('.comment-draft-inner').addEventListener('click', showForm);
+      }
+      return;
+    }
     commentEl.className = 'comment-display-row';
     commentEl.innerHTML = `
       <div class="comment-display-inner">
@@ -373,7 +430,7 @@ function renderCommitMessageSection(container, patchHash, commitMessage, disable
     ta.value = existing ? existing.text : (drafts[dk] || '');
     ta.focus();
     ta.addEventListener('input', () => { drafts[dk] = ta.value; });
-    formEl.querySelector('.btn-cancel').addEventListener('click', () => { formEl.innerHTML = ''; });
+    formEl.querySelector('.btn-cancel').addEventListener('click', () => { formEl.innerHTML = ''; refreshComment(); });
     formEl.querySelector('.btn-discard').addEventListener('click', () => { delete drafts[dk]; formEl.innerHTML = ''; });
     formEl.querySelector('.btn-save').addEventListener('click', () => {
       const text = ta.value.trim();
@@ -416,6 +473,10 @@ function renderExpandRow(table, patchHash, filePath, hiddenStart, hiddenEnd, ins
   let curStart = hiddenStart;
   let curEnd   = hiddenEnd; // null = unknown (after last hunk)
 
+  // Whether this row sits before the first hunk or after the last hunk
+  const isFileTop    = hiddenStart === 1 && insertBeforeEl !== null;
+  const isFileBottom = insertBeforeEl === null;
+
   const tr = document.createElement('tr');
   tr.className = 'expand-context-row';
 
@@ -424,9 +485,16 @@ function renderExpandRow(table, patchHash, filePath, hiddenStart, hiddenEnd, ins
     const btn = e.target.closest('button[data-action]');
     if (!btn) return;
     const action = btn.dataset.action;
-    if (action === 'up')    load(curStart, Math.min(curStart + CHUNK - 1, curEnd ?? curStart + CHUNK - 1), true);
-    if (action === 'down')  load(Math.max(curEnd - CHUNK + 1, curStart), curEnd, false);
-    if (action === 'small') load(curStart, curEnd, true);
+    // 'up'   — load from top of hidden range, insert above bar
+    // 'down' — between hunks: load from bottom of range, insert below bar
+    //          after last hunk: load next batch from curStart, insert above bar
+    if (action === 'up' || (action === 'down' && isFileBottom)) {
+      load(curStart, Math.min(curStart + CHUNK - 1, curEnd ?? curStart + CHUNK - 1), true);
+    } else if (action === 'down') {
+      load(Math.max(curEnd - CHUNK + 1, curStart), curEnd, false);
+    } else if (action === 'small') {
+      load(curStart, curEnd, true);
+    }
   });
 
   function rebuild() {
@@ -434,12 +502,13 @@ function renderExpandRow(table, patchHash, filePath, hiddenStart, hiddenEnd, ins
     let btns = '';
     if (count !== null && count <= CHUNK) {
       btns = `<button class="btn-exp" data-action="small">↕ ${count} Line${count === 1 ? '' : 's'}</button>`;
+    } else if (isFileTop) {
+      btns = `<button class="btn-exp" data-action="up">↑ 20 Lines</button>`;
+    } else if (isFileBottom) {
+      btns = `<button class="btn-exp" data-action="down">↓ 20 Lines</button>`;
     } else {
-      const upLabel = curStart === 1 ? 'Show First 20 Lines' : '↑ 20 Lines';
-      btns = `<button class="btn-exp" data-action="up">${upLabel}</button>`;
-      if (curEnd !== null) {
-        btns += `<button class="btn-exp" data-action="down">↓ 20 Lines</button>`;
-      }
+      btns = `<button class="btn-exp" data-action="up">↑ 20 Lines</button>`;
+      btns += `<button class="btn-exp" data-action="down">↓ 20 Lines</button>`;
     }
     tr.innerHTML = `<td colspan="3"><div class="expand-context-btns">${btns}</div></td>`;
   }
@@ -581,7 +650,9 @@ function renderFile(fileData, patchHash) {
       tr.querySelector('.ln-content').addEventListener('click', () => {
         const next = tr.nextElementSibling;
         if (next && next.classList.contains('comment-form-row')) {
+          const ctx = next._draftContext;
           next.remove();
+          if (ctx) renderDraftDisplay(ctx.tr, ctx.patchHash, ctx.filePath, ctx.line, ctx.key);
           return;
         }
         removeExistingForm();
@@ -592,6 +663,8 @@ function renderFile(fileData, patchHash) {
 
       if (getComment(patchHash, filePath, key)) {
         renderCommentDisplay(tr, patchHash, filePath, line, key);
+      } else {
+        renderDraftDisplay(tr, patchHash, filePath, line, key);
       }
     }
 
@@ -1155,6 +1228,43 @@ function initTabsDragScroll() {
   if (bar) addDragScroll(bar);
 }
 
+// ── Worktree switcher ──────────────────────────────────────────────────────
+async function initWorktreeBar() {
+  try {
+    const res = await fetch('/api/worktrees');
+    if (!res.ok) return;
+    const { current, worktrees } = await res.json();
+    if (worktrees.length <= 1) return; // nothing to switch to
+
+    const bar = $('#worktree-bar');
+    bar.innerHTML = worktrees.map((wt) =>
+      `<button class="worktree-pill${wt.worktreeName === current ? ' active' : ''}" data-name="${escapeHtml(wt.worktreeName)}">${escapeHtml(wt.worktreeName)}</button>`
+    ).join('');
+
+    bar.addEventListener('click', async (e) => {
+      const btn = e.target.closest('.worktree-pill');
+      if (!btn || btn.classList.contains('active')) return;
+      const name = btn.dataset.name;
+      btn.textContent = 'Switching…';
+      btn.disabled = true;
+      try {
+        const r = await fetch('/api/switch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ worktreeName: name }),
+        });
+        if (!r.ok) throw new Error('Switch failed');
+        location.reload();
+      } catch {
+        btn.textContent = name;
+        btn.disabled = false;
+      }
+    });
+
+    bar.style.display = '';
+  } catch { /* non-fatal */ }
+}
+
 // ── Boot ───────────────────────────────────────────────────────────────────
 async function init() {
   updateSubmitButton();
@@ -1189,6 +1299,8 @@ async function init() {
       $('#result-overlay').classList.remove('visible');
     }
   });
+
+  initWorktreeBar(); // fire-and-forget — bar loads independently
 
   const loading = $('#loading');
   const errorMsg = $('#error-msg');
@@ -1264,6 +1376,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Allow unit tests to import pure helpers without loading the full browser app.
 if (typeof module !== 'undefined') {
-  module.exports = { migrateApprovals };
+  module.exports = { migrateApprovals, renderDraftDisplay, removeExistingForm, showCommentForm, draftKey, drafts, state };
 }
 

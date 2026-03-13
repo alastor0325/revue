@@ -5,7 +5,7 @@ jest.mock('child_process', () => ({
 }));
 
 const { execSync } = require('child_process');
-const { getHeadHash, parseDiff, parseWorktreeList, getDiffForCommit, parseCommitBody } = require('../src/git');
+const { getHeadHash, parseDiff, parseWorktreeList, getDiffForCommit, parseCommitBody, getMergeBase } = require('../src/git');
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -267,6 +267,76 @@ describe('parseWorktreeList', () => {
   test('returns empty array for empty output', () => {
     expect(parseWorktreeList('', MAIN)).toEqual([]);
   });
+
+  test('filters main repo when git outputs forward slashes but mainRepoPath uses backslashes (Windows)', () => {
+    // Simulate Windows: git outputs C:/Users/user/firefox but mainRepoPath uses backslashes
+    const windowsMain = 'C:\\Users\\user\\firefox';
+    const output = [
+      'worktree C:/Users/user/firefox\nHEAD abc123\nbranch refs/heads/main',
+      'worktree C:/Users/user/firefox-bugABC\nHEAD def456\nbranch refs/heads/bug-ABC',
+    ].join('\n\n');
+    const result = parseWorktreeList(output, windowsMain);
+    expect(result).toHaveLength(1);
+    expect(result[0].worktreeName).toBe('bugABC');
+  });
+});
+
+// ── getMergeBase ───────────────────────────────────────────────────────────
+
+describe('getMergeBase', () => {
+  const WORKTREE  = '/fake/worktree';
+  const MAIN_REPO = '/fake/firefox';
+
+  beforeEach(() => execSync.mockReset());
+
+  test('uses origin/main when available', () => {
+    execSync
+      .mockReturnValueOnce('origin-main-hash\n') // rev-parse origin/main
+      .mockReturnValueOnce('merge-base-hash\n');  // merge-base HEAD origin/main
+    const result = getMergeBase(WORKTREE, MAIN_REPO);
+    expect(result).toBe('merge-base-hash');
+    expect(execSync).toHaveBeenNthCalledWith(
+      1,
+      `git -C "${WORKTREE}" rev-parse origin/main`,
+      { encoding: 'utf8' }
+    );
+    expect(execSync).toHaveBeenNthCalledWith(
+      2,
+      `git -C "${WORKTREE}" merge-base HEAD origin-main-hash`,
+      { encoding: 'utf8' }
+    );
+  });
+
+  test('falls back to main repo HEAD when origin/main is not available', () => {
+    execSync
+      .mockImplementationOnce(() => { throw new Error('unknown revision'); }) // rev-parse origin/main fails
+      .mockReturnValueOnce('main-repo-head\n') // rev-parse HEAD on main repo
+      .mockReturnValueOnce('merge-base-hash\n');  // merge-base HEAD main-repo-head
+    const result = getMergeBase(WORKTREE, MAIN_REPO);
+    expect(result).toBe('merge-base-hash');
+    expect(execSync).toHaveBeenNthCalledWith(
+      2,
+      `git -C "${MAIN_REPO}" rev-parse HEAD`,
+      { encoding: 'utf8' }
+    );
+  });
+
+  test('finds patches when main repo HEAD equals worktree HEAD (jj detached scenario)', () => {
+    // Simulate the jj scenario: main repo detached at same commit as worktree,
+    // but origin/main correctly points to the integration branch.
+    const ORIGIN_MAIN = 'f7ae6e84aaa3';
+    const WORKTREE_HEAD = 'eef8f9698f21';
+    const MERGE_BASE = ORIGIN_MAIN; // worktree diverged from origin/main
+
+    execSync
+      .mockReturnValueOnce(`${ORIGIN_MAIN}\n`)   // rev-parse origin/main
+      .mockReturnValueOnce(`${MERGE_BASE}\n`);    // merge-base HEAD origin/main
+
+    const result = getMergeBase(WORKTREE, MAIN_REPO);
+    expect(result).toBe(MERGE_BASE);
+    // merge-base !== worktree HEAD, so getCommits would find commits — no empty patch list
+    expect(result).not.toBe(WORKTREE_HEAD);
+  });
 });
 
 // ── getDiffForCommit ───────────────────────────────────────────────────────
@@ -375,6 +445,61 @@ describe('getHeadHash', () => {
       'git -C "/path/to/repo" rev-parse HEAD',
       { encoding: 'utf8' }
     );
+  });
+});
+
+// ── getFileLines ───────────────────────────────────────────────────────────
+
+describe('getFileLines', () => {
+  const { getFileLines } = require('../src/git');
+  const WORKTREE = '/fake/worktree';
+  const HASH = 'abc1234';
+  const FILE = 'dom/media/Foo.cpp';
+
+  beforeEach(() => execSync.mockReset());
+
+  test('calls git show with the correct hash:file syntax', () => {
+    execSync.mockReturnValue('content\n');
+    getFileLines(WORKTREE, HASH, FILE, 1, 1);
+    expect(execSync).toHaveBeenCalledWith(
+      `git -C "${WORKTREE}" show "${HASH}:${FILE}"`,
+      { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 }
+    );
+  });
+
+  test('returns correct lines for the requested range', () => {
+    execSync.mockReturnValue('line1\nline2\nline3\nline4\nline5\n');
+    const result = getFileLines(WORKTREE, HASH, FILE, 2, 4);
+    expect(result.lines).toHaveLength(3);
+    expect(result.lines[0]).toMatchObject({ type: 'context', content: 'line2', newLineNum: 2, oldLineNum: 2 });
+    expect(result.lines[1]).toMatchObject({ type: 'context', content: 'line3', newLineNum: 3, oldLineNum: 3 });
+    expect(result.lines[2]).toMatchObject({ type: 'context', content: 'line4', newLineNum: 4, oldLineNum: 4 });
+  });
+
+  test('returns totalLines count', () => {
+    execSync.mockReturnValue('a\nb\nc\n');
+    const result = getFileLines(WORKTREE, HASH, FILE, 1, 2);
+    expect(result.totalLines).toBe(3);
+  });
+
+  test('clamps end to totalLines when end exceeds file length', () => {
+    execSync.mockReturnValue('a\nb\nc\n');
+    const result = getFileLines(WORKTREE, HASH, FILE, 2, 100);
+    expect(result.lines).toHaveLength(2);
+    expect(result.lines[0].content).toBe('b');
+    expect(result.lines[1].content).toBe('c');
+  });
+
+  test('returns lines from the start of file when start is 1', () => {
+    execSync.mockReturnValue('first\nsecond\nthird\n');
+    const result = getFileLines(WORKTREE, HASH, FILE, 1, 2);
+    expect(result.lines[0]).toMatchObject({ content: 'first', newLineNum: 1 });
+    expect(result.lines[1]).toMatchObject({ content: 'second', newLineNum: 2 });
+  });
+
+  test('throws when git throws', () => {
+    execSync.mockImplementation(() => { throw new Error('not found'); });
+    expect(() => getFileLines(WORKTREE, HASH, FILE, 1, 5)).toThrow('not found');
   });
 });
 

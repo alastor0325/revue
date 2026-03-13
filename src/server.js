@@ -8,7 +8,7 @@ const net = require('net');
 const os = require('os');
 const fs = require('fs');
 const { execSync } = require('child_process');
-const { getHeadHash, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getFileLines } = require('./git');
+const { getHeadHash, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getFileLines, discoverWorktrees } = require('./git');
 const { submitReview } = require('./claude');
 
 /**
@@ -46,10 +46,14 @@ function findAvailablePort(preferred) {
  * Create and return the Express app without starting the server.
  * Exported separately so tests can import it without side effects.
  */
-function createApp({ worktreeName, worktreePath, mainRepoPath }) {
+function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWorktreePath, mainRepoPath }) {
   const app = express();
   app.use(express.json());
   app.use(express.static(path.join(__dirname, '..', 'public')));
+
+  // Active worktree — mutable so /api/switch can change them at runtime
+  let worktreeName = initialWorktreeName;
+  let worktreePath = initialWorktreePath;
 
   // Cache patches, invalidated automatically when the worktree HEAD changes
   let patchesCache = null;
@@ -198,6 +202,46 @@ function createApp({ worktreeName, worktreePath, mainRepoPath }) {
       res.json({ hash, files });
     } catch (err) {
       res.status(404).json({ error: `Commit ${hash} not found: ${err.message}` });
+    }
+  });
+
+  // GET /api/worktrees — list all discoverable worktrees and which one is active
+  app.get('/api/worktrees', (req, res) => {
+    try {
+      const others = discoverWorktrees(mainRepoPath);
+      const all = [
+        { worktreeName: path.basename(mainRepoPath), path: mainRepoPath, isMain: true },
+        ...others,
+      ];
+      res.json({ current: worktreeName, worktrees: all });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/switch — switch the active worktree; clears the patch cache
+  app.post('/api/switch', (req, res) => {
+    const { worktreeName: newName } = req.body;
+    if (!newName || typeof newName !== 'string') {
+      return res.status(400).json({ error: 'worktreeName is required.' });
+    }
+    try {
+      const others = discoverWorktrees(mainRepoPath);
+      const all = [
+        { worktreeName: path.basename(mainRepoPath), path: mainRepoPath },
+        ...others,
+      ];
+      const found = all.find((w) => w.worktreeName === newName);
+      if (!found) {
+        return res.status(404).json({ error: `Worktree '${newName}' not found.` });
+      }
+      worktreeName = found.worktreeName;
+      worktreePath = found.path;
+      patchesCache = null;
+      cachedHeadHash = null;
+      res.json({ ok: true, worktreeName, worktreePath });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
     }
   });
 
