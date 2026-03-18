@@ -11,7 +11,7 @@ jest.mock('../src/server', () => ({ startServer: jest.fn() }));
 jest.mock('../src/git', () => ({ discoverWorktrees: jest.fn() }));
 
 const { discoverWorktrees } = require('../src/git');
-const { readPid, isRunning, stopDaemon, waitForPort, buildEntries } = require('../bin/firefox-review');
+const { readPid, isRunning, stopDaemon, waitForPort, buildEntries, pickDefaultEntry } = require('../bin/firefox-review');
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -33,6 +33,37 @@ afterEach(() => {
 // needed; for stopDaemon we write directly to the module's PID_FILE path by
 // temporarily swapping it — instead, we test stopDaemon's logic via the
 // exported helpers in isolation.
+
+// ── pickDefaultEntry ───────────────────────────────────────────────────────
+
+describe('pickDefaultEntry', () => {
+  const main    = { path: '/home/user/firefox',        worktreeName: 'firefox', isMain: true  };
+  const wt1     = { path: '/home/user/firefox-bugABC', worktreeName: 'bugABC',  isMain: false };
+  const wt2     = { path: '/home/user/firefox-bugXYZ', worktreeName: 'bugXYZ',  isMain: false };
+
+  test('prefers first non-main worktree when main repo is first in list', () => {
+    // This is the bug case: entries[0] is the main repo (no patches),
+    // but we should start on bugABC so the user sees actual file changes.
+    const result = pickDefaultEntry([main, wt1, wt2]);
+    expect(result.worktreeName).toBe('bugABC');
+  });
+
+  test('falls back to main repo when no registered worktrees exist', () => {
+    const result = pickDefaultEntry([main]);
+    expect(result.worktreeName).toBe('firefox');
+    expect(result.isMain).toBe(true);
+  });
+
+  test('works when main repo is not in the list', () => {
+    const result = pickDefaultEntry([wt1, wt2]);
+    expect(result.worktreeName).toBe('bugABC');
+  });
+
+  test('returns the only entry when only one exists', () => {
+    const result = pickDefaultEntry([wt1]);
+    expect(result.worktreeName).toBe('bugABC');
+  });
+});
 
 // ── readPid ────────────────────────────────────────────────────────────────
 

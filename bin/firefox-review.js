@@ -28,6 +28,15 @@ function buildEntries() {
   return entries;
 }
 
+/**
+ * Pick the default entry to open when no worktree arg is given.
+ * Prefers the first registered worktree over the main repo so the user
+ * sees actual patches instead of an empty "No patches found" state.
+ */
+function pickDefaultEntry(entries) {
+  return entries.find((e) => !e.isMain) || entries[0];
+}
+
 function isRunning(pid) {
   try {
     process.kill(pid, 0);
@@ -143,7 +152,7 @@ async function main() {
       console.error('No Firefox repos or worktrees found under ~/firefox.');
       process.exit(1);
     }
-    const first = entries[0];
+    const first = pickDefaultEntry(entries);
     worktreeName = first.worktreeName;
     worktreePath = first.path;
   }
@@ -160,4 +169,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { readPid, isRunning, stopDaemon, waitForPort, buildEntries };
+module.exports = { readPid, isRunning, stopDaemon, waitForPort, buildEntries, pickDefaultEntry };
