@@ -816,6 +816,7 @@ function switchPatch(idx) {
 
 // ── File navigation sidebar ─────────────────────────────────────────────────
 let fileNavScrollHandler = null;
+let fileNavCollapsed = false;
 
 function renderFileNav(files, diffWrap) {
   const nav = $('#file-nav');
@@ -829,10 +830,38 @@ function renderFileNav(files, diffWrap) {
   }
 
   nav.innerHTML = '';
-  nav.style.display = 'block';
+  nav.style.display = '';
+  nav.classList.toggle('collapsed', fileNavCollapsed);
+
   const topBarH = ($('#top-bar') || {}).offsetHeight || 0;
   nav.style.top = topBarH + 'px';
   nav.style.maxHeight = `calc(100vh - ${topBarH}px)`;
+
+  // ── Header: label + collapse toggle ──
+  const header = document.createElement('div');
+  header.className = 'file-nav-header';
+
+  const label = document.createElement('span');
+  label.className = 'file-nav-label';
+  label.textContent = 'Files changed';
+  header.appendChild(label);
+
+  const toggleBtn = document.createElement('button');
+  toggleBtn.className = 'file-nav-toggle';
+  toggleBtn.textContent = fileNavCollapsed ? '▶' : '◀';
+  toggleBtn.title = fileNavCollapsed ? 'Expand sidebar' : 'Collapse sidebar';
+  toggleBtn.addEventListener('click', () => {
+    fileNavCollapsed = !fileNavCollapsed;
+    nav.classList.toggle('collapsed', fileNavCollapsed);
+    toggleBtn.textContent = fileNavCollapsed ? '▶' : '◀';
+    toggleBtn.title = fileNavCollapsed ? 'Expand sidebar' : 'Collapse sidebar';
+  });
+  header.appendChild(toggleBtn);
+  nav.appendChild(header);
+
+  // ── Items list ──
+  const itemsEl = document.createElement('div');
+  itemsEl.className = 'file-nav-items';
 
   const blocks = Array.from(diffWrap.querySelectorAll('.file-block'));
   const navItems = [];
@@ -841,64 +870,50 @@ function renderFileNav(files, diffWrap) {
     const filePath = fileData.newPath || fileData.oldPath || '(unknown)';
     const { added, removed } = countStats(fileData.hunks);
 
-    const block    = blocks[idx] || null;
-    const diffBody = block ? block.querySelector('.diff-body') : null;
-    const fileTgl  = block ? block.querySelector('.file-toggle') : null;
+    const lastSlash = filePath.lastIndexOf('/');
+    const filename = lastSlash >= 0 ? filePath.slice(lastSlash + 1) : filePath;
+    const dirPath  = lastSlash >= 0 ? filePath.slice(0, lastSlash + 1) : '';
+
+    const block = blocks[idx] || null;
 
     const item = document.createElement('div');
     item.className = 'file-nav-item';
+    item.title = filePath;
 
-    // Fold toggle — collapses/expands the file block without scrolling
-    const foldBtn = document.createElement('span');
-    foldBtn.className = 'nav-fold-btn';
-    foldBtn.textContent = '▼';
-    foldBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (!diffBody) return;
-      const nowCollapsed = diffBody.style.display !== 'none';
-      diffBody.style.display = nowCollapsed ? 'none' : '';
-      if (fileTgl) fileTgl.classList.toggle('collapsed', nowCollapsed);
-      foldBtn.textContent = nowCollapsed ? '▶' : '▼';
-    });
-    item.appendChild(foldBtn);
+    // Row 1: filename + +/- stats
+    const filenameRow = document.createElement('div');
+    filenameRow.className = 'file-nav-filename-row';
 
-    // Full file path (overflows with ellipsis from the left so filename stays visible)
-    const pathSpan = document.createElement('span');
-    pathSpan.className = 'file-nav-name';
-    pathSpan.textContent = filePath;
-    pathSpan.title = filePath;
-    item.appendChild(pathSpan);
+    const filenameSpan = document.createElement('span');
+    filenameSpan.className = 'file-nav-filename';
+    filenameSpan.textContent = filename;
+    filenameRow.appendChild(filenameSpan);
 
     const statsSpan = document.createElement('span');
     statsSpan.className = 'file-nav-stats';
     statsSpan.innerHTML = `<span class="stat-add">+${added}</span>&nbsp;<span class="stat-del">-${removed}</span>`;
-    item.appendChild(statsSpan);
+    filenameRow.appendChild(statsSpan);
+    item.appendChild(filenameRow);
 
-    // Keep fold icon in sync when the file header itself is clicked
-    if (block) {
-      block.querySelector('.file-header').addEventListener('click', () => {
-        requestAnimationFrame(() => {
-          const isCollapsed = diffBody && diffBody.style.display === 'none';
-          foldBtn.textContent = isCollapsed ? '▶' : '▼';
-        });
-      });
+    // Row 2: directory path (omitted for root-level files)
+    if (dirPath) {
+      const dirSpan = document.createElement('div');
+      dirSpan.className = 'file-nav-dir';
+      dirSpan.textContent = dirPath;
+      item.appendChild(dirSpan);
     }
 
-    // Clicking the nav item scrolls to the file block (expanding it first if collapsed)
     item.addEventListener('click', () => {
       if (!block) return;
-      if (diffBody && diffBody.style.display === 'none') {
-        diffBody.style.display = '';
-        if (fileTgl) fileTgl.classList.remove('collapsed');
-        foldBtn.textContent = '▼';
-      }
       const y = block.getBoundingClientRect().top + window.scrollY - topBarH - 8;
       window.scrollTo({ top: y, behavior: 'smooth' });
     });
 
-    nav.appendChild(item);
+    itemsEl.appendChild(item);
     navItems.push(item);
   });
+
+  nav.appendChild(itemsEl);
 
   function updateActive() {
     let activeIdx = 0;
@@ -1489,6 +1504,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Allow unit tests to import pure helpers without loading the full browser app.
 if (typeof module !== 'undefined') {
-  module.exports = { migrateApprovals, renderDraftDisplay, removeExistingForm, showCommentForm, draftKey, drafts, state, renderFileNav, renderFile };
+  module.exports = {
+    migrateApprovals, renderDraftDisplay, removeExistingForm, showCommentForm,
+    draftKey, drafts, state, renderFileNav, renderFile,
+    getFileNavCollapsed: () => fileNavCollapsed,
+    setFileNavCollapsed: (v) => { fileNavCollapsed = v; },
+  };
 }
 

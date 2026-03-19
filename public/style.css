@@ -256,64 +256,106 @@ body {
   overflow-y: auto;
   border-right: 1px solid #30363d;
   background: #0d1117;
-  padding: 8px 0;
   scrollbar-width: thin;
   scrollbar-color: #30363d #0d1117;
+  transition: width 0.15s ease;
 }
+
+#file-nav.collapsed {
+  width: 24px;
+  overflow: hidden;
+}
+
+/* Header row: "Files changed" label + collapse toggle */
+.file-nav-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 6px 6px 12px;
+  border-bottom: 1px solid #30363d;
+  position: sticky;
+  top: 0;
+  background: #0d1117;
+  z-index: 1;
+}
+
+.file-nav-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #6e7681;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+#file-nav.collapsed .file-nav-label,
+#file-nav.collapsed .file-nav-items { display: none; }
+
+.file-nav-toggle {
+  background: transparent;
+  border: none;
+  color: #6e7681;
+  cursor: pointer;
+  font-size: 10px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.file-nav-toggle:hover { color: #c9d1d9; background: #21262d; }
+
+/* Nav items list */
+.file-nav-items { padding: 4px 0; }
 
 .file-nav-item {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
-  padding: 4px 10px 4px 12px;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 10px 5px 12px;
   cursor: pointer;
-  font-size: 12px;
-  color: #8b949e;
-  overflow: hidden;
   border-left: 2px solid transparent;
 }
 
-.file-nav-item:hover {
-  background: #161b22;
-  color: #c9d1d9;
-}
+.file-nav-item:hover { background: #161b22; }
 
 .file-nav-item.active {
   border-left-color: #f78166;
-  color: #e6edf3;
   background: #161b22;
 }
 
-.nav-fold-btn {
-  flex-shrink: 0;
-  color: #6e7681;
-  font-size: 10px;
-  width: 14px;
-  text-align: center;
-  cursor: pointer;
-  border-radius: 3px;
-  line-height: 1;
+/* First line: filename + stats */
+.file-nav-filename-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
 }
 
-.nav-fold-btn:hover { color: #c9d1d9; background: #21262d; }
-
-.file-nav-name {
+.file-nav-filename {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-  flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-size: 12px;
+  color: #e6edf3;
   white-space: nowrap;
+  flex: 1 1 auto;
   min-width: 0;
-  /* overflow from the left so the filename at the end of the path stays visible */
-  direction: rtl;
-  text-align: left;
-  unicode-bidi: plaintext;
 }
 
 .file-nav-stats {
   font-size: 11px;
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+/* Second line: directory path — truncated from the left so the deepest dir is visible */
+.file-nav-dir {
+  font-size: 11px;
+  color: #6e7681;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+  unicode-bidi: plaintext;
 }
 
 /* ── Files changed section ── */
