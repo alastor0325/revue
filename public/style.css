@@ -284,6 +284,19 @@ body {
   background: #161b22;
 }
 
+.nav-fold-btn {
+  flex-shrink: 0;
+  color: #6e7681;
+  font-size: 10px;
+  width: 14px;
+  text-align: center;
+  cursor: pointer;
+  border-radius: 3px;
+  line-height: 1;
+}
+
+.nav-fold-btn:hover { color: #c9d1d9; background: #21262d; }
+
 .file-nav-name {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   flex: 1 1 auto;
@@ -291,6 +304,10 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  /* overflow from the left so the filename at the end of the path stays visible */
+  direction: rtl;
+  text-align: left;
+  unicode-bidi: plaintext;
 }
 
 .file-nav-stats {

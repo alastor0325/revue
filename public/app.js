@@ -840,19 +840,62 @@ function renderFileNav(files, diffWrap) {
   files.forEach((fileData, idx) => {
     const filePath = fileData.newPath || fileData.oldPath || '(unknown)';
     const { added, removed } = countStats(fileData.hunks);
-    const name = filePath.split('/').pop();
+
+    const block    = blocks[idx] || null;
+    const diffBody = block ? block.querySelector('.diff-body') : null;
+    const fileTgl  = block ? block.querySelector('.file-toggle') : null;
 
     const item = document.createElement('div');
     item.className = 'file-nav-item';
-    item.title = filePath;
-    item.innerHTML = `<span class="file-nav-name">${escapeHtml(name)}</span><span class="file-nav-stats"><span class="stat-add">+${added}</span>&nbsp;<span class="stat-del">-${removed}</span></span>`;
-    item.addEventListener('click', () => {
-      const block = blocks[idx];
-      if (block) {
-        const y = block.getBoundingClientRect().top + window.scrollY - topBarH - 8;
-        window.scrollTo({ top: y, behavior: 'smooth' });
-      }
+
+    // Fold toggle — collapses/expands the file block without scrolling
+    const foldBtn = document.createElement('span');
+    foldBtn.className = 'nav-fold-btn';
+    foldBtn.textContent = '▼';
+    foldBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!diffBody) return;
+      const nowCollapsed = diffBody.style.display !== 'none';
+      diffBody.style.display = nowCollapsed ? 'none' : '';
+      if (fileTgl) fileTgl.classList.toggle('collapsed', nowCollapsed);
+      foldBtn.textContent = nowCollapsed ? '▶' : '▼';
     });
+    item.appendChild(foldBtn);
+
+    // Full file path (overflows with ellipsis from the left so filename stays visible)
+    const pathSpan = document.createElement('span');
+    pathSpan.className = 'file-nav-name';
+    pathSpan.textContent = filePath;
+    pathSpan.title = filePath;
+    item.appendChild(pathSpan);
+
+    const statsSpan = document.createElement('span');
+    statsSpan.className = 'file-nav-stats';
+    statsSpan.innerHTML = `<span class="stat-add">+${added}</span>&nbsp;<span class="stat-del">-${removed}</span>`;
+    item.appendChild(statsSpan);
+
+    // Keep fold icon in sync when the file header itself is clicked
+    if (block) {
+      block.querySelector('.file-header').addEventListener('click', () => {
+        requestAnimationFrame(() => {
+          const isCollapsed = diffBody && diffBody.style.display === 'none';
+          foldBtn.textContent = isCollapsed ? '▶' : '▼';
+        });
+      });
+    }
+
+    // Clicking the nav item scrolls to the file block (expanding it first if collapsed)
+    item.addEventListener('click', () => {
+      if (!block) return;
+      if (diffBody && diffBody.style.display === 'none') {
+        diffBody.style.display = '';
+        if (fileTgl) fileTgl.classList.remove('collapsed');
+        foldBtn.textContent = '▼';
+      }
+      const y = block.getBoundingClientRect().top + window.scrollY - topBarH - 8;
+      window.scrollTo({ top: y, behavior: 'smooth' });
+    });
+
     nav.appendChild(item);
     navItems.push(item);
   });
@@ -1446,6 +1489,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Allow unit tests to import pure helpers without loading the full browser app.
 if (typeof module !== 'undefined') {
-  module.exports = { migrateApprovals, renderDraftDisplay, removeExistingForm, showCommentForm, draftKey, drafts, state };
+  module.exports = { migrateApprovals, renderDraftDisplay, removeExistingForm, showCommentForm, draftKey, drafts, state, renderFileNav, renderFile };
 }
 
