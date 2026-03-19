@@ -88,8 +88,20 @@ function isRunning(pid) {
  * Stop all running instances. Returns true if at least one was stopped.
  */
 function stopDaemon() {
-  // Migrate legacy single PID file on first use.
+  let stoppedAny = false;
+
+  // Handle legacy single-instance PID file — kill the process it tracks.
   if (fs.existsSync(LEGACY_PID_FILE)) {
+    try {
+      const content = fs.readFileSync(LEGACY_PID_FILE, 'utf8').trim();
+      const pid = parseInt(content.split(':')[0], 10);
+      if (!isNaN(pid) && isRunning(pid)) {
+        process.kill(pid, 'SIGTERM');
+        const port = content.split(':')[1];
+        console.log(`Stopped firefox-review (PID ${pid}${port ? `, port ${port}` : ''}).`);
+        stoppedAny = true;
+      }
+    } catch {}
     try { fs.unlinkSync(LEGACY_PID_FILE); } catch {}
   }
 
@@ -101,16 +113,17 @@ function stopDaemon() {
     try { fs.unlinkSync(inst.filePath); } catch {}
   }
 
-  if (running.length === 0) {
-    console.log('No running firefox-review instance found.');
-    return false;
-  }
-
   for (const inst of running) {
     process.kill(inst.pid, 'SIGTERM');
     try { fs.unlinkSync(inst.filePath); } catch {}
     const portStr = inst.port ? `, port ${inst.port}` : '';
     console.log(`Stopped firefox-review (PID ${inst.pid}${portStr}).`);
+    stoppedAny = true;
+  }
+
+  if (!stoppedAny) {
+    console.log('No running firefox-review instance found.');
+    return false;
   }
   return true;
 }
@@ -231,4 +244,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { readPid, readAllInstances, isRunning, stopDaemon, waitForPort, buildEntries, pickDefaultEntry, parseArgs, pidFilePath, ensurePidsDir };
+module.exports = { readPid, readAllInstances, isRunning, stopDaemon, waitForPort, buildEntries, pickDefaultEntry, parseArgs, pidFilePath, ensurePidsDir, LEGACY_PID_FILE };

@@ -14,7 +14,7 @@ const { discoverWorktrees } = require('../src/git');
 const {
   readPid, readAllInstances, isRunning, stopDaemon,
   waitForPort, buildEntries, pickDefaultEntry, parseArgs,
-  pidFilePath, ensurePidsDir,
+  pidFilePath, ensurePidsDir, LEGACY_PID_FILE,
 } = require('../bin/firefox-review');
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -194,9 +194,48 @@ describe('isRunning', () => {
 
 describe('stopDaemon', () => {
   test('returns false and prints message when no instances are running', () => {
-    // Ensure no pid files exist for fake PIDs
     const result = stopDaemon();
     expect(result === false || result === true).toBe(true); // does not throw
+  });
+
+  test('kills process tracked in legacy PID file and removes the file', () => {
+    const killSpy = jest.spyOn(process, 'kill').mockImplementation(() => {});
+    fs.writeFileSync(LEGACY_PID_FILE, `${process.pid}:7777`, 'utf8');
+    try {
+      const result = stopDaemon();
+      expect(result).toBe(true);
+      expect(killSpy).toHaveBeenCalledWith(process.pid, 'SIGTERM');
+      expect(fs.existsSync(LEGACY_PID_FILE)).toBe(false);
+    } finally {
+      killSpy.mockRestore();
+      try { fs.unlinkSync(LEGACY_PID_FILE); } catch {}
+    }
+  });
+
+  test('removes stale legacy PID file without killing anything when process is not running', () => {
+    fs.writeFileSync(LEGACY_PID_FILE, '2147483647:7777', 'utf8');
+    try {
+      stopDaemon(); // should not throw
+      expect(fs.existsSync(LEGACY_PID_FILE)).toBe(false);
+    } finally {
+      try { fs.unlinkSync(LEGACY_PID_FILE); } catch {}
+    }
+  });
+
+  test('stops both a legacy instance and a new-style instance in one call', () => {
+    const killSpy = jest.spyOn(process, 'kill').mockImplementation(() => {});
+    fs.writeFileSync(LEGACY_PID_FILE, `${process.pid}:7777`, 'utf8');
+    writePidEntry(process.pid, 7778); // new-style entry (same pid, different port for test)
+    try {
+      const result = stopDaemon();
+      expect(result).toBe(true);
+      expect(killSpy).toHaveBeenCalledWith(process.pid, 'SIGTERM');
+      expect(fs.existsSync(LEGACY_PID_FILE)).toBe(false);
+    } finally {
+      killSpy.mockRestore();
+      try { fs.unlinkSync(LEGACY_PID_FILE); } catch {}
+      removePidEntry(process.pid);
+    }
   });
 
   test('cleans up stale pid file for a non-running PID', () => {
