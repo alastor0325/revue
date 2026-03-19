@@ -472,6 +472,21 @@ describe('startServer pidFile', () => {
     });
     await new Promise((resolve) => server.close(resolve));
   });
+
+  test('binds to the specified port when --port is given', async () => {
+    const desiredPort = await findAvailablePort(19900);
+    const server = await startServer({
+      worktreeName: 'bugABC',
+      worktreePath: tmpDir,
+      mainRepoPath: '/fake/firefox',
+      port: desiredPort,
+    });
+    try {
+      expect(server.address().port).toBe(desiredPort);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
 });
 
 // ── findAvailablePort ──────────────────────────────────────────────────────

@@ -34,9 +34,11 @@ npm link          # makes `firefox-review` available globally
 `firefox-review` always runs as a background daemon — it starts the server, opens your browser, and returns control to the terminal immediately. Use the worktree switcher in the UI to change worktrees at any time.
 
 ```bash
-firefox-review               # start (opens browser, returns terminal)
-firefox-review --stop        # stop the running instance
-firefox-review --restart     # restart (picks up server code changes)
+firefox-review                        # start (opens browser, returns terminal)
+firefox-review --stop                 # stop the running instance
+firefox-review --restart              # restart (picks up server code changes)
+firefox-review --port 8080            # use a specific port instead of 7777
+firefox-review my-feature --port 8080 # worktree + custom port
 ```
 
 To start reviewing a specific worktree directly:
@@ -46,6 +48,8 @@ firefox-review my-feature    # opens ~/firefox-my-feature
 ```
 
 `<worktree-name>` is the suffix of the directory: `~/firefox-<worktree-name>`. If omitted, the server starts on the first registered worktree. Switch anytime using the worktree tabs at the top of the page.
+
+The server defaults to port `7777` and increments automatically if that port is busy. Use `--port` to pin a specific port.
 
 The browser opens at `http://localhost:7777` automatically (increments if the port is busy).
 

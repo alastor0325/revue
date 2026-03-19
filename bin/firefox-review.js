@@ -110,9 +110,27 @@ function waitForPort(timeoutMs) {
   });
 }
 
+/**
+ * Parse CLI args, extracting --port and the optional worktree name.
+ * Returns { worktreeArg, port, rest } where rest is the remaining args
+ * with --port and its value removed (for forwarding to the daemon).
+ */
+function parseArgs(args) {
+  let port = null;
+  const rest = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--port' && i + 1 < args.length) {
+      port = parseInt(args[++i], 10);
+    } else {
+      rest.push(args[i]);
+    }
+  }
+  return { port, rest };
+}
+
 async function main() {
-  const args = process.argv.slice(2);
-  const flag = args[0];
+  const rawArgs = process.argv.slice(2);
+  const flag = rawArgs[0];
 
   if (flag === '--stop') {
     stopDaemon();
@@ -123,13 +141,13 @@ async function main() {
     stopDaemon();
     // Brief pause to let the port free up
     await new Promise((r) => setTimeout(r, 500));
-    daemonize(args.slice(1));
+    daemonize(rawArgs.slice(1)); // forward all args (including --port) to new daemon
     return;
   }
 
   // Not already running as daemon — fork into background
   if (!process.env.FIREFOX_REVIEW_DAEMON) {
-    daemonize(args);
+    daemonize(rawArgs);
     return;
   }
 
@@ -139,7 +157,8 @@ async function main() {
   process.on('exit', () => { try { fs.unlinkSync(PID_FILE); } catch {} });
   process.on('SIGTERM', () => process.exit(0));
 
-  const argName = args[0];
+  const { port, rest: positional } = parseArgs(rawArgs);
+  const argName = positional[0];
   let worktreeName;
   let worktreePath;
 
@@ -162,11 +181,11 @@ async function main() {
     process.exit(1);
   }
 
-  startServer({ worktreeName, worktreePath, mainRepoPath, pidFile: PID_FILE });
+  startServer({ worktreeName, worktreePath, mainRepoPath, pidFile: PID_FILE, ...(port && { port }) });
 }
 
 if (require.main === module) {
   main();
 }
 
-module.exports = { readPid, isRunning, stopDaemon, waitForPort, buildEntries, pickDefaultEntry };
+module.exports = { readPid, isRunning, stopDaemon, waitForPort, buildEntries, pickDefaultEntry, parseArgs };

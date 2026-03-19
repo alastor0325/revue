@@ -272,9 +272,9 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
 /**
  * Start the review web server.
  */
-async function startServer({ worktreeName, worktreePath, mainRepoPath, pidFile }) {
+async function startServer({ worktreeName, worktreePath, mainRepoPath, pidFile, port: preferredPort = 7777 }) {
   const app = createApp({ worktreeName, worktreePath, mainRepoPath });
-  const port = await findAvailablePort(7777);
+  const port = await findAvailablePort(preferredPort);
 
   return new Promise((resolve) => {
     const server = app.listen(port, '127.0.0.1', () => {

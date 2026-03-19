@@ -11,7 +11,7 @@ jest.mock('../src/server', () => ({ startServer: jest.fn() }));
 jest.mock('../src/git', () => ({ discoverWorktrees: jest.fn() }));
 
 const { discoverWorktrees } = require('../src/git');
-const { readPid, isRunning, stopDaemon, waitForPort, buildEntries, pickDefaultEntry } = require('../bin/firefox-review');
+const { readPid, isRunning, stopDaemon, waitForPort, buildEntries, pickDefaultEntry, parseArgs } = require('../bin/firefox-review');
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -33,6 +33,45 @@ afterEach(() => {
 // needed; for stopDaemon we write directly to the module's PID_FILE path by
 // temporarily swapping it — instead, we test stopDaemon's logic via the
 // exported helpers in isolation.
+
+// ── parseArgs ─────────────────────────────────────────────────────────────
+
+describe('parseArgs', () => {
+  test('returns null port and empty rest when no args', () => {
+    const { port, rest } = parseArgs([]);
+    expect(port).toBeNull();
+    expect(rest).toEqual([]);
+  });
+
+  test('parses --port value', () => {
+    const { port, rest } = parseArgs(['--port', '8080']);
+    expect(port).toBe(8080);
+    expect(rest).toEqual([]);
+  });
+
+  test('parses worktree name without --port', () => {
+    const { port, rest } = parseArgs(['my-feature']);
+    expect(port).toBeNull();
+    expect(rest).toEqual(['my-feature']);
+  });
+
+  test('parses --port alongside worktree name', () => {
+    const { port, rest } = parseArgs(['my-feature', '--port', '9000']);
+    expect(port).toBe(9000);
+    expect(rest).toEqual(['my-feature']);
+  });
+
+  test('parses --port before worktree name', () => {
+    const { port, rest } = parseArgs(['--port', '9000', 'my-feature']);
+    expect(port).toBe(9000);
+    expect(rest).toEqual(['my-feature']);
+  });
+
+  test('returns NaN port for non-numeric value', () => {
+    const { port } = parseArgs(['--port', 'abc']);
+    expect(isNaN(port)).toBe(true);
+  });
+});
 
 // ── pickDefaultEntry ───────────────────────────────────────────────────────
 
