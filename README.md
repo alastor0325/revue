@@ -2,7 +2,7 @@
 
 A local web UI for reviewing patches in git worktrees.
 
-**[→ Interactive demo](https://alastor0325.github.io/firefox-review/docs/)**
+**[→ Interactive demo](https://alastor0325.github.io/revue/docs/)**
 
 ## The problem
 
@@ -15,8 +15,8 @@ When you use Claude Code to implement changes, the patches land in a dedicated g
 **Prerequisites:** Node.js ≥ 18
 
 ```bash
-git clone https://github.com/alastor0325/firefox-review
-cd firefox-review
+git clone https://github.com/alastor0325/revue
+cd revue
 npm install
 npm link          # makes `revue` available globally
 ```
