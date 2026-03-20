@@ -38,7 +38,7 @@ function makeFeedback(overrides = []) {
 describe('formatCombinedPrompt', () => {
   test('includes worktree name', () => {
     const out = formatCombinedPrompt('bugABC', allPatches, makeFeedback());
-    expect(out).toContain('firefox-bugABC');
+    expect(out).toContain('bugABC');
   });
 
   test('lists all patches in the series', () => {
@@ -184,7 +184,7 @@ describe('submitReview', () => {
   test('written file contains the formatted prompt', () => {
     submitReview(tmpDir, 'bugABC', allPatches, makeFeedback());
     const content = fs.readFileSync(path.join(tmpDir, 'REVIEW_FEEDBACK_bugABC.md'), 'utf8');
-    expect(content).toContain('firefox-bugABC');
+    expect(content).toContain('bugABC');
     expect(content).toContain('[YOUR CODE]');
     expect(content).toContain('[FEEDBACK]');
   });
@@ -197,7 +197,7 @@ describe('submitReview', () => {
   test('returns the prompt text', () => {
     const { prompt } = submitReview(tmpDir, 'bugABC', allPatches, makeFeedback());
     expect(typeof prompt).toBe('string');
-    expect(prompt).toContain('firefox-bugABC');
+    expect(prompt).toContain('bugABC');
   });
 
   test('overwrites the same file on successive calls', () => {

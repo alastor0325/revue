@@ -5,11 +5,16 @@ const { execSync } = require('child_process');
 
 /**
  * Return the current HEAD commit hash of the given repo/worktree.
+ * Returns null if the repo has no commits yet.
  */
 function getHeadHash(worktreePath) {
-  return execSync(`git -C "${worktreePath}" rev-parse HEAD`, {
-    encoding: 'utf8',
-  }).trim();
+  try {
+    return execSync(`git -C "${worktreePath}" rev-parse HEAD`, {
+      encoding: 'utf8',
+    }).trim();
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -43,9 +48,15 @@ function getMergeBase(worktreePath, mainRepoPath) {
 /**
  * Get list of commits ahead of the merge-base.
  * Returns array of { hash, message } objects, oldest first.
+ * Returns [] if the worktree has no commits or the merge-base cannot be determined.
  */
 function getCommits(worktreePath, mainRepoPath) {
-  const base = getMergeBase(worktreePath, mainRepoPath);
+  let base;
+  try {
+    base = getMergeBase(worktreePath, mainRepoPath);
+  } catch {
+    return [];
+  }
   const output = execSync(
     `git -C "${worktreePath}" log --oneline --reverse ${base}..HEAD`,
     { encoding: 'utf8' }
@@ -364,11 +375,17 @@ function getDiffPerCommit(worktreePath, mainRepoPath) {
  * Parse the output of `git worktree list --porcelain` into an array of
  * { path, branch } objects, excluding the main repo path.
  *
+ * The worktreeName is derived from the directory basename. If the basename
+ * starts with "<mainRepoBasename>-" (e.g. "firefox-bugABC" for a main repo
+ * named "firefox"), that prefix is stripped to produce a shorter name.
+ *
  * @param {string} output - stdout from `git worktree list --porcelain`
  * @param {string} mainRepoPath - path to exclude (the main repo itself)
  * @returns {Array<{ path: string, branch: string|null, worktreeName: string }>}
  */
 function parseWorktreeList(output, mainRepoPath) {
+  const mainBasename = path.basename(mainRepoPath);
+  const prefix = mainBasename + '-';
   const blocks = output.trim().split(/\n\n+/);
   return blocks
     .map((block) => {
@@ -386,16 +403,16 @@ function parseWorktreeList(output, mainRepoPath) {
     .filter((wt) => path.normalize(wt.path) !== path.normalize(mainRepoPath))
     .map((wt) => {
       const basename = path.basename(wt.path);
-      const match = basename.match(/^firefox-(.+)$/);
-      const worktreeName = match ? match[1] : basename;
+      const worktreeName = basename.startsWith(prefix) ? basename.slice(prefix.length) : basename;
       return { path: wt.path, branch: wt.branch, worktreeName };
     });
 }
 
 /**
- * Discover all non-main Firefox worktrees registered with the main repo.
+ * Discover all worktrees registered with the given repo, excluding the main
+ * repo itself.
  *
- * @param {string} mainRepoPath - path to ~/firefox
+ * @param {string} mainRepoPath - path to the main repo
  * @returns {Array<{ path: string, branch: string|null, worktreeName: string }>}
  */
 function discoverWorktrees(mainRepoPath) {

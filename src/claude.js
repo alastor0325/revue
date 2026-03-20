@@ -71,7 +71,7 @@ function formatCombinedPrompt(worktreeName, allPatches, allFeedback, approvedHas
     })
     .join('\n---\n\n');
 
-  return `You are being asked to revise your implementation in worktree firefox-${worktreeName}.
+  return `You are being asked to revise your implementation in worktree ${worktreeName}.
 
 ## Full patch series:
 ${seriesList}
@@ -103,7 +103,7 @@ function submitReview(worktreePath, worktreeName, allPatches, allFeedback, appro
   const filename = `REVIEW_FEEDBACK_${worktreeName}.md`;
   const feedbackPath = path.join(worktreePath, filename);
   fs.writeFileSync(feedbackPath, fileContent, 'utf8');
-  const prompt = `Please read the review feedback at ${feedbackPath} and apply all the changes described there to your implementation in worktree firefox-${worktreeName}.`;
+  const prompt = `Please read the review feedback at ${feedbackPath} and apply all the changes described there to your implementation in worktree ${worktreeName}.`;
   return { feedbackPath, prompt };
 }
 

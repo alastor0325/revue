@@ -5,7 +5,7 @@ jest.mock('child_process', () => ({
 }));
 
 const { execSync } = require('child_process');
-const { getHeadHash, parseDiff, parseWorktreeList, getDiffForCommit, parseCommitBody, getMergeBase } = require('../src/git');
+const { getHeadHash, parseDiff, parseWorktreeList, getDiffForCommit, parseCommitBody, getMergeBase, getDiffPerCommit } = require('../src/git');
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -268,6 +268,24 @@ describe('parseWorktreeList', () => {
     expect(parseWorktreeList('', MAIN)).toEqual([]);
   });
 
+  test('strips repo-name prefix from worktree basename for any repo name', () => {
+    const output = porcelainOutput([
+      { p: '/home/user/myrepo',         branch: 'main' },
+      { p: '/home/user/myrepo-feature', branch: 'feature' },
+    ]);
+    const result = parseWorktreeList(output, '/home/user/myrepo');
+    expect(result[0].worktreeName).toBe('feature');
+  });
+
+  test('uses full basename when worktree does not start with repo prefix', () => {
+    const output = porcelainOutput([
+      { p: '/home/user/myrepo',    branch: 'main' },
+      { p: '/home/user/something', branch: 'feat' },
+    ]);
+    const result = parseWorktreeList(output, '/home/user/myrepo');
+    expect(result[0].worktreeName).toBe('something');
+  });
+
   test('filters main repo when git outputs forward slashes but mainRepoPath uses backslashes (Windows)', () => {
     // Simulate Windows: git outputs C:/Users/user/firefox but mainRepoPath uses backslashes
     const windowsMain = 'C:\\Users\\user\\firefox';
@@ -278,6 +296,30 @@ describe('parseWorktreeList', () => {
     const result = parseWorktreeList(output, windowsMain);
     expect(result).toHaveLength(1);
     expect(result[0].worktreeName).toBe('bugABC');
+  });
+});
+
+// ── getHeadHash — empty repo ───────────────────────────────────────────────
+
+describe('getHeadHash', () => {
+  test('returns null when repo has no commits (rev-parse HEAD fails)', () => {
+    execSync.mockImplementation(() => { throw new Error('fatal: ambiguous argument HEAD'); });
+    expect(getHeadHash('/fake/empty-repo')).toBeNull();
+  });
+
+  test('returns hash string when HEAD exists', () => {
+    execSync.mockReturnValue('abc123\n');
+    expect(getHeadHash('/fake/repo')).toBe('abc123');
+  });
+});
+
+// ── getDiffPerCommit — empty repo ──────────────────────────────────────────
+
+describe('getDiffPerCommit empty repo', () => {
+  test('returns empty array when worktree has no commits', () => {
+    // All git commands fail — simulates a worktree with no commits
+    execSync.mockImplementation(() => { throw new Error('fatal: ambiguous argument HEAD'); });
+    expect(getDiffPerCommit('/fake/empty', '/fake/main')).toEqual([]);
   });
 });
 

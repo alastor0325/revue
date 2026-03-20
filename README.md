@@ -1,14 +1,14 @@
-# firefox-review
+# Revue
 
-A local web UI for reviewing Claude-generated Firefox patches in git worktrees.
+A local web UI for reviewing patches in git worktrees.
 
 **[→ Interactive demo](https://alastor0325.github.io/firefox-review/docs/)**
 
 ## The problem
 
-When you use Claude Code to implement a Firefox bug, the patches land in a dedicated git worktree (e.g. `~/firefox-my-feature`). Reviewing those changes and sending feedback back to Claude is awkward — there's no clean way to annotate specific lines and hand the structured feedback off without manual copy-pasting.
+When you use Claude Code to implement changes, the patches land in a dedicated git worktree. Reviewing those changes and sending structured feedback back to Claude is awkward — there's no clean way to annotate specific lines and hand the feedback off without manual copy-pasting.
 
-`firefox-review` solves this with a GitHub-style diff viewer that runs locally, lets you leave inline comments per patch, and generates a structured prompt you can paste directly into Claude.
+`Revue` solves this with a GitHub-style diff viewer that runs locally, lets you leave inline comments per patch, and generates a structured prompt you can paste directly into Claude.
 
 ## Setup
 
@@ -18,40 +18,47 @@ When you use Claude Code to implement a Firefox bug, the patches land in a dedic
 git clone https://github.com/alastor0325/firefox-review
 cd firefox-review
 npm install
-npm link          # makes `firefox-review` available globally
+npm link          # makes `revue` available globally
 ```
 
-**Expected directory layout:**
+## First-time configuration
+
+Tell `revue` which repo to use by default:
+
+```bash
+revue init ~/path/to/your/repo
+```
+
+This writes `~/.revue/config.json` with your default repo path. Run `init` again any time to change it.
+
+**Expected directory layout** (example with a repo named `myrepo`):
 
 ```
-~/firefox/               ← main Firefox repo (central)
-~/firefox-my-feature/    ← a Claude-generated worktree
-~/firefox-experiment/    ← another worktree
+~/myrepo/               ← main repo
+~/myrepo-feature/       ← a Claude-generated worktree
+~/myrepo-experiment/    ← another worktree
 ```
+
+Worktrees can live anywhere on disk — `revue` discovers them from git's own worktree registry.
 
 ## Usage
 
-`firefox-review` always runs as a background daemon — it starts the server, opens your browser, and returns control to the terminal immediately. Use the worktree switcher in the UI to change worktrees at any time.
+`revue` always runs as a background daemon — it starts the server, opens your browser, and returns control to the terminal immediately.
 
 ```bash
-firefox-review                        # start (opens browser, returns terminal)
-firefox-review --stop                 # stop the running instance
-firefox-review --restart              # restart (picks up server code changes)
-firefox-review --port 8080            # use a specific port instead of 7777
-firefox-review my-feature --port 8080 # worktree + custom port
+revue                              # start with default repo (from init)
+revue --stop                       # stop the running instance
+revue --restart                    # restart (picks up server code changes)
+revue --port 8080                  # use a specific port instead of 7777
+revue my-feature                   # open a specific worktree by name
+revue my-feature --port 8080       # worktree + custom port
+revue --repo ~/other/repo          # override default repo for this run
+revue --repo ~/other/repo feature  # override repo and open specific worktree
 ```
 
-To start reviewing a specific worktree directly:
+`<worktree-name>` is the directory basename of the worktree (with the repo name prefix stripped if present, e.g. `myrepo-feature` → `feature`). If omitted, the server starts on the first registered worktree. Switch anytime using the worktree tabs at the top of the page.
 
-```bash
-firefox-review my-feature    # opens ~/firefox-my-feature
-```
-
-`<worktree-name>` is the suffix of the directory: `~/firefox-<worktree-name>`. If omitted, the server starts on the first registered worktree. Switch anytime using the worktree tabs at the top of the page.
-
-The server defaults to port `7777` and increments automatically if that port is busy. Use `--port` to pin a specific port.
-
-The browser opens at `http://localhost:7777` automatically (increments if the port is busy).
+The server defaults to port `7777` and increments automatically if that port is busy.
 
 ## Reviewing
 
@@ -67,7 +74,7 @@ Each tab shows a comment-count badge, a `✓` if approved, or a `✗` if denied.
 
 ### Per-patch actions
 
-Each patch has three buttons in the heading:
+Each patch has two buttons in the heading:
 
 | Button | Meaning |
 |---|---|
@@ -85,6 +92,8 @@ Both can be undone by clicking again. Patches with no comments and not denied ar
 - Unsaved text in a comment form is cached as a draft — closing the form preserves it; **Discard draft** clears it
 - Use the **General feedback** box for patch-level concerns not tied to a specific line
 
+> **Tip:** Selecting text (drag) on the diff or commit message will not trigger the comment box — only a plain click does.
+
 ### Revision detection
 
 If a patch has been amended or rebased since the last review session, its tab shows a `↑` badge. A **Revision** bar appears above the diff with one button per recorded revision (`Rev 1`, `Rev 2`, `Rev 3 · current`). Click any revision button to compare diffs between versions.
@@ -93,14 +102,14 @@ If a patch has been amended or rebased since the last review session, its tab sh
 
 When you're done reviewing all patches, click the **Generate Review Prompt** button. It:
 
-1. Writes `REVIEW_FEEDBACK_<worktree-name>.md` in the worktree covering all patches (see format below)
-2. Opens a modal with the prompt — click **Copy prompt** and paste it into Claude
+1. Writes `REVIEW_FEEDBACK_<worktree-name>.md` in the worktree covering all patches
+2. Opens a modal with the prompt — already copied to your clipboard, ready to paste into Claude
 
 The button is enabled as soon as any patch has any activity (a comment, approval, denial, or skip).
 
 ## Auto-save and state persistence
 
-Your review state (comments, general feedback, approved/denied/skipped status) is saved automatically to `REVIEW_STATE_<worktree-name>.json` in the worktree. When you reopen `firefox-review` for the same worktree, all your work is restored automatically.
+Your review state (comments, general feedback, approved/denied/skipped status) is saved automatically to `REVIEW_STATE_<worktree-name>.json` in the worktree. When you reopen `revue` for the same worktree, all your work is restored automatically.
 
 ### What triggers what
 
@@ -123,26 +132,26 @@ Once all patches have been acted on (each approved or denied), a green **Copy cu
 `REVIEW_FEEDBACK_<worktree-name>.md` covers all patches in one file:
 
 ```
-You are being asked to revise your implementation in worktree firefox-my-feature.
+You are being asked to revise your implementation in worktree my-feature.
 
 ## Full patch series:
-- aaa111 my-feature - Part 1: Add WebIDL  [DENIED — requires significant changes]
+- aaa111 my-feature - Part 1: Add thing  [DENIED — requires significant changes]
 - bbb222 my-feature - Part 2: Implement logic
 - ccc333 my-feature - Part 3: Fire events  [APPROVED — no issues]
 
 ---
 
-## Part 1 (aaa111) — my-feature - Part 1: Add WebIDL
+## Part 1 (aaa111) — my-feature - Part 1: Add thing
 
 ⚠ This patch was denied — it requires significant changes.
 
 ### Commit message feedback:
 
-[FEEDBACK]: Fix commit message — use "Bug XXXXXX -" prefix
+[FEEDBACK]: Fix commit message subject format
 
 ### Line-level feedback:
 
-#### dom/media/Foo.webidl : line 2
+#### src/foo.cpp : line 2
 [YOUR CODE] :   void toggle();
 [FEEDBACK]  : Use camelCase
 
@@ -156,9 +165,9 @@ Please use RAII for the lock throughout this patch.
 
 ### Line-level feedback:
 
-#### dom/media/ContentPlaybackController.cpp : line 42
-[YOUR CODE] : MOZ_ASSERT(mBrowsingContext);
-[FEEDBACK]  : Add a message string — MOZ_ASSERT(mBrowsingContext, "must not be null")
+#### src/bar.cpp : line 42
+[YOUR CODE] : assert(mCtx);
+[FEEDBACK]  : Add a message string
 
 ---
 
@@ -184,17 +193,17 @@ npm run test:coverage # coverage report
 To run with auto-restart on file changes during development (bypasses daemon mode):
 
 ```bash
-FIREFOX_REVIEW_DAEMON=1 npm run dev -- my-feature
+REVUE_DAEMON=1 npm run dev -- my-feature
 ```
 
 nodemon watches `src/`, `public/`, and `bin/` and restarts the server on any change. Refresh the browser tab manually to pick up the new build.
 
-Alternatively, `firefox-review --restart` is sufficient for one-off server restarts when not actively editing code.
+Alternatively, `revue --restart` is sufficient for one-off server restarts when not actively editing code.
 
 Tests cover:
 - `parseDiff` — diff parsing (added/removed/context lines, multiple files, binary files, multiple hunks)
 - `parseCommitBody` — full commit message extraction from `git show` output
-- `parseWorktreeList` — worktree discovery parsing
+- `parseWorktreeList` — worktree discovery parsing (including generic prefix stripping)
 - `formatCombinedPrompt` / `submitReview` — combined prompt structure, approved/skipped markers, commit message feedback, multi-patch feedback
 - Express routes — all API endpoints with mocked git and claude modules
 

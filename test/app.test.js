@@ -4,7 +4,7 @@
 global.document = { addEventListener: () => {} };
 global.fetch = () => {};
 
-const { migrateApprovals } = require('../public/app');
+const { migrateApprovals, submitReview } = require('../public/app');
 
 // ── migrateApprovals ───────────────────────────────────────────────────────
 
@@ -110,5 +110,67 @@ describe('migrateApprovals', () => {
       expect(result.approved.has(h)).toBe(false);
       expect(result.denied.has(h)).toBe(false);
     });
+  });
+});
+
+// ── submitReview — auto-copy to clipboard ──────────────────────────────────
+
+describe('submitReview clipboard auto-copy', () => {
+  let elements;
+
+  function makeElement(overrides = {}) {
+    return { textContent: '', value: '', classList: { add: jest.fn() }, dataset: {}, ...overrides };
+  }
+
+  beforeEach(() => {
+    elements = {
+      '#result-feedback-path': makeElement(),
+      '#result-prompt':        makeElement(),
+      '#result-overlay':       makeElement({ classList: { add: jest.fn() } }),
+      '#btn-submit':           makeElement({ disabled: false }),
+      '#btn-copy-prompt':      makeElement(),
+      '#submit-warning':       makeElement(),
+    };
+
+    global.document = {
+      addEventListener: () => {},
+      querySelector: (sel) => elements[sel] || null,
+    };
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        feedbackPath: '/fake/REVIEW_FEEDBACK_bugABC.md',
+        prompt: 'Please revise the following patches…',
+      }),
+    });
+
+    global.navigator = {
+      clipboard: { writeText: jest.fn().mockResolvedValue(undefined) },
+    };
+  });
+
+  afterEach(() => {
+    global.document = { addEventListener: () => {} };
+    delete global.navigator;
+  });
+
+  test('copies the generated prompt to the clipboard automatically', async () => {
+    await submitReview();
+    expect(global.navigator.clipboard.writeText).toHaveBeenCalledWith(
+      'Please revise the following patches…'
+    );
+  });
+
+  test('sets btn-copy-prompt text to "Copied!" after auto-copy', async () => {
+    jest.useFakeTimers();
+    await submitReview();
+    expect(elements['#btn-copy-prompt'].textContent).toBe('Copied!');
+    jest.useRealTimers();
+  });
+
+  test('does not throw when clipboard access is denied', async () => {
+    global.navigator.clipboard.writeText = jest.fn().mockRejectedValue(new Error('denied'));
+    await expect(submitReview()).resolves.not.toThrow();
   });
 });

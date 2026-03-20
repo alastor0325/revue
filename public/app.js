@@ -415,6 +415,7 @@ function renderCommitMessageSection(container, patchHash, commitMessage, disable
 
   function showForm() {
     if (disabled) return;
+    if (window.getSelection().toString().length > 0) return;
     formEl.innerHTML = `
       <div class="comment-form-inner">
         <textarea placeholder="Leave feedback on this commit message…" autofocus></textarea>
@@ -648,6 +649,7 @@ function renderFile(fileData, patchHash) {
       tr.dataset.filePath = filePath;
       tr.dataset.lineKey = key;
       tr.querySelector('.ln-content').addEventListener('click', () => {
+        if (window.getSelection().toString().length > 0) return;
         const next = tr.nextElementSibling;
         if (next && next.classList.contains('comment-form-row')) {
           const ctx = next._draftContext;
@@ -1314,6 +1316,12 @@ async function submitReview() {
     $('#result-overlay').classList.add('visible');
     updateCurrentPrompt(json.prompt);
 
+    navigator.clipboard.writeText(json.prompt).then(() => {
+      const copyBtn = $('#btn-copy-prompt');
+      copyBtn.textContent = 'Copied!';
+      setTimeout(() => { copyBtn.textContent = 'Copy prompt'; }, 2000);
+    }).catch(() => {});  // silently ignore if clipboard access is denied
+
     renderTabs();
   } catch (err) {
     const warn = $('#submit-warning');
@@ -1509,6 +1517,8 @@ if (typeof module !== 'undefined') {
     draftKey, drafts, state, renderFileNav, renderFile,
     getFileNavCollapsed: () => fileNavCollapsed,
     setFileNavCollapsed: (v) => { fileNavCollapsed = v; },
+    submitReview,
+    renderCommitMessageSection,
   };
 }
 

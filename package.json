@@ -1,15 +1,15 @@
 {
-  "name": "firefox-review",
+  "name": "revue",
   "version": "0.1.0",
-  "description": "Review Claude-generated Firefox patches in git worktrees",
+  "description": "Revue — a web UI for reviewing patches in git worktrees",
   "bin": {
-    "firefox-review": "./bin/firefox-review.js"
+    "revue": "./bin/revue.js"
   },
   "scripts": {
     "test": "jest --testPathPattern=test/ --forceExit --silent",
     "test:watch": "jest --testPathPattern=test/ --watch --forceExit",
     "test:coverage": "jest --testPathPattern=test/ --coverage --forceExit --silent",
-    "dev": "nodemon --watch src --watch public --watch bin bin/firefox-review.js"
+    "dev": "nodemon --watch src --watch public --watch bin bin/revue.js"
   },
   "jest": {
     "testEnvironment": "node",

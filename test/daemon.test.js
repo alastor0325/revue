@@ -15,7 +15,8 @@ const {
   readPid, readAllInstances, isRunning, stopDaemon,
   waitForPort, buildEntries, pickDefaultEntry, parseArgs,
   pidFilePath, ensurePidsDir, LEGACY_PID_FILE,
-} = require('../bin/firefox-review');
+  readConfig, writeConfig, runInit, CONFIG_FILE,
+} = require('../bin/revue');
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -51,9 +52,10 @@ afterEach(() => {
 // ── parseArgs ─────────────────────────────────────────────────────────────
 
 describe('parseArgs', () => {
-  test('returns null port and empty rest when no args', () => {
-    const { port, rest } = parseArgs([]);
+  test('returns null port, null repo, and empty rest when no args', () => {
+    const { port, repo, rest } = parseArgs([]);
     expect(port).toBeNull();
+    expect(repo).toBeNull();
     expect(rest).toEqual([]);
   });
 
@@ -84,6 +86,19 @@ describe('parseArgs', () => {
   test('returns NaN port for non-numeric value', () => {
     const { port } = parseArgs(['--port', 'abc']);
     expect(isNaN(port)).toBe(true);
+  });
+
+  test('parses --repo value', () => {
+    const { repo, rest } = parseArgs(['--repo', '/home/user/myrepo']);
+    expect(repo).toBe('/home/user/myrepo');
+    expect(rest).toEqual([]);
+  });
+
+  test('parses --repo alongside worktree name and --port', () => {
+    const { port, repo, rest } = parseArgs(['--repo', '/home/user/myrepo', 'my-feature', '--port', '9000']);
+    expect(repo).toBe('/home/user/myrepo');
+    expect(port).toBe(9000);
+    expect(rest).toEqual(['my-feature']);
   });
 });
 
@@ -342,24 +357,96 @@ describe('waitForPort', () => {
 
 describe('buildEntries', () => {
   test('returns empty array when mainRepoPath does not exist', () => {
-    const entries = buildEntries();
+    const entries = buildEntries('/nonexistent/path/abc123');
     expect(Array.isArray(entries)).toBe(true);
+    expect(entries).toHaveLength(0);
   });
 
-  test('includes worktrees returned by discoverWorktrees when main repo exists', () => {
-    const mainRepoPath = path.join(os.homedir(), 'firefox');
-    if (!fs.existsSync(mainRepoPath)) return;
+  test('includes main repo entry when path exists', () => {
+    discoverWorktrees.mockReturnValue([]);
+    const entries = buildEntries(tmpDir);
+    expect(entries[0].isMain).toBe(true);
+    expect(entries[0].path).toBe(tmpDir);
+  });
+
+  test('includes worktrees returned by discoverWorktrees', () => {
     discoverWorktrees.mockReturnValue([
-      { path: '/fake/firefox-bugABC', worktreeName: 'bugABC' },
+      { path: '/fake/myrepo-feature', worktreeName: 'feature' },
     ]);
-    const entries = buildEntries();
-    expect(entries.some((e) => e.worktreeName === 'bugABC')).toBe(true);
+    const entries = buildEntries(tmpDir);
+    expect(entries.some((e) => e.worktreeName === 'feature')).toBe(true);
   });
 
   test('does not throw when discoverWorktrees throws', () => {
-    const mainRepoPath = path.join(os.homedir(), 'firefox');
-    if (!fs.existsSync(mainRepoPath)) return;
     discoverWorktrees.mockImplementation(() => { throw new Error('git error'); });
-    expect(() => buildEntries()).not.toThrow();
+    expect(() => buildEntries(tmpDir)).not.toThrow();
+  });
+});
+
+// ── readConfig / writeConfig ───────────────────────────────────────────────
+
+describe('readConfig / writeConfig', () => {
+  let configFile;
+
+  beforeEach(() => {
+    configFile = path.join(tmpDir, 'config.json');
+  });
+
+  test('readConfig returns empty object when file does not exist', () => {
+    expect(readConfig(configFile)).toEqual({});
+  });
+
+  test('readConfig returns parsed JSON', () => {
+    fs.writeFileSync(configFile, JSON.stringify({ defaultRepo: '/some/repo' }), 'utf8');
+    expect(readConfig(configFile)).toEqual({ defaultRepo: '/some/repo' });
+  });
+
+  test('readConfig returns empty object for malformed JSON', () => {
+    fs.writeFileSync(configFile, 'not json', 'utf8');
+    expect(readConfig(configFile)).toEqual({});
+  });
+
+  test('writeConfig writes JSON and creates parent dir', () => {
+    const nestedConfig = path.join(tmpDir, 'subdir', 'config.json');
+    writeConfig({ defaultRepo: '/my/repo' }, nestedConfig);
+    expect(fs.existsSync(nestedConfig)).toBe(true);
+    const parsed = JSON.parse(fs.readFileSync(nestedConfig, 'utf8'));
+    expect(parsed.defaultRepo).toBe('/my/repo');
+  });
+});
+
+// ── runInit ────────────────────────────────────────────────────────────────
+
+describe('runInit', () => {
+  let configFile;
+
+  beforeEach(() => {
+    configFile = path.join(tmpDir, 'config.json');
+  });
+
+  test('writes defaultRepo to config file', () => {
+    runInit([tmpDir], configFile);
+    const config = readConfig(configFile);
+    expect(config.defaultRepo).toBe(tmpDir);
+  });
+
+  test('resolves relative path to absolute', () => {
+    runInit([tmpDir], configFile);
+    const config = readConfig(configFile);
+    expect(path.isAbsolute(config.defaultRepo)).toBe(true);
+  });
+
+  test('exits with error when no path given', () => {
+    const exitSpy = jest.spyOn(process, 'exit').mockImplementation(() => { throw new Error('exit'); });
+    expect(() => runInit([], configFile)).toThrow('exit');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    exitSpy.mockRestore();
+  });
+
+  test('exits with error when path does not exist', () => {
+    const exitSpy = jest.spyOn(process, 'exit').mockImplementation(() => { throw new Error('exit'); });
+    expect(() => runInit(['/nonexistent/path/abc'], configFile)).toThrow('exit');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    exitSpy.mockRestore();
   });
 });
