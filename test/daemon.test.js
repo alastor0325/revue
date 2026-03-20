@@ -15,7 +15,7 @@ const {
   readPid, readAllInstances, isRunning, stopDaemon,
   waitForPort, buildEntries, pickDefaultEntry, parseArgs,
   pidFilePath, ensurePidsDir, LEGACY_PID_FILE,
-  readConfig, writeConfig, runInit, CONFIG_FILE,
+  readConfig, writeConfig, runInit, printHelp, CONFIG_FILE,
 } = require('../bin/revue');
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -448,5 +448,30 @@ describe('runInit', () => {
     expect(() => runInit(['/nonexistent/path/abc'], configFile)).toThrow('exit');
     expect(exitSpy).toHaveBeenCalledWith(1);
     exitSpy.mockRestore();
+  });
+});
+
+describe('printHelp', () => {
+  test('prints usage line', () => {
+    const lines = [];
+    jest.spyOn(console, 'log').mockImplementation((msg) => lines.push(msg));
+    printHelp();
+    console.log.mockRestore();
+    const output = lines.join('\n');
+    expect(output).toMatch(/Usage:/);
+  });
+
+  test('lists all commands', () => {
+    const lines = [];
+    jest.spyOn(console, 'log').mockImplementation((msg) => lines.push(msg));
+    printHelp();
+    console.log.mockRestore();
+    const output = lines.join('\n');
+    expect(output).toMatch(/init/);
+    expect(output).toMatch(/--stop/);
+    expect(output).toMatch(/--restart/);
+    expect(output).toMatch(/--repo/);
+    expect(output).toMatch(/--port/);
+    expect(output).toMatch(/--help/);
   });
 });

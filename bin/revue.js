@@ -234,9 +234,39 @@ function parseArgs(args) {
   return { port, repo, rest };
 }
 
+function printHelp() {
+  console.log(`
+Usage: revue [worktree] [options]
+
+Commands:
+  revue                        Start with default repo (configured via init)
+  revue init <repo-path>       Set the default repo path
+  revue <worktree>             Open a specific worktree by name
+  revue --stop                 Stop the running instance
+  revue --restart              Restart the running instance
+
+Options:
+  --repo <path>                Override the default repo for this run
+  --port <port>                Use a specific port (default: 7777)
+  --help, -h                   Show this help message
+
+Examples:
+  revue init ~/code/firefox
+  revue
+  revue my-feature
+  revue my-feature --port 8080
+  revue --repo ~/other/repo feature
+`.trim());
+}
+
 async function main() {
   const rawArgs = process.argv.slice(2);
   const flag = rawArgs[0];
+
+  if (flag === '--help' || flag === '-h') {
+    printHelp();
+    return;
+  }
 
   if (flag === '--stop') {
     stopDaemon();
@@ -325,6 +355,6 @@ if (require.main === module) {
 module.exports = {
   readPid, readAllInstances, isRunning, stopDaemon, waitForPort,
   buildEntries, pickDefaultEntry, parseArgs, pidFilePath, ensurePidsDir,
-  readConfig, writeConfig, runInit,
+  readConfig, writeConfig, runInit, printHelp,
   LEGACY_PID_FILE, CONFIG_FILE,
 };
