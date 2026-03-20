@@ -772,15 +772,16 @@ function getRevisionList(patchIdx) {
 function renderTabs() {
   const tabsBar = $('#patch-tabs-bar');
   const tabsEl = $('#patch-tabs');
-  tabsEl.innerHTML = '';
 
   if (state.patches.length <= 1) {
     tabsBar.style.display = 'none';
+    tabsEl.replaceChildren();
     return;
   }
 
   tabsBar.style.display = '';
 
+  const frag = document.createDocumentFragment();
   state.patches.forEach((patch, idx) => {
     const isApproved = state.approved.has(patch.hash);
     const isDenied = state.denied.has(patch.hash);
@@ -804,8 +805,9 @@ function renderTabs() {
 
     tab.innerHTML = `<span class="tab-part">Part ${idx + 1}</span><span class="tab-msg">${escapeHtml(patch.message)}${badge}${approvedIcon}${deniedIcon}${updatedIcon}</span>`;
     tab.addEventListener('click', () => switchPatch(idx));
-    tabsEl.appendChild(tab);
+    frag.appendChild(tab);
   });
+  tabsEl.replaceChildren(frag);
 }
 
 function switchPatch(idx) {
@@ -943,10 +945,17 @@ function renderFileNav(files, diffWrap) {
 function renderCurrentPatch() {
   const patch = currentPatch();
   const container = $('#files-changed');
-  container.innerHTML = '';
+
+  // Build all synchronous content into a fragment first, then swap atomically
+  // to avoid the flicker caused by container briefly going empty.
+  const frag = document.createDocumentFragment();
 
   if (!patch) {
-    container.innerHTML = '<p style="color:#8b949e;padding:16px 24px;">No patches found.</p>';
+    const p = document.createElement('p');
+    p.style.cssText = 'color:#8b949e;padding:16px 24px;';
+    p.textContent = 'No patches found.';
+    frag.appendChild(p);
+    container.replaceChildren(frag);
     renderFileNav([], null);
     return;
   }
@@ -995,7 +1004,7 @@ function renderCurrentPatch() {
   btnGroup.appendChild(approveBtn);
   btnGroup.appendChild(denyBtn);
   heading.appendChild(btnGroup);
-  container.appendChild(heading);
+  frag.appendChild(heading);
 
   // Revision toggle bar — shown when this patch has multiple recorded revisions
   const revList = getRevisionList(state.currentPatchIdx);
@@ -1066,8 +1075,8 @@ function renderCurrentPatch() {
         renderCurrentPatch();
       });
 
-      container.appendChild(fromBar);
-      container.appendChild(toBar);
+      frag.appendChild(fromBar);
+      frag.appendChild(toBar);
     } else {
       const compareBtn = document.createElement('button');
       compareBtn.className = 'btn-compare-toggle';
@@ -1084,12 +1093,12 @@ function renderCurrentPatch() {
         renderTabs();
       });
       revBar._scroll.appendChild(compareBtn);
-      container.appendChild(revBar);
+      frag.appendChild(revBar);
     }
   }
 
   // Commit message section — always shown, disabled when approved
-  renderCommitMessageSection(container, patch.hash, patch.body || patch.message, isApproved);
+  renderCommitMessageSection(frag, patch.hash, patch.body || patch.message, isApproved);
 
   // General comment box (always shown so user can read it even when skipped/approved)
   const generalBox = document.createElement('div');
@@ -1100,7 +1109,7 @@ function renderCurrentPatch() {
       <span class="general-comment-hint">Feedback here is scoped to this patch only. Use this for overall concerns not tied to a specific line.</span>
     </div>
     <textarea class="general-comment-textarea" placeholder="e.g. This approach should use RAII. Please refactor the error handling throughout this patch…">${escapeHtml(getGeneralComment(patch.hash))}</textarea>`;
-  container.appendChild(generalBox);
+  frag.appendChild(generalBox);
 
   const textarea = generalBox.querySelector('textarea');
   if (isApproved) textarea.disabled = true;
@@ -1166,7 +1175,7 @@ function renderCurrentPatch() {
     }
 
     summaryBox.appendChild(summaryList);
-    container.appendChild(summaryBox);
+    frag.appendChild(summaryBox);
   }
 
   // Deny notice — show below general comment box but before diff
@@ -1176,7 +1185,7 @@ function renderCurrentPatch() {
     denyNotice.innerHTML = `
       <span class="deny-notice-icon">✗</span>
       <span>This patch was denied — it requires significant changes. Add comments above to explain.</span>`;
-    container.appendChild(denyNotice);
+    frag.appendChild(denyNotice);
   }
 
   // Approved notice — shown above the diff (diff still visible but read-only)
@@ -1186,11 +1195,10 @@ function renderCurrentPatch() {
     notice.innerHTML = `
       <span class="approve-notice-icon">✓</span>
       <span>This patch was approved — no issues found. Click <strong>Approved ✓</strong> to undo.</span>`;
-    container.appendChild(notice);
+    frag.appendChild(notice);
   }
 
   if (isCompareMode) {
-    renderFileNav([], null);
     const fromIdx = revList.findIndex((r) => r.hash === compareRev.from);
     const toIdx   = revList.findIndex((r) => r.hash === compareRev.to);
     const fromLabel = fromIdx >= 0 ? `Rev ${fromIdx + 1}` : compareRev.from;
@@ -1199,12 +1207,15 @@ function renderCurrentPatch() {
     const compareHeader = document.createElement('div');
     compareHeader.className = 'diff-revision-header diff-revision-compare';
     compareHeader.textContent = `Comparing ${fromLabel} → ${toLabel}`;
-    container.appendChild(compareHeader);
+    frag.appendChild(compareHeader);
 
     const placeholder = document.createElement('div');
     placeholder.className = 'diff-revision-loading';
     placeholder.textContent = 'Loading comparison…';
-    container.appendChild(placeholder);
+    frag.appendChild(placeholder);
+
+    container.replaceChildren(frag);
+    renderFileNav([], null);
 
     fetch(`/api/revdiff?from=${compareRev.from}&to=${compareRev.to}`)
       .then((r) => r.json())
@@ -1235,18 +1246,20 @@ function renderCurrentPatch() {
         placeholder.textContent = 'Failed to load comparison.';
       });
   } else if (effectiveHash !== patch.hash) {
-    renderFileNav([], null);
     const revIdx = revList.findIndex((r) => r.hash === effectiveHash);
     const revLabel = revIdx >= 0 ? `Rev ${revIdx + 1}` : 'Previous revision';
     const prevHeader = document.createElement('div');
     prevHeader.className = 'diff-revision-header diff-revision-previous';
     prevHeader.textContent = `${revLabel} — ${effectiveHash}`;
-    container.appendChild(prevHeader);
+    frag.appendChild(prevHeader);
 
     const placeholder = document.createElement('div');
     placeholder.className = 'diff-revision-loading';
     placeholder.textContent = 'Loading revision…';
-    container.appendChild(placeholder);
+    frag.appendChild(placeholder);
+
+    container.replaceChildren(frag);
+    renderFileNav([], null);
 
     fetch(`/api/patchdiff/${effectiveHash}`)
       .then((r) => r.json())
@@ -1270,18 +1283,20 @@ function renderCurrentPatch() {
       });
   } else {
     if (patch.files.length === 0) {
-      renderFileNav([], null);
       const msg = document.createElement('p');
       msg.style.cssText = 'color:#8b949e;padding:8px 0;';
       msg.textContent = 'No changed files in this patch.';
-      container.appendChild(msg);
+      frag.appendChild(msg);
+      container.replaceChildren(frag);
+      renderFileNav([], null);
     } else {
       const diffWrap = document.createElement('div');
       if (isApproved) diffWrap.className = 'diff-approved-readonly';
       for (const fileData of patch.files) {
         diffWrap.appendChild(renderFile(fileData, patch.hash));
       }
-      container.appendChild(diffWrap);
+      frag.appendChild(diffWrap);
+      container.replaceChildren(frag);
       renderFileNav(patch.files, diffWrap);
     }
   }
