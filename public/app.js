@@ -1609,6 +1609,7 @@ if (typeof module !== 'undefined') {
     renderCommitMessageSection,
     buildPatchEl,
     initPatchNodes,
+    renderTabs,
     switchPatch,
     patchEls,
     init,

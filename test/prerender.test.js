@@ -6,7 +6,7 @@
 global.fetch = jest.fn();
 global.EventSource = jest.fn(() => ({ addEventListener: jest.fn(), close: jest.fn() }));
 
-const { buildPatchEl, initPatchNodes, patchEls, state, switchPatch } = require('../public/app');
+const { buildPatchEl, initPatchNodes, renderTabs, patchEls, state, switchPatch } = require('../public/app');
 
 function makePatches(...messages) {
   return messages.map((msg, i) => ({
@@ -134,5 +134,33 @@ describe('switchPatch', () => {
     initPatchNodes();
     switchPatch(1);
     expect(state.currentPatchIdx).toBe(1);
+  });
+});
+
+describe('renderTabs', () => {
+  test('all tab buttons have the patch-tab class', () => {
+    state.patches = makePatches('A', 'B', 'C');
+    renderTabs();
+    const btns = document.querySelectorAll('#patch-tabs .patch-tab');
+    expect(btns).toHaveLength(3);
+  });
+
+  test('second call updates tabs in-place without losing patch-tab class', () => {
+    state.patches = makePatches('A', 'B');
+    renderTabs();
+    renderTabs(); // second call — must not break querySelectorAll
+    const btns = document.querySelectorAll('#patch-tabs .patch-tab');
+    expect(btns).toHaveLength(2);
+    btns.forEach((btn) => expect(btn.className).toContain('patch-tab'));
+  });
+
+  test('active class is set on the current patch tab', () => {
+    state.patches = makePatches('A', 'B', 'C');
+    state.currentPatchIdx = 1;
+    renderTabs();
+    const btns = document.querySelectorAll('#patch-tabs .patch-tab');
+    expect(btns[0].classList.contains('active')).toBe(false);
+    expect(btns[1].classList.contains('active')).toBe(true);
+    expect(btns[2].classList.contains('active')).toBe(false);
   });
 });
