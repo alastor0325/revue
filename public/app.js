@@ -785,13 +785,28 @@ function renderTabs() {
 
   tabsBar.style.display = '';
 
-  const frag = document.createDocumentFragment();
+  const existingBtns = tabsEl.querySelectorAll('.patch-tab');
+  const needRebuild = existingBtns.length !== state.patches.length;
+
+  if (needRebuild) {
+    // First render or patch count changed — build all tab buttons from scratch
+    const frag = document.createDocumentFragment();
+    state.patches.forEach((patch, idx) => {
+      const tab = document.createElement('button');
+      tab.addEventListener('click', () => switchPatch(idx));
+      frag.appendChild(tab);
+    });
+    tabsEl.replaceChildren(frag);
+  }
+
+  // Update each tab button's class and content in-place
+  const btns = tabsEl.querySelectorAll('.patch-tab');
   state.patches.forEach((patch, idx) => {
     const isApproved = state.approved.has(patch.hash);
     const isDenied = state.denied.has(patch.hash);
     const commentCount = commentsForPatch(patch.hash).length;
 
-    const tab = document.createElement('button');
+    const tab = btns[idx];
     tab.className = 'patch-tab' +
       (idx === state.currentPatchIdx ? ' active' : '') +
       (isApproved ? ' approved' : '') +
@@ -808,10 +823,7 @@ function renderTabs() {
       : '';
 
     tab.innerHTML = `<span class="tab-part">Part ${idx + 1}</span><span class="tab-msg">${escapeHtml(patch.message)}${badge}${approvedIcon}${deniedIcon}${updatedIcon}</span>`;
-    tab.addEventListener('click', () => switchPatch(idx));
-    frag.appendChild(tab);
   });
-  tabsEl.replaceChildren(frag);
 }
 
 function switchPatch(idx) {
@@ -821,64 +833,28 @@ function switchPatch(idx) {
   const entry = patchEls[idx];
   if (entry) {
     entry.el.style.display = '';
-    renderFileNav(state.patches[idx]?.files || [], entry.diffWrap);
+    activateFileNav(entry.navItemsEl, entry.diffWrap);
   }
-  renderTabs();
+  // Update active tab in-place — no DOM rebuild on switch
+  document.querySelectorAll('#patch-tabs .patch-tab').forEach((btn, i) => {
+    btn.classList.toggle('active', i === idx);
+  });
   updateSubmitButton();
-  window.scrollTo(0, 0);
 }
 
 // ── File navigation sidebar ─────────────────────────────────────────────────
 let fileNavScrollHandler = null;
 let fileNavCollapsed = false;
 
-function renderFileNav(files, diffWrap) {
-  const nav = $('#file-nav');
-  if (!nav) return;
-  if (fileNavScrollHandler) {
-    window.removeEventListener('scroll', fileNavScrollHandler, { passive: true });
-    fileNavScrollHandler = null;
-  }
-  if (!files || files.length === 0) {
-    nav.style.display = 'none';
-    return;
-  }
-
-  nav.innerHTML = '';
-  nav.style.display = '';
-  nav.classList.toggle('collapsed', fileNavCollapsed);
-
-  const topBarH = ($('#top-bar') || {}).offsetHeight || 0;
-  nav.style.top = topBarH + 'px';
-  nav.style.maxHeight = `calc(100vh - ${topBarH}px)`;
-
-  // ── Header: label + collapse toggle ──
-  const header = document.createElement('div');
-  header.className = 'file-nav-header';
-
-  const label = document.createElement('span');
-  label.className = 'file-nav-label';
-  label.textContent = 'Files changed';
-  header.appendChild(label);
-
-  const toggleBtn = document.createElement('button');
-  toggleBtn.className = 'file-nav-toggle';
-  toggleBtn.textContent = fileNavCollapsed ? '▶' : '◀';
-  toggleBtn.title = fileNavCollapsed ? 'Expand sidebar' : 'Collapse sidebar';
-  toggleBtn.addEventListener('click', () => {
-    fileNavCollapsed = !fileNavCollapsed;
-    nav.classList.toggle('collapsed', fileNavCollapsed);
-    toggleBtn.textContent = fileNavCollapsed ? '▶' : '◀';
-    toggleBtn.title = fileNavCollapsed ? 'Expand sidebar' : 'Collapse sidebar';
-  });
-  header.appendChild(toggleBtn);
-  nav.appendChild(header);
-
-  // ── Items list ──
-  const itemsEl = document.createElement('div');
-  itemsEl.className = 'file-nav-items';
+// Builds the file-nav items element for a patch. Pure DOM construction,
+// no layout reads — safe to call while the patch is still detached / hidden.
+// Returns the itemsEl div (with _navItems and _blocks attached) or null.
+function buildNavItemsEl(files, diffWrap) {
+  if (!files || files.length === 0 || !diffWrap) return null;
 
   const blocks = Array.from(diffWrap.querySelectorAll('.file-block'));
+  const itemsEl = document.createElement('div');
+  itemsEl.className = 'file-nav-items';
   const navItems = [];
 
   files.forEach((fileData, idx) => {
@@ -890,12 +866,10 @@ function renderFileNav(files, diffWrap) {
     const dirPath  = lastSlash >= 0 ? filePath.slice(0, lastSlash + 1) : '';
 
     const block = blocks[idx] || null;
-
     const item = document.createElement('div');
     item.className = 'file-nav-item';
     item.title = filePath;
 
-    // Row 1: filename + +/- stats
     const filenameRow = document.createElement('div');
     filenameRow.className = 'file-nav-filename-row';
 
@@ -910,7 +884,6 @@ function renderFileNav(files, diffWrap) {
     filenameRow.appendChild(statsSpan);
     item.appendChild(filenameRow);
 
-    // Row 2: directory path (omitted for root-level files)
     if (dirPath) {
       const dirSpan = document.createElement('div');
       dirSpan.className = 'file-nav-dir';
@@ -918,9 +891,11 @@ function renderFileNav(files, diffWrap) {
       item.appendChild(dirSpan);
     }
 
+    // Click handler reads getBoundingClientRect at click time (element is visible then)
     item.addEventListener('click', () => {
       if (!block) return;
-      const y = block.getBoundingClientRect().top + window.scrollY - topBarH - 8;
+      const topH = ($('#top-bar') || {}).offsetHeight || 0;
+      const y = block.getBoundingClientRect().top + window.scrollY - topH - 8;
       window.scrollTo({ top: y, behavior: 'smooth' });
     });
 
@@ -928,7 +903,64 @@ function renderFileNav(files, diffWrap) {
     navItems.push(item);
   });
 
-  nav.appendChild(itemsEl);
+  itemsEl._navItems = navItems;
+  itemsEl._blocks = blocks;
+  return itemsEl;
+}
+
+// Activates the file nav for the current patch: swaps in the pre-built items,
+// sets up position/sizing, and attaches the scroll highlight handler.
+// Called on tab switch — all work is O(1) DOM ops.
+function activateFileNav(navItemsEl, diffWrap) {
+  const nav = $('#file-nav');
+  if (!nav) return;
+
+  if (fileNavScrollHandler) {
+    window.removeEventListener('scroll', fileNavScrollHandler, { passive: true });
+    fileNavScrollHandler = null;
+  }
+
+  if (!navItemsEl) {
+    nav.style.display = 'none';
+    return;
+  }
+
+  const topBarH = ($('#top-bar') || {}).offsetHeight || 0;
+  nav.style.top = topBarH + 'px';
+  nav.style.maxHeight = `calc(100vh - ${topBarH}px)`;
+
+  // Build or reuse nav header
+  let header = nav.querySelector('.file-nav-header');
+  if (!header) {
+    header = document.createElement('div');
+    header.className = 'file-nav-header';
+
+    const label = document.createElement('span');
+    label.className = 'file-nav-label';
+    label.textContent = 'Files changed';
+    header.appendChild(label);
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.className = 'file-nav-toggle';
+    header.appendChild(toggleBtn);
+    toggleBtn.addEventListener('click', () => {
+      fileNavCollapsed = !fileNavCollapsed;
+      nav.classList.toggle('collapsed', fileNavCollapsed);
+      toggleBtn.textContent = fileNavCollapsed ? '▶' : '◀';
+      toggleBtn.title = fileNavCollapsed ? 'Expand sidebar' : 'Collapse sidebar';
+    });
+  }
+  const toggleBtn = header.querySelector('.file-nav-toggle');
+  toggleBtn.textContent = fileNavCollapsed ? '▶' : '◀';
+  toggleBtn.title = fileNavCollapsed ? 'Expand sidebar' : 'Collapse sidebar';
+
+  // Atomically swap to: header + new items
+  nav.replaceChildren(header, navItemsEl);
+  nav.style.display = '';
+  nav.classList.toggle('collapsed', fileNavCollapsed);
+
+  const navItems = navItemsEl._navItems || [];
+  const blocks   = navItemsEl._blocks   || [];
 
   function updateActive() {
     let activeIdx = 0;
@@ -950,6 +982,11 @@ function renderFileNav(files, diffWrap) {
   fileNavScrollHandler = updateActive;
   window.addEventListener('scroll', fileNavScrollHandler, { passive: true });
   updateActive();
+}
+
+// Kept for backward compat — builds and activates in one call.
+function renderFileNav(files, diffWrap) {
+  activateFileNav(buildNavItemsEl(files, diffWrap), diffWrap);
 }
 
 // ── Build a patch element (detached) ────────────────────────────────────────
@@ -1300,21 +1337,22 @@ function buildPatchEl(idx) {
     }
   }
 
-  return { el, diffWrap };
+  const navItemsEl = buildNavItemsEl(patch.files, diffWrap);
+  return { el, diffWrap, navItemsEl };
 }
 
 // Re-render the current patch in-place (called when approve/deny/comment state changes).
 function renderCurrentPatch() {
   const idx = state.currentPatchIdx;
-  const { el, diffWrap } = buildPatchEl(idx);
+  const { el, diffWrap, navItemsEl } = buildPatchEl(idx);
   const existing = patchEls[idx];
-  patchEls[idx] = { el, diffWrap };
+  patchEls[idx] = { el, diffWrap, navItemsEl };
   if (existing) {
     existing.el.replaceWith(el);
   } else {
     $('#files-changed').appendChild(el);
   }
-  renderFileNav(state.patches[idx]?.files || [], diffWrap);
+  activateFileNav(navItemsEl, diffWrap);
 }
 
 // Build all patch elements and insert them into #files-changed.
@@ -1324,14 +1362,14 @@ function initPatchNodes() {
   patchEls.length = 0;
   const frag = document.createDocumentFragment();
   for (let i = 0; i < state.patches.length; i++) {
-    const { el, diffWrap } = buildPatchEl(i);
+    const { el, diffWrap, navItemsEl } = buildPatchEl(i);
     el.style.display = i === state.currentPatchIdx ? '' : 'none';
-    patchEls.push({ el, diffWrap });
+    patchEls.push({ el, diffWrap, navItemsEl });
     frag.appendChild(el);
   }
   container.replaceChildren(frag);
   const cur = patchEls[state.currentPatchIdx];
-  renderFileNav(state.patches[state.currentPatchIdx]?.files || [], cur?.diffWrap || null);
+  activateFileNav(cur?.navItemsEl || null, cur?.diffWrap || null);
 }
 
 // ── Submit review ──────────────────────────────────────────────────────────
