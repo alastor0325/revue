@@ -85,6 +85,17 @@ describe('renderFile — stats display', () => {
     expect(el.querySelector('.stat-add').textContent).toBe('+0');
     expect(el.querySelector('.stat-del').textContent).toBe('-0');
   });
+
+  test('stats are inside .file-header on the same row as the file path', () => {
+    const el = renderFile(makeFile(), 'hash1');
+    const header = el.querySelector('.file-header');
+    // Both .file-path and .file-stats must be direct children of .file-header
+    // (not nested inside an intermediate column wrapper)
+    const path = header.querySelector('.file-path');
+    const stats = header.querySelector('.file-stats');
+    expect(path.parentElement).toBe(header);
+    expect(stats.parentElement).toBe(header);
+  });
 });
 
 // ── Hunk header rows ─────────────────────────────────────────────────────────

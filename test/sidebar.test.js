@@ -155,6 +155,18 @@ describe('renderFileNav — filename and directory hierarchy', () => {
     expect(addEl.textContent).toMatch(/^\+\d+/);
     expect(delEl.textContent).toMatch(/^-\d+/);
   });
+
+  test('stats are in their own row separate from the filename row', () => {
+    const files = [makeFile('dom/media/Foo.cpp')];
+    renderFileNav(files, makeDiffWrap(files));
+    const item = document.querySelector('.file-nav-item');
+    const filenameRow = item.querySelector('.file-nav-filename-row');
+    const statsEl = item.querySelector('.file-nav-stats');
+    // stats must not be inside the filename row
+    expect(filenameRow.contains(statsEl)).toBe(false);
+    // both must share the same parent (the nav item)
+    expect(statsEl.parentElement).toBe(item);
+  });
 });
 
 // ── Sidebar collapse toggle ────────────────────────────────────────────────
