@@ -6,7 +6,7 @@
 global.fetch = jest.fn();
 global.EventSource = jest.fn(() => ({ addEventListener: jest.fn(), close: jest.fn() }));
 
-const { init } = require('../public/app');
+const { loadAndRender } = require('../public/app');
 
 function setupDOM() {
   document.body.innerHTML = `
@@ -67,23 +67,23 @@ describe('document.title — page title reflects repo and worktree', () => {
 
   test('sets title to repoName-worktreeName when diff loads', async () => {
     mockFetch({ repoName: 'firefox', worktreeName: 'bug-1234567', worktreePath: '/Users/dev/firefox-bug-1234567', patches: [] });
-    await init();
+    await loadAndRender();
     expect(document.title).toBe('firefox-bug-1234567');
   });
 
   test('does not change title when repoName is absent', async () => {
     mockFetch({ worktreeName: 'bug-1234567', worktreePath: '/Users/dev/firefox-bug-1234567', patches: [] });
-    await init();
+    await loadAndRender();
     expect(document.title).toBe('Revue');
   });
 
   test('title updates to new worktree name on next init call', async () => {
     mockFetch({ repoName: 'myrepo', worktreeName: 'feat-A', worktreePath: '/Users/dev/myrepo-feat-A', patches: [] });
-    await init();
+    await loadAndRender();
     expect(document.title).toBe('myrepo-feat-A');
 
     mockFetch({ repoName: 'myrepo', worktreeName: 'feat-B', worktreePath: '/Users/dev/myrepo-feat-B', patches: [] });
-    await init();
+    await loadAndRender();
     expect(document.title).toBe('myrepo-feat-B');
   });
 });

@@ -1477,7 +1477,13 @@ async function initWorktreeBar() {
           body: JSON.stringify({ worktreeName: name }),
         });
         if (!r.ok) throw new Error('Switch failed');
-        location.reload();
+        // Update active pill
+        bar.querySelectorAll('.worktree-pill').forEach((p) => {
+          p.classList.toggle('active', p.dataset.name === name);
+          p.disabled = false;
+          p.textContent = p.dataset.name;
+        });
+        await loadAndRender();
       } catch {
         btn.textContent = name;
         btn.disabled = false;
@@ -1489,45 +1495,28 @@ async function initWorktreeBar() {
 }
 
 // ── Boot ───────────────────────────────────────────────────────────────────
-async function init() {
-  updateSubmitButton();
-
-  $('#btn-submit').addEventListener('click', submitReview);
-  initTabsDragScroll();
-
-  $('#btn-copy-prompt').addEventListener('click', () => {
-    const prompt = $('#result-prompt').value;
-    navigator.clipboard.writeText(prompt).then(() => {
-      $('#btn-copy-prompt').textContent = 'Copied!';
-      setTimeout(() => { $('#btn-copy-prompt').textContent = 'Copy prompt'; }, 2000);
-    });
-  });
-
-  $('#btn-copy-current-prompt').addEventListener('click', () => {
-    const bar = $('#current-prompt-bar');
-    const prompt = bar && bar.dataset.prompt;
-    if (!prompt) return;
-    navigator.clipboard.writeText(prompt).then(() => {
-      $('#btn-copy-current-prompt').textContent = 'Copied!';
-      setTimeout(() => { $('#btn-copy-current-prompt').textContent = 'Copy current prompt'; }, 2000);
-    });
-  });
-
-  $('#btn-close-modal').addEventListener('click', () => {
-    $('#result-overlay').classList.remove('visible');
-  });
-
-  $('#result-overlay').addEventListener('click', (e) => {
-    if (e.target === $('#result-overlay')) {
-      $('#result-overlay').classList.remove('visible');
-    }
-  });
-
-  initWorktreeBar(); // fire-and-forget — bar loads independently
+// Fetches diff + state from the server and re-renders everything in-place.
+// Safe to call multiple times (worktree switch, manual refresh).
+async function loadAndRender() {
+  // Reset ephemeral state before loading new worktree data
+  state.comments = {};
+  state.generalComments = {};
+  state.approved = new Set();
+  state.denied = new Set();
+  state.patches = [];
+  state.currentPatchIdx = 0;
+  state.revisions = [];
+  state.updatedPatches = {};
+  state.showRevision = {};
+  state.compareRevision = {};
 
   const loading = $('#loading');
   const errorMsg = $('#error-msg');
   const filesChanged = $('#files-changed');
+
+  loading.style.display = '';
+  errorMsg.style.display = 'none';
+  filesChanged.style.display = 'none';
 
   try {
     const [diffRes, stateRes] = await Promise.all([fetch('/api/diff'), fetch('/api/state')]);
@@ -1565,6 +1554,44 @@ async function init() {
     errorMsg.style.display = '';
     errorMsg.textContent = `Error loading diff: ${err.message}`;
   }
+}
+
+async function init() {
+  updateSubmitButton();
+
+  $('#btn-submit').addEventListener('click', submitReview);
+  initTabsDragScroll();
+
+  $('#btn-copy-prompt').addEventListener('click', () => {
+    const prompt = $('#result-prompt').value;
+    navigator.clipboard.writeText(prompt).then(() => {
+      $('#btn-copy-prompt').textContent = 'Copied!';
+      setTimeout(() => { $('#btn-copy-prompt').textContent = 'Copy prompt'; }, 2000);
+    });
+  });
+
+  $('#btn-copy-current-prompt').addEventListener('click', () => {
+    const bar = $('#current-prompt-bar');
+    const prompt = bar && bar.dataset.prompt;
+    if (!prompt) return;
+    navigator.clipboard.writeText(prompt).then(() => {
+      $('#btn-copy-current-prompt').textContent = 'Copied!';
+      setTimeout(() => { $('#btn-copy-current-prompt').textContent = 'Copy current prompt'; }, 2000);
+    });
+  });
+
+  $('#btn-close-modal').addEventListener('click', () => {
+    $('#result-overlay').classList.remove('visible');
+  });
+
+  $('#result-overlay').addEventListener('click', (e) => {
+    if (e.target === $('#result-overlay')) {
+      $('#result-overlay').classList.remove('visible');
+    }
+  });
+
+  initWorktreeBar(); // fire-and-forget — bar loads independently
+  await loadAndRender();
 }
 
 // ── Update detection ───────────────────────────────────────────────────────
@@ -1612,6 +1639,7 @@ if (typeof module !== 'undefined') {
     renderTabs,
     switchPatch,
     patchEls,
+    loadAndRender,
     init,
   };
 }
