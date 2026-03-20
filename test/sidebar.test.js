@@ -51,6 +51,13 @@ beforeEach(() => {
 // ── Visibility ─────────────────────────────────────────────────────────────
 
 describe('renderFileNav — visibility', () => {
+  test('does nothing when #file-nav element is absent (demo/embedded pages)', () => {
+    document.body.innerHTML = '<div id="top-bar"></div><div id="files-changed"></div>';
+    const files = [makeFile('dom/media/Foo.cpp')];
+    expect(() => renderFileNav(files, makeDiffWrap(files))).not.toThrow();
+    expect(() => renderFileNav([], null)).not.toThrow();
+  });
+
   test('hides #file-nav when files array is empty', () => {
     renderFileNav([], null);
     expect(document.getElementById('file-nav').style.display).toBe('none');

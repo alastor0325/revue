@@ -822,6 +822,7 @@ let fileNavCollapsed = false;
 
 function renderFileNav(files, diffWrap) {
   const nav = $('#file-nav');
+  if (!nav) return;
   if (fileNavScrollHandler) {
     window.removeEventListener('scroll', fileNavScrollHandler, { passive: true });
     fileNavScrollHandler = null;
