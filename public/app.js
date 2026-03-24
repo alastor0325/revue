@@ -1469,8 +1469,25 @@ async function initWorktreeBar() {
   try {
     const res = await fetch('/api/worktrees');
     if (!res.ok) return;
-    const { current, worktrees } = await res.json();
+    let { current, worktrees } = await res.json();
     if (worktrees.length <= 1) return; // nothing to switch to
+
+    // ── Hash navigation: switch to worktree named in URL hash on load ──
+    const hashName = window.location.hash.slice(1);
+    if (hashName && hashName !== current) {
+      const target = worktrees.find((wt) => wt.worktreeName === hashName);
+      if (target) {
+        const r = await fetch('/api/switch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ worktreeName: hashName }),
+        });
+        if (r.ok) current = hashName;
+      }
+    }
+
+    // Keep URL hash in sync with active worktree
+    history.replaceState(null, '', '#' + current);
 
     const bar = $('#worktree-bar');
     const pills = $('#worktree-pills');
@@ -1510,6 +1527,7 @@ async function initWorktreeBar() {
           body: JSON.stringify({ worktreeName: name }),
         });
         if (!r.ok) throw new Error('Switch failed');
+        history.replaceState(null, '', '#' + name);
         // Update active pill
         pills.querySelectorAll('.worktree-pill').forEach((p) => {
           p.classList.toggle('active', p.dataset.name === name);
@@ -1628,7 +1646,7 @@ async function init() {
     await loadAndRender();
   });
 
-  initWorktreeBar(); // fire-and-forget — bar loads independently
+  await initWorktreeBar(); // awaited so hash-based switch completes before first render
   await loadAndRender();
 }
 
