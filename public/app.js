@@ -490,13 +490,16 @@ function renderExpandRow(table, patchHash, filePath, hiddenStart, hiddenEnd, ins
     const btn = e.target.closest('button[data-action]');
     if (!btn) return;
     const action = btn.dataset.action;
-    // 'up'   — load from top of hidden range, insert above bar
-    // 'down' — between hunks: load from bottom of range, insert below bar
-    //          after last hunk: load next batch from curStart, insert above bar
-    if (action === 'up' || (action === 'down' && isFileBottom)) {
+    // 'up'   — show lines just above the hunk below (near curEnd), insert above bar
+    // 'down' — between hunks: show lines just below the hunk above (near curStart), insert below bar
+    //          after last hunk: advance curStart forward, insert above bar (bar stays at bottom)
+    if (action === 'up') {
+      const end = curEnd ?? curStart + CHUNK - 1;
+      load(Math.max(end - CHUNK + 1, curStart), end, true);
+    } else if (action === 'down' && isFileBottom) {
       load(curStart, Math.min(curStart + CHUNK - 1, curEnd ?? curStart + CHUNK - 1), true);
     } else if (action === 'down') {
-      load(Math.max(curEnd - CHUNK + 1, curStart), curEnd, false);
+      load(curStart, Math.min(curStart + CHUNK - 1, curEnd), false);
     } else if (action === 'small') {
       load(curStart, curEnd, true);
     }

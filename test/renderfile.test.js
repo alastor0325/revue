@@ -266,3 +266,84 @@ describe('renderFile — expand context rows', () => {
     expect(lastRow.classList.contains('expand-context-row')).toBe(true);
   });
 });
+
+describe('renderFile — expand context button fetch ranges', () => {
+  function mockFileContext(lines = []) {
+    global.fetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ lines, totalLines: 2000 }),
+    });
+  }
+
+  // Two hunks: one at line 5, one at line 1662 — creates an in-between gap [~8, 1661]
+  function makeFileWithTwoHunks() {
+    const hunk1 = makeHunk({
+      header: '@@ -5,3 +5,3 @@',
+      oldStart: 5, oldCount: 3,
+      newStart: 5, newCount: 3,
+      lines: [
+        makeLine('context', 'a', 5, 5),
+        makeLine('added',   'b', null, 6),
+        makeLine('context', 'c', 6, 7),
+      ],
+    });
+    const hunk2 = makeHunk({
+      header: '@@ -1662,3 +1662,3 @@',
+      oldStart: 1662, oldCount: 3,
+      newStart: 1662, newCount: 3,
+      lines: [
+        makeLine('context', 'x', 1662, 1662),
+        makeLine('added',   'y', null, 1663),
+        makeLine('context', 'z', 1663, 1664),
+      ],
+    });
+    return renderFile(makeFile({ hunks: [hunk1, hunk2] }), 'hash1');
+  }
+
+  test('↑ 20 Lines between two hunks fetches the 20 lines just above the lower hunk (near curEnd)', async () => {
+    mockFileContext([]);
+    const el = makeFileWithTwoHunks();
+
+    // There are multiple expand rows; find the one between the hunks (not isFileTop/isFileBottom)
+    // It should have both ↑ and ↓ buttons. Find the ↑ button in such a row.
+    const expandRows = el.querySelectorAll('tr.expand-context-row');
+    let upBtn = null;
+    for (const row of expandRows) {
+      const up = row.querySelector('button[data-action="up"]');
+      const down = row.querySelector('button[data-action="down"]');
+      if (up && down) { upBtn = up; break; } // between-hunks row has both
+    }
+    expect(upBtn).not.toBeNull();
+    upBtn.click();
+    await Promise.resolve();
+
+    const url = global.fetch.mock.calls[global.fetch.mock.calls.length - 1][0];
+    // Gap ends at 1661; ↑ should fetch [1642, 1661]
+    expect(url).toContain('end=1661');
+    const startMatch = url.match(/start=(\d+)/);
+    expect(parseInt(startMatch[1], 10)).toBeGreaterThan(1600); // near 1661, not near gap start
+  });
+
+  test('↓ 20 Lines between two hunks fetches the 20 lines just below the upper hunk (near curStart)', async () => {
+    mockFileContext([]);
+    const el = makeFileWithTwoHunks();
+
+    const expandRows = el.querySelectorAll('tr.expand-context-row');
+    let downBtn = null;
+    for (const row of expandRows) {
+      const up = row.querySelector('button[data-action="up"]');
+      const down = row.querySelector('button[data-action="down"]');
+      if (up && down) { downBtn = down; break; }
+    }
+    expect(downBtn).not.toBeNull();
+    downBtn.click();
+    await Promise.resolve();
+
+    const url = global.fetch.mock.calls[global.fetch.mock.calls.length - 1][0];
+    // Gap starts just after hunk1 ends (~line 8); ↓ should fetch near that start
+    const startMatch = url.match(/start=(\d+)/);
+    const endMatch = url.match(/end=(\d+)/);
+    expect(parseInt(startMatch[1], 10)).toBeLessThan(100); // near gap start, not 1661
+    expect(parseInt(endMatch[1], 10)).toBeLessThan(100);   // only fetches ~20 lines from top
+  });
+});
