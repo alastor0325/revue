@@ -254,3 +254,76 @@ describe('#hash navigation — URL hash switches to matching worktree on load', 
     expect(window.location.hash).toBe('#bug-111');
   });
 });
+
+describe('#hash navigation — hashchange event switches worktree after page load', () => {
+  const WORKTREES = [
+    { worktreeName: 'firefox' },
+    { worktreeName: 'bug-111' },
+    { worktreeName: 'bug-222' },
+  ];
+
+  function mockSwitchFetch() {
+    global.fetch.mockImplementation((url) => {
+      if (url === '/api/worktrees') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ current: 'bug-111', worktrees: WORKTREES }),
+        });
+      }
+      if (url === '/api/switch') {
+        return Promise.resolve({ ok: true });
+      }
+      if (url === '/api/diff') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ patches: [], worktreeName: 'bug-222', worktreePath: '/tmp', repoName: 'firefox' }) });
+      }
+      if (url === '/api/state') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+      }
+      return Promise.reject(new Error(`Unmocked: ${url}`));
+    });
+  }
+
+  beforeEach(() => {
+    setupDOM();
+    jest.clearAllMocks();
+    window.location.hash = '';
+    mockSwitchFetch();
+  });
+
+  test('hashchange triggers switch to the named worktree', async () => {
+    await initWorktreeBar();
+    jest.clearAllMocks();
+    mockSwitchFetch();
+
+    // Call the registered handler directly to avoid async event-dispatch timing issues
+    window.location.hash = '#bug-222';
+    await initWorktreeBar._hashHandler();
+
+    const switchCalls = global.fetch.mock.calls.filter(([url]) => url === '/api/switch');
+    expect(switchCalls).toHaveLength(1);
+    expect(JSON.parse(switchCalls[0][1].body).worktreeName).toBe('bug-222');
+  });
+
+  test('hashchange to current worktree does not re-switch', async () => {
+    await initWorktreeBar();
+    jest.clearAllMocks();
+
+    // bug-111 is active; navigating to it again should be a no-op
+    window.location.hash = '#bug-111';
+    await initWorktreeBar._hashHandler();
+
+    const switchCalls = global.fetch.mock.calls.filter(([url]) => url === '/api/switch');
+    expect(switchCalls).toHaveLength(0);
+  });
+
+  test('hashchange to unknown worktree is ignored', async () => {
+    await initWorktreeBar();
+    jest.clearAllMocks();
+
+    window.location.hash = '#nonexistent';
+    await initWorktreeBar._hashHandler();
+
+    const switchCalls = global.fetch.mock.calls.filter(([url]) => url === '/api/switch');
+    expect(switchCalls).toHaveLength(0);
+  });
+});

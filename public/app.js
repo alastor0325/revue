@@ -1542,6 +1542,45 @@ async function initWorktreeBar() {
     });
 
     bar.style.display = '';
+
+    // Handle hash changes after page load (e.g. user edits hash in address bar).
+    // Remove any previous listener before adding a new one so re-initialisation
+    // (e.g. in tests) never accumulates duplicate handlers.
+    if (initWorktreeBar._hashHandler) {
+      window.removeEventListener('hashchange', initWorktreeBar._hashHandler);
+    }
+    initWorktreeBar._hashHandler = async () => {
+      const name = window.location.hash.slice(1);
+      if (!name) return;
+      const active = pills.querySelector('.worktree-pill.active');
+      if (active && active.dataset.name === name) return; // already on it
+      const target = worktrees.find((wt) => wt.worktreeName === name);
+      if (!target) return;
+      pills.querySelectorAll('.worktree-pill').forEach((p) => {
+        p.disabled = p.dataset.name !== name;
+        if (p.dataset.name === name) p.textContent = 'Switching…';
+      });
+      try {
+        const r = await fetch('/api/switch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ worktreeName: name }),
+        });
+        if (!r.ok) throw new Error('Switch failed');
+        pills.querySelectorAll('.worktree-pill').forEach((p) => {
+          p.classList.toggle('active', p.dataset.name === name);
+          p.disabled = false;
+          p.textContent = p.dataset.name;
+        });
+        await loadAndRender();
+      } catch {
+        pills.querySelectorAll('.worktree-pill').forEach((p) => {
+          p.disabled = false;
+          p.textContent = p.dataset.name;
+        });
+      }
+    };
+    window.addEventListener('hashchange', initWorktreeBar._hashHandler);
   } catch { /* non-fatal */ }
 }
 
