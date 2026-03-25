@@ -100,6 +100,17 @@ describe('parseArgs', () => {
     expect(port).toBe(9000);
     expect(rest).toEqual(['my-feature']);
   });
+
+  test('parses --no-open flag', () => {
+    const { noOpen, rest } = parseArgs(['my-feature', '--no-open']);
+    expect(noOpen).toBe(true);
+    expect(rest).toEqual(['my-feature']);
+  });
+
+  test('noOpen defaults to false when --no-open is absent', () => {
+    const { noOpen } = parseArgs(['my-feature']);
+    expect(noOpen).toBe(false);
+  });
 });
 
 // ── pickDefaultEntry ───────────────────────────────────────────────────────

@@ -6,7 +6,7 @@
 global.fetch = jest.fn();
 global.EventSource = jest.fn(() => ({ addEventListener: jest.fn(), close: jest.fn() }));
 
-const { buildPatchEl, initPatchNodes, renderTabs, patchEls, state, switchPatch } = require('../public/app');
+const { buildPatchEl, initPatchNodes, renderTabs, patchEls, state, switchPatch, addDragScroll } = require('../public/app');
 
 function makePatches(...messages) {
   return messages.map((msg, i) => ({
@@ -183,5 +183,29 @@ describe('renderTabs', () => {
     expect(btns[0].classList.contains('active')).toBe(false);
     expect(btns[1].classList.contains('active')).toBe(true);
     expect(btns[2].classList.contains('active')).toBe(false);
+  });
+});
+
+// ── addDragScroll ──────────────────────────────────────────────────────────
+
+describe('addDragScroll', () => {
+  test('stops scrolling when element is detached from DOM', () => {
+    const el = document.createElement('div');
+    el.scrollLeft = 0;
+    document.body.appendChild(el);
+    addDragScroll(el);
+
+    // Start drag
+    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 100, button: 0 }));
+    expect(el.isConnected).toBe(true);
+
+    // Detach the element (simulates replaceWith on re-render)
+    el.remove();
+    expect(el.isConnected).toBe(false);
+
+    // Mousemove on document should not mutate scrollLeft (guard fires)
+    const prevScroll = el.scrollLeft;
+    document.dispatchEvent(new MouseEvent('mousemove', { clientX: 50 }));
+    expect(el.scrollLeft).toBe(prevScroll);
   });
 });

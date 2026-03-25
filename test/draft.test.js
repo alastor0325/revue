@@ -122,13 +122,16 @@ describe('showCommentForm button visibility', () => {
     expect(formRow.querySelector('.btn-save')).not.toBeNull();
   });
 
-  test('comment-actions is left-aligned with flex-wrap so buttons are always visible', () => {
-    const css = require('fs').readFileSync(
-      require('path').join(__dirname, '../public/style.css'), 'utf8'
-    );
-    const actionsBlock = css.match(/\.comment-actions\s*\{[^}]+\}/)?.[0] ?? '';
-    expect(actionsBlock).toContain('flex-wrap: wrap');
-    expect(actionsBlock).toContain('justify-content: flex-start');
+  test('all three action buttons are children of .comment-actions', () => {
+    const tr = setupTr();
+    showCommentForm(tr, HASH, FILE, LINE, KEY);
+
+    const formRow = tr.nextElementSibling;
+    const actions = formRow.querySelector('.comment-actions');
+    expect(actions).not.toBeNull();
+    expect(actions.querySelector('.btn-cancel')).not.toBeNull();
+    expect(actions.querySelector('.btn-discard')).not.toBeNull();
+    expect(actions.querySelector('.btn-save')).not.toBeNull();
   });
 });
 

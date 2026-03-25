@@ -6,7 +6,7 @@
 global.fetch = jest.fn();
 global.EventSource = jest.fn(() => ({ addEventListener: jest.fn(), close: jest.fn() }));
 
-const { loadAndRender, init, initWorktreeBar } = require('../public/app');
+const { loadAndRender, init, initWorktreeBar, getPollTimer } = require('../public/app');
 
 function setupDOM() {
   document.body.innerHTML = `
@@ -325,5 +325,15 @@ describe('#hash navigation — hashchange event switches worktree after page loa
 
     const switchCalls = global.fetch.mock.calls.filter(([url]) => url === '/api/switch');
     expect(switchCalls).toHaveLength(0);
+  });
+});
+
+// ── _pollTimer is stored ────────────────────────────────────────────────────
+
+describe('getPollTimer', () => {
+  test('returns null before polling starts', () => {
+    // _pollTimer is module-level; since startUpdatePolling is async and not called
+    // in tests (DOMContentLoaded does not fire in jsdom), the timer stays null.
+    expect(getPollTimer()).toBeNull();
   });
 });

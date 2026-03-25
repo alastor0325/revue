@@ -453,6 +453,7 @@ describe('startServer pidFile', () => {
       worktreePath: tmpDir,
       mainRepoPath: '/fake/firefox',
       pidFile,
+      noOpen: true,
     });
     try {
       expect(fs.existsSync(pidFile)).toBe(true);
@@ -470,6 +471,7 @@ describe('startServer pidFile', () => {
       worktreeName: 'bugABC',
       worktreePath: tmpDir,
       mainRepoPath: '/fake/firefox',
+      noOpen: true,
     });
     await new Promise((resolve) => server.close(resolve));
   });
@@ -481,11 +483,31 @@ describe('startServer pidFile', () => {
       worktreePath: tmpDir,
       mainRepoPath: '/fake/firefox',
       port: desiredPort,
+      noOpen: true,
     });
     try {
       expect(server.address().port).toBe(desiredPort);
     } finally {
       await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  test('does not open browser when noOpen is true', async () => {
+    let browserOpened = false;
+    jest.spyOn(require('child_process'), 'execSync').mockImplementation((cmd) => {
+      if (/^open |^xdg-open |^start /.test(cmd)) browserOpened = true;
+    });
+    const server = await startServer({
+      worktreeName: 'bugABC',
+      worktreePath: tmpDir,
+      mainRepoPath: '/fake/firefox',
+      noOpen: true,
+    });
+    try {
+      expect(browserOpened).toBe(false);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+      jest.restoreAllMocks();
     }
   });
 });

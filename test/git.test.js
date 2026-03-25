@@ -5,7 +5,7 @@ jest.mock('child_process', () => ({
 }));
 
 const { execSync } = require('child_process');
-const { getHeadHash, parseDiff, parseWorktreeList, getDiffForCommit, parseCommitBody, getMergeBase, getDiffPerCommit } = require('../src/git');
+const { getHeadHash, getCommits, parseDiff, parseWorktreeList, getDiffForCommit, parseCommitBody, getMergeBase, getDiffPerCommit } = require('../src/git');
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -299,7 +299,7 @@ describe('parseWorktreeList', () => {
   });
 });
 
-// ── getHeadHash — empty repo ───────────────────────────────────────────────
+// ── getHeadHash ────────────────────────────────────────────────────────────
 
 describe('getHeadHash', () => {
   test('returns null when repo has no commits (rev-parse HEAD fails)', () => {
@@ -307,9 +307,30 @@ describe('getHeadHash', () => {
     expect(getHeadHash('/fake/empty-repo')).toBeNull();
   });
 
-  test('returns hash string when HEAD exists', () => {
-    execSync.mockReturnValue('abc123\n');
-    expect(getHeadHash('/fake/repo')).toBe('abc123');
+  test('returns trimmed HEAD hash and calls correct git command', () => {
+    execSync.mockReturnValue('abc1234def5678\n');
+    expect(getHeadHash('/path/to/repo')).toBe('abc1234def5678');
+    expect(execSync).toHaveBeenCalledWith(
+      'git -C "/path/to/repo" rev-parse HEAD',
+      { encoding: 'utf8' }
+    );
+  });
+});
+
+// ── getCommits ─────────────────────────────────────────────────────────────
+
+describe('getCommits', () => {
+  test('silently skips malformed log lines that have no space', () => {
+    // getMergeBase needs 2 calls (rev-parse origin/main, then merge-base HEAD <tip>)
+    // getCommits then needs 1 more (git log)
+    execSync
+      .mockReturnValueOnce('deadbeef\n')  // rev-parse origin/main → mainTip
+      .mockReturnValueOnce('baseabc\n')   // merge-base HEAD deadbeef → base
+      .mockReturnValueOnce('abc1234 normal commit\nNOSPACE\ndef5678 another commit\n');
+    const result = getCommits('/fake/worktree', '/fake/main');
+    expect(result).toHaveLength(2);
+    expect(result[0].hash).toBe('abc1234');
+    expect(result[1].hash).toBe('def5678');
   });
 });
 
@@ -474,19 +495,6 @@ diff --git a/foo.js b/foo.js`;
     const result = parseCommitBody(raw);
     expect(result).toBe('Subject only');
     expect(result).not.toMatch(/\n$/);
-  });
-});
-
-// ── getHeadHash ────────────────────────────────────────────────────────────
-
-describe('getHeadHash', () => {
-  test('returns trimmed HEAD hash', () => {
-    execSync.mockReturnValue('abc1234def5678\n');
-    expect(getHeadHash('/path/to/repo')).toBe('abc1234def5678');
-    expect(execSync).toHaveBeenCalledWith(
-      'git -C "/path/to/repo" rev-parse HEAD',
-      { encoding: 'utf8' }
-    );
   });
 });
 
