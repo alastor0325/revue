@@ -346,4 +346,72 @@ describe('renderFile — expand context button fetch ranges', () => {
     expect(parseInt(startMatch[1], 10)).toBeLessThan(100); // near gap start, not 1661
     expect(parseInt(endMatch[1], 10)).toBeLessThan(100);   // only fetches ~20 lines from top
   });
+
+  // flush all pending microtasks (fetch + json each need an await)
+  async function flushAsync() {
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+
+  test('↑ between two hunks: expand bar persists after click (curEnd retreats, bar not removed)', async () => {
+    // Return 20 real lines so the cursor updates
+    const fakeLines = Array.from({ length: 20 }, (_, i) => ({
+      oldLineNum: 1642 + i, newLineNum: 1642 + i, content: `line ${1642 + i}`,
+    }));
+    global.fetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ lines: fakeLines, totalLines: 2000 }),
+    });
+    const el = makeFileWithTwoHunks();
+
+    const expandRows = el.querySelectorAll('tr.expand-context-row');
+    let betweenRow = null;
+    for (const row of expandRows) {
+      if (row.querySelector('button[data-action="up"]') && row.querySelector('button[data-action="down"]')) {
+        betweenRow = row; break;
+      }
+    }
+    expect(betweenRow).not.toBeNull();
+    betweenRow.querySelector('button[data-action="up"]').click();
+    await flushAsync();
+
+    // Bar must still be in the DOM (curEnd retreated to 1641, not removed)
+    expect(betweenRow.parentNode).not.toBeNull();
+    // A second ↑ click should now fetch the next batch ending at 1641
+    betweenRow.querySelector('button[data-action="up"]').click();
+    await flushAsync();
+    const url = global.fetch.mock.calls[global.fetch.mock.calls.length - 1][0];
+    expect(url).toContain('end=1641');
+  });
+
+  test('↓ between two hunks: expand bar persists after click (curStart advances, bar not removed)', async () => {
+    const fakeLines = Array.from({ length: 20 }, (_, i) => ({
+      oldLineNum: 8 + i, newLineNum: 8 + i, content: `line ${8 + i}`,
+    }));
+    global.fetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ lines: fakeLines, totalLines: 2000 }),
+    });
+    const el = makeFileWithTwoHunks();
+
+    const expandRows = el.querySelectorAll('tr.expand-context-row');
+    let betweenRow = null;
+    for (const row of expandRows) {
+      if (row.querySelector('button[data-action="up"]') && row.querySelector('button[data-action="down"]')) {
+        betweenRow = row; break;
+      }
+    }
+    expect(betweenRow).not.toBeNull();
+    betweenRow.querySelector('button[data-action="down"]').click();
+    await flushAsync();
+
+    // Bar must still be in the DOM (curStart advanced to 28, not removed)
+    expect(betweenRow.parentNode).not.toBeNull();
+    // A second ↓ click should fetch the next batch starting at 28
+    betweenRow.querySelector('button[data-action="down"]').click();
+    await flushAsync();
+    const url = global.fetch.mock.calls[global.fetch.mock.calls.length - 1][0];
+    const startMatch = url.match(/start=(\d+)/);
+    expect(parseInt(startMatch[1], 10)).toBeGreaterThan(20); // advanced past first batch
+  });
 });
