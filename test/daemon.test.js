@@ -460,6 +460,12 @@ describe('runInit', () => {
     expect(exitSpy).toHaveBeenCalledWith(1);
     exitSpy.mockRestore();
   });
+
+  test('resolves tilde to home directory', () => {
+    runInit(['~'], configFile);
+    const config = readConfig(configFile);
+    expect(config.defaultRepo).toBe(os.homedir());
+  });
 });
 
 describe('printHelp', () => {

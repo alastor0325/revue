@@ -116,6 +116,8 @@ describe('git integration', () => {
 
     const patch = patches[0];
     expect(patch.message).toBe('feat: add hello function');
+    expect(typeof patch.body).toBe('string');
+    expect(patch.body).toContain('feat: add hello function');
     // git log --oneline produces an abbreviated hash
     expect(commitHash.startsWith(patch.hash)).toBe(true);
     expect(patch.files).toHaveLength(1);
@@ -278,6 +280,33 @@ describe('server HTTP integration', () => {
     expect(typeof body.prompt).toBe('string');
     expect(body.prompt.length).toBeGreaterThan(0);
     fs.unlinkSync(body.feedbackPath);
+  });
+
+  test('GET /api/state returns prompt from existing REVIEW_FEEDBACK MD file', async () => {
+    const mdPath = path.join(workRepoPath, 'REVIEW_FEEDBACK_work-repo.md');
+    fs.writeFileSync(mdPath, 'pre-existing review prompt', 'utf8');
+    try {
+      const { status, body } = await httpRequest(`${baseUrl}/api/state`);
+      expect(status).toBe(200);
+      expect(body.prompt).toBe('pre-existing review prompt');
+    } finally {
+      fs.unlinkSync(mdPath);
+    }
+  });
+
+  test('GET /api/state returns empty fallback when state JSON is malformed', async () => {
+    const statePath = path.join(workRepoPath, 'REVIEW_STATE_work-repo.json');
+    let existing = null;
+    try { existing = fs.readFileSync(statePath, 'utf8'); } catch {}
+    fs.writeFileSync(statePath, 'not valid json!!!', 'utf8');
+    try {
+      const { status, body } = await httpRequest(`${baseUrl}/api/state`);
+      expect(status).toBe(200);
+      expect(Object.keys(body)).toHaveLength(0);
+    } finally {
+      if (existing !== null) fs.writeFileSync(statePath, existing, 'utf8');
+      else try { fs.unlinkSync(statePath); } catch {}
+    }
   });
 
   test('GET /api/reload sends SSE stream with server token', async () => {
