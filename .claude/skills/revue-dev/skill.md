@@ -20,6 +20,8 @@ Develop → Self-Review → Test → Agent Review → Commit → Push → (fix &
 
 Project rules (from CLAUDE.md):
 - Every code change **must** include a corresponding test in the same response.
+- **All tests must pass before committing.** A failing test is a hard blocker — fix it, do not skip or suppress.
+- **Always add integration tests when possible.** If the change touches `src/git.js`, `src/server.js`, or `bin/revue.js`, add or update a test in `test/integration.test.js` that exercises the real code path (real git commands, real HTTP, real file I/O — no mocks). Unit tests alone are not sufficient for server and git module changes.
 - If the change affects user-facing behavior or CLI flags, update README.md.
 
 ---
