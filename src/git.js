@@ -451,4 +451,4 @@ function getFileLines(worktreePath, hash, filePath, start, end) {
   return { lines, totalLines };
 }
 
-module.exports = { getHeadHash, getCommits, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getMergeBase, parseDiff, parseCommitBody, parseWorktreeList, discoverWorktrees, getFileLines };
+module.exports = { getHeadHash, getCommits, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getMergeBase, parseDiff, parseCommitBody, parseWorktreeList, discoverWorktrees, getFileLines, getPatchLines, lcsCompare };

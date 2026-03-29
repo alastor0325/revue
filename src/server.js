@@ -254,6 +254,10 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
     if (!hash || !hashRe.test(hash) || !file || !start || !end) {
       return res.status(400).json({ error: 'Invalid parameters.' });
     }
+    // A " in the file path breaks shell quoting in git show "${hash}:${file}".
+    if (/["\n]/.test(file)) {
+      return res.status(400).json({ error: 'Invalid parameters.' });
+    }
     const startLine = parseInt(start, 10);
     const endLine   = parseInt(end,   10);
     if (isNaN(startLine) || isNaN(endLine) || startLine < 1 || endLine < startLine) {

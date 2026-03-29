@@ -5,7 +5,7 @@ jest.mock('child_process', () => ({
 }));
 
 const { execSync } = require('child_process');
-const { getHeadHash, getCommits, parseDiff, parseWorktreeList, getDiffForCommit, parseCommitBody, getMergeBase, getDiffPerCommit } = require('../src/git');
+const { getHeadHash, getCommits, parseDiff, parseWorktreeList, getDiffForCommit, parseCommitBody, getMergeBase, getDiffPerCommit, getPatchLines, lcsCompare } = require('../src/git');
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -620,5 +620,91 @@ describe('getDiffBetweenCommits', () => {
     expect(files).toHaveLength(1);
     const lines = files[0].hunks[0].lines;
     expect(lines.find((l) => l.type === 'removed' && l.content === '  droppedLine();')).toBeTruthy();
+  });
+});
+
+// ── getPatchLines ─────────────────────────────────────────────────────────
+
+describe('getPatchLines', () => {
+  test('returns only added and removed lines, stripping context', () => {
+    const file = {
+      hunks: [{
+        lines: [
+          { type: 'context', content: 'ctx1' },
+          { type: 'added', content: 'add1' },
+          { type: 'removed', content: 'rem1' },
+          { type: 'context', content: 'ctx2' },
+          { type: 'added', content: 'add2' },
+        ],
+      }],
+    };
+    const result = getPatchLines(file);
+    expect(result).toEqual([
+      { type: 'added', content: 'add1' },
+      { type: 'removed', content: 'rem1' },
+      { type: 'added', content: 'add2' },
+    ]);
+  });
+
+  test('returns empty array when all lines are context', () => {
+    const file = {
+      hunks: [{ lines: [{ type: 'context', content: 'x' }] }],
+    };
+    expect(getPatchLines(file)).toEqual([]);
+  });
+
+  test('returns empty array for null or undefined input', () => {
+    expect(getPatchLines(null)).toEqual([]);
+    expect(getPatchLines(undefined)).toEqual([]);
+  });
+
+  test('collects lines across multiple hunks', () => {
+    const file = {
+      hunks: [
+        { lines: [{ type: 'added', content: 'a' }] },
+        { lines: [{ type: 'removed', content: 'b' }, { type: 'context', content: 'c' }] },
+      ],
+    };
+    const result = getPatchLines(file);
+    expect(result).toEqual([
+      { type: 'added', content: 'a' },
+      { type: 'removed', content: 'b' },
+    ]);
+  });
+});
+
+// ── lcsCompare ────────────────────────────────────────────────────────────
+
+describe('lcsCompare', () => {
+  test('returns empty array for two empty sequences', () => {
+    expect(lcsCompare([], [])).toEqual([]);
+  });
+
+  test('all entries have inFrom and inTo true when sequences are identical', () => {
+    const linesA = [{ type: 'added', content: 'x = 1' }, { type: 'removed', content: 'y = 2' }];
+    const linesB = [{ type: 'added', content: 'x = 1' }, { type: 'removed', content: 'y = 2' }];
+    const result = lcsCompare(linesA, linesB);
+    expect(result).toHaveLength(2);
+    expect(result.every((r) => r.inFrom && r.inTo)).toBe(true);
+  });
+
+  test('produces removed and added entries when sequences share nothing', () => {
+    const from = [{ type: 'added', content: 'only-in-from' }];
+    const to   = [{ type: 'added', content: 'only-in-to' }];
+    const result = lcsCompare(from, to);
+    expect(result).toHaveLength(2);
+    expect(result.some((r) =>  r.inFrom && !r.inTo && r.content === 'only-in-from')).toBe(true);
+    expect(result.some((r) => !r.inFrom &&  r.inTo && r.content === 'only-in-to')).toBe(true);
+  });
+
+  test('handles one empty sequence', () => {
+    const from = [{ type: 'added', content: 'line' }];
+    const resultA = lcsCompare(from, []);
+    expect(resultA).toHaveLength(1);
+    expect(resultA[0]).toMatchObject({ inFrom: true, inTo: false, content: 'line' });
+
+    const resultB = lcsCompare([], from);
+    expect(resultB).toHaveLength(1);
+    expect(resultB[0]).toMatchObject({ inFrom: false, inTo: true, content: 'line' });
   });
 });

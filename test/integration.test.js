@@ -229,6 +229,16 @@ describe('server HTTP integration', () => {
     expect(status).toBe(400);
   });
 
+  test('GET /api/filecontext rejects file path containing double-quote (shell injection guard)', async () => {
+    const shortHash = commitHash.slice(0, 8);
+    // A " in the file path would break shell quoting in: git show "${hash}:${file}"
+    const badFile = encodeURIComponent('feature.js"; echo pwned #');
+    const { status } = await httpRequest(
+      `${baseUrl}/api/filecontext?hash=${shortHash}&file=${badFile}&start=1&end=5`
+    );
+    expect(status).toBe(400);
+  });
+
   test('GET /api/filecontext returns 404 for a non-existent file at a valid commit', async () => {
     const shortHash = commitHash.slice(0, 8);
     const { status, body } = await httpRequest(

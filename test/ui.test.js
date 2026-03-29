@@ -1028,6 +1028,126 @@ describe('submit error state', () => {
   });
 });
 
+// ── Empty worktree display ─────────────────────────────────────────────────
+// When a worktree has no commits ahead of main, the UI must show the
+// .empty-worktree "No changes" element instead of patch tabs or diff content.
+
+describe('empty worktree shows "No changes" state', () => {
+  let emptyServer, emptyPage, emptyTmpDir;
+
+  beforeAll(async () => {
+    emptyTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-ui-empty-'));
+    const emptyMain = path.join(emptyTmpDir, 'main-repo');
+    const emptyWork = path.join(emptyTmpDir, 'work-repo');
+
+    fs.mkdirSync(emptyMain);
+    git(emptyMain, 'init');
+    git(emptyMain, 'config user.email "test@test.com"');
+    git(emptyMain, 'config user.name "Test"');
+    fs.writeFileSync(path.join(emptyMain, 'base.txt'), 'base\n');
+    git(emptyMain, 'add .');
+    git(emptyMain, 'commit -m "initial"');
+
+    // Clone so origin/main exists — work repo has no commits ahead of main
+    execSync(`git clone "${emptyMain}" "${emptyWork}"`, { encoding: 'utf8' });
+    git(emptyWork, 'config user.email "test@test.com"');
+    git(emptyWork, 'config user.name "Test"');
+
+    const app = createApp({ worktreeName: 'work-repo', worktreePath: emptyWork, mainRepoPath: emptyMain });
+    const port = await findAvailablePort(19600);
+    await new Promise((resolve) => { emptyServer = app.listen(port, '127.0.0.1', resolve); });
+
+    emptyPage = await browser.newPage();
+    await emptyPage.goto(`http://127.0.0.1:${port}`);
+    // Wait for the app to finish loading (loading spinner disappears)
+    await emptyPage.waitForFunction(
+      () => document.getElementById('loading').style.display === 'none',
+      { timeout: 10000 }
+    );
+  }, 30000);
+
+  afterAll(async () => {
+    await emptyPage?.close();
+    await new Promise((resolve) => emptyServer?.close(resolve));
+    fs.rmSync(emptyTmpDir, { recursive: true, force: true });
+  });
+
+  test('shows .empty-worktree element with "No changes" text', async () => {
+    const el = await emptyPage.$('.empty-worktree');
+    expect(el).not.toBeNull();
+    expect(await emptyPage.textContent('.empty-worktree-title')).toBe('No changes');
+  });
+
+  test('patch tabs bar is hidden when there are no patches', async () => {
+    expect(await emptyPage.$eval('#patch-tabs-bar', (el) => el.style.display)).toBe('none');
+  });
+
+  test('submit button is disabled when there is nothing to review', async () => {
+    expect(await emptyPage.$eval('#btn-submit', (el) => el.disabled)).toBe(true);
+  });
+});
+
+// ── URL hash navigation ────────────────────────────────────────────────────
+// When the page is loaded with #<worktreeName> in the URL, initWorktreeBar
+// must POST /api/switch to that worktree and render its patches.
+
+describe('URL hash navigates to the named worktree on load', () => {
+  let hashServer, hashPage, hashTmpDir, hashPort;
+  const mainName = 'hash-main';
+
+  beforeAll(async () => {
+    hashTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-ui-hash-'));
+    const hashMain = path.join(hashTmpDir, mainName);
+    const hashWork = path.join(hashTmpDir, `${mainName}-feature`);
+
+    fs.mkdirSync(hashMain);
+    git(hashMain, 'init');
+    git(hashMain, 'config user.email "test@test.com"');
+    git(hashMain, 'config user.name "Test"');
+    fs.writeFileSync(path.join(hashMain, 'base.txt'), 'base\n');
+    git(hashMain, 'add .');
+    git(hashMain, 'commit -m "initial"');
+
+    // Linked worktree with one commit ahead of main
+    git(hashMain, `worktree add -b feature "${hashWork}"`);
+    fs.writeFileSync(path.join(hashWork, 'patch.js'), 'const x = 1;\n');
+    git(hashWork, 'add .');
+    git(hashWork, 'commit -m "feat: patch"');
+
+    // Server starts on the main repo (no patches), but the URL hash will direct to 'feature'
+    const app = createApp({ worktreeName: mainName, worktreePath: hashMain, mainRepoPath: hashMain });
+    hashPort = await findAvailablePort(19650);
+    await new Promise((resolve) => { hashServer = app.listen(hashPort, '127.0.0.1', resolve); });
+
+    hashPage = await browser.newPage();
+    // Load the page with #feature in the URL — initWorktreeBar should auto-switch
+    await hashPage.goto(`http://127.0.0.1:${hashPort}#feature`);
+    // Wait until either patches or empty state is rendered
+    await hashPage.waitForFunction(
+      () => document.getElementById('loading').style.display === 'none',
+      { timeout: 15000 }
+    );
+  }, 30000);
+
+  afterAll(async () => {
+    await hashPage?.close();
+    await new Promise((resolve) => hashServer?.close(resolve));
+    fs.rmSync(hashTmpDir, { recursive: true, force: true });
+  });
+
+  test('active worktree pill matches the hash target after load', async () => {
+    const activePill = await hashPage.$('.worktree-pill.active');
+    expect(activePill).not.toBeNull();
+    expect(await activePill.getAttribute('data-name')).toBe('feature');
+  });
+
+  test('diff content reflects the hash-targeted worktree patches', async () => {
+    // 'feature' has one commit ahead; .patch-heading should be visible
+    const heading = await hashPage.$('.patch-heading');
+    expect(heading).not.toBeNull();
+  });
+});
+
 describe('current-prompt-bar appears after all patches reviewed and submitted', () => {
   let promptBarPage;
 
