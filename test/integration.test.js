@@ -13,7 +13,7 @@ const { execSync } = require('child_process');
 
 const {
   getHeadHash, getCommits, getDiffPerCommit, getFileLines,
-  getDiffForCommit, getDiffBetweenCommits, discoverWorktrees,
+  getDiffForCommit, getDiffBetweenCommits, discoverWorktrees, getMergeBase,
 } = require('../src/git');
 const { createApp, startServer, findAvailablePort } = require('../src/server');
 const { git } = require('./helpers');
@@ -518,5 +518,50 @@ describe('discoverWorktrees and worktree switching integration', () => {
     expect(body.ok).toBe(true);
     expect(body.worktreeName).toBe('repo');
     expect(body.worktreePath).toBe(wtMain);
+  });
+});
+
+// ── getMergeBase — fallback when origin/main is absent ────────────────────
+// Fixture: a plain (non-clone) repo with a linked worktree.  Because there
+// is no remote, rev-parse origin/main fails and getMergeBase must fall back
+// to rev-parse HEAD on the main repo itself.
+
+describe('getMergeBase — fallback without origin/main', () => {
+  let fbTmpDir, fbMain, fbWork;
+
+  beforeAll(() => {
+    fbTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-mb-'));
+    fbMain = path.join(fbTmpDir, 'main');
+    fbWork = path.join(fbTmpDir, 'work');
+
+    fs.mkdirSync(fbMain);
+    git(fbMain, 'init');
+    git(fbMain, 'config user.email "test@test.com"');
+    git(fbMain, 'config user.name "Test"');
+    fs.writeFileSync(path.join(fbMain, 'base.txt'), 'base\n');
+    git(fbMain, 'add .');
+    git(fbMain, 'commit -m "initial"');
+
+    // git worktree add creates a linked worktree with no origin remote
+    git(fbMain, `worktree add -b feature "${fbWork}"`);
+    fs.writeFileSync(path.join(fbWork, 'new.txt'), 'new\n');
+    git(fbWork, 'add .');
+    git(fbWork, 'commit -m "feat: add new"');
+  });
+
+  afterAll(() => {
+    fs.rmSync(fbTmpDir, { recursive: true, force: true });
+  });
+
+  test('getMergeBase falls back to mainRepoPath HEAD when origin/main is unavailable', () => {
+    const base = getMergeBase(fbWork, fbMain);
+    const mainHead = git(fbMain, 'rev-parse HEAD');
+    expect(base).toBe(mainHead);
+  });
+
+  test('getCommits finds the patch commit via the fallback path', () => {
+    const commits = getCommits(fbWork, fbMain);
+    expect(commits).toHaveLength(1);
+    expect(commits[0].message).toBe('feat: add new');
   });
 });

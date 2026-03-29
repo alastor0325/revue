@@ -185,6 +185,22 @@ describe('readAllInstances', () => {
     }
   });
 
+  test('includes instances from LEGACY_FIREFOX_PIDS_DIR when it exists', () => {
+    const legacyDir = path.join(os.homedir(), '.firefox-review.pids');
+    const fakePid = 99999941;
+    const pidFile = path.join(legacyDir, String(fakePid));
+    fs.mkdirSync(legacyDir, { recursive: true });
+    fs.writeFileSync(pidFile, `${fakePid}:9876`, 'utf8');
+    try {
+      const instances = readAllInstances();
+      const found = instances.find((i) => i.pid === fakePid);
+      expect(found).toBeDefined();
+      expect(found.port).toBe(9876);
+    } finally {
+      try { fs.unlinkSync(pidFile); } catch {}
+    }
+  });
+
   test('returns multiple instances when multiple pid files exist', () => {
     const pid1 = 99999903;
     const pid2 = 99999904;

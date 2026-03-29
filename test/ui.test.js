@@ -746,4 +746,125 @@ describe('update banner', () => {
   test('banner contains a Reload button', async () => {
     expect(await bannerPage.textContent('#btn-reload-page')).toBe('Reload');
   });
+
+  test('clicking Reload button hides the banner and re-renders', async () => {
+    await bannerPage.click('#btn-reload-page');
+    await bannerPage.waitForFunction(
+      () => document.getElementById('update-banner').style.display === 'none',
+      { timeout: 5000 }
+    );
+    expect(await bannerPage.$eval('#update-banner', (el) => el.style.display)).toBe('none');
+    // Content was re-rendered — patches are still visible
+    expect(await bannerPage.$('.patch-heading')).not.toBeNull();
+  });
+});
+
+// ── Result overlay ─────────────────────────────────────────────────────────
+// Submitting with all patches approved fires POST /api/submit, which writes
+// REVIEW_FEEDBACK_*.md and triggers the result overlay with the prompt text.
+
+describe('result overlay', () => {
+  let overlayPage;
+
+  beforeAll(async () => {
+    overlayPage = await openFreshPage();
+    // Fill a general comment — works regardless of prior approval state loaded from server
+    await overlayPage.fill('.general-comment-textarea', 'Looks good overall.');
+    await overlayPage.waitForFunction(
+      () => !document.querySelector('#btn-submit').disabled,
+      { timeout: 5000 }
+    );
+    await overlayPage.click('#btn-submit');
+    await overlayPage.waitForFunction(
+      () => document.getElementById('result-overlay')?.classList.contains('visible'),
+      { timeout: 15000 }
+    );
+  }, 60000);
+
+  afterAll(async () => {
+    await overlayPage?.close();
+    try { fs.unlinkSync(path.join(workRepoPath, 'REVIEW_FEEDBACK_work-repo.md')); } catch {}
+  });
+
+  test('overlay becomes visible after successful submit', async () => {
+    expect(
+      await overlayPage.$eval('#result-overlay', (el) => el.classList.contains('visible'))
+    ).toBe(true);
+  });
+
+  test('overlay shows the feedback file path', async () => {
+    const feedbackPath = await overlayPage.textContent('#result-feedback-path');
+    expect(feedbackPath.length).toBeGreaterThan(0);
+    expect(feedbackPath).toContain('REVIEW_FEEDBACK');
+  });
+
+  test('overlay shows the review prompt text', async () => {
+    const prompt = await overlayPage.$eval('#result-prompt', (el) => el.value);
+    expect(prompt.length).toBeGreaterThan(0);
+    expect(prompt).toContain('worktree');
+  });
+
+  test('clicking Close hides the overlay', async () => {
+    await overlayPage.click('#btn-close-modal');
+    await overlayPage.waitForFunction(
+      () => !document.getElementById('result-overlay').classList.contains('visible')
+    );
+    expect(
+      await overlayPage.$eval('#result-overlay', (el) => el.classList.contains('visible'))
+    ).toBe(false);
+  });
+});
+
+// ── Nested file path in sidebar ────────────────────────────────────────────
+// A commit touching src/helper.js should show a .file-nav-dir label in the
+// sidebar with the directory prefix, and .file-nav-filename with just the
+// basename.
+
+describe('nested file path in sidebar', () => {
+  let nestedServer, nestedPage, nestedTmpDir;
+
+  beforeAll(async () => {
+    nestedTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-ui-nested-'));
+    const nestedMain = path.join(nestedTmpDir, 'main');
+    const nestedWork = path.join(nestedTmpDir, 'work');
+
+    fs.mkdirSync(nestedMain);
+    git(nestedMain, 'init');
+    git(nestedMain, 'config user.email "test@test.com"');
+    git(nestedMain, 'config user.name "Test"');
+    fs.mkdirSync(path.join(nestedMain, 'src'));
+    fs.writeFileSync(path.join(nestedMain, 'src', 'helper.js'), 'const x = 1;\n');
+    git(nestedMain, 'add .');
+    git(nestedMain, 'commit -m "initial"');
+
+    execSync(`git clone "${nestedMain}" "${nestedWork}"`, { encoding: 'utf8' });
+    git(nestedWork, 'config user.email "test@test.com"');
+    git(nestedWork, 'config user.name "Test"');
+    fs.writeFileSync(path.join(nestedWork, 'src', 'helper.js'), 'const x = 2;\n');
+    git(nestedWork, 'add .');
+    git(nestedWork, 'commit -m "feat: update helper"');
+
+    const app = createApp({ worktreeName: 'work', worktreePath: nestedWork, mainRepoPath: nestedMain });
+    const port = await findAvailablePort(19700);
+    await new Promise((resolve) => { nestedServer = app.listen(port, '127.0.0.1', resolve); });
+
+    nestedPage = await browser.newPage();
+    await nestedPage.goto(`http://127.0.0.1:${port}`);
+    await nestedPage.waitForSelector('.file-nav-item', { state: 'visible' });
+  }, 30000);
+
+  afterAll(async () => {
+    await nestedPage?.close();
+    await new Promise((resolve) => nestedServer?.close(resolve));
+    fs.rmSync(nestedTmpDir, { recursive: true, force: true });
+  });
+
+  test('sidebar shows directory prefix in file-nav-dir label', async () => {
+    expect(await nestedPage.$('.file-nav-dir')).not.toBeNull();
+    expect(await nestedPage.textContent('.file-nav-dir')).toContain('src/');
+  });
+
+  test('sidebar shows only the filename in file-nav-filename', async () => {
+    expect(await nestedPage.textContent('.file-nav-filename')).toBe('helper.js');
+  });
 });
