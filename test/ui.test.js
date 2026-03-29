@@ -640,3 +640,110 @@ describe('sidebar file highlight', () => {
     expect(await items[1].evaluate((el) => el.classList.contains('active'))).toBe(false);
   });
 });
+
+// ── Revue title link ───────────────────────────────────────────────────────
+
+describe('Revue title link', () => {
+  test('title link text is "Revue"', async () => {
+    expect(await page.textContent('h1 .app-name')).toBe('Revue');
+  });
+
+  test('title link opens in a new tab', async () => {
+    expect(await page.$eval('h1 .app-name', (el) => el.target)).toBe('_blank');
+  });
+
+  test('worktree-path shows the worktree directory name', async () => {
+    expect(await page.textContent('#worktree-path')).toContain('work-repo');
+  });
+});
+
+// ── File path format ───────────────────────────────────────────────────────
+
+describe('file path format in sidebar and diff', () => {
+  test('sidebar file item shows the filename', async () => {
+    expect(await page.textContent('.file-nav-item')).toContain('feature.js');
+  });
+
+  test('diff file header shows the file path', async () => {
+    expect(await page.textContent('.file-header')).toContain('feature.js');
+  });
+
+  test('sidebar dir label is absent for root-level files', async () => {
+    // feature.js is at repo root — no directory prefix shown
+    expect(await page.$('.file-nav-dir')).toBeNull();
+  });
+});
+
+// ── Generate review prompt button ─────────────────────────────────────────
+
+describe('generate review prompt button', () => {
+  let promptPage;
+
+  beforeAll(async () => { promptPage = await openFreshPage(); }, 15000);
+  afterAll(async () => { await promptPage.close(); });
+
+  test('button label is "Generate Review Prompt"', async () => {
+    expect(await promptPage.textContent('#btn-submit')).toBe('Generate Review Prompt');
+  });
+
+  test('button is disabled and warning is visible before any feedback', async () => {
+    expect(await promptPage.$eval('#btn-submit', (el) => el.disabled)).toBe(true);
+    expect((await promptPage.textContent('#submit-warning')).trim().length).toBeGreaterThan(0);
+  });
+
+  test('approving a patch enables the button', async () => {
+    await promptPage.click('.btn-approve');
+    await promptPage.waitForSelector('.btn-unapprove');
+    expect(await promptPage.$eval('#btn-submit', (el) => el.disabled)).toBe(false);
+  });
+
+  test('clicking the button fires POST /api/submit', async () => {
+    const requestPromise = promptPage.waitForRequest(
+      (req) => req.url().includes('/api/submit') && req.method() === 'POST'
+    );
+    await promptPage.click('#btn-submit');
+    const req = await requestPromise;
+    expect(Array.isArray(JSON.parse(req.postData()).allFeedback)).toBe(true);
+  });
+});
+
+// ── Update banner ──────────────────────────────────────────────────────────
+// Uses route interception: the first /api/headhash response is real (sets
+// knownHash), subsequent ones return a fake different hash to trigger the banner.
+
+describe('update banner', () => {
+  let bannerPage;
+
+  beforeAll(async () => {
+    bannerPage = await browser.newPage();
+    let firstCall = true;
+    await bannerPage.route('**/api/headhash', (route) => {
+      if (firstCall) {
+        firstCall = false;
+        route.continue();
+      } else {
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ hash: 'aabbccdd00000000' }) });
+      }
+    });
+    await bannerPage.goto(baseUrl);
+    await bannerPage.waitForSelector('.patch-heading', { state: 'visible' });
+  }, 15000);
+
+  afterAll(async () => { await bannerPage?.close(); });
+
+  test('banner is hidden on initial load', async () => {
+    expect(await bannerPage.$eval('#update-banner', (el) => el.style.display)).toBe('none');
+  });
+
+  test('banner appears when HEAD hash changes', async () => {
+    await bannerPage.waitForFunction(
+      () => document.getElementById('update-banner').style.display !== 'none',
+      { timeout: 10000 }
+    );
+    expect(await bannerPage.textContent('#update-banner')).toContain('Codebase updated');
+  });
+
+  test('banner contains a Reload button', async () => {
+    expect(await bannerPage.textContent('#btn-reload-page')).toBe('Reload');
+  });
+});
