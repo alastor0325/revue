@@ -240,6 +240,21 @@ describe('stopDaemon', () => {
     expect(result === false || result === true).toBe(true); // does not throw
   });
 
+  test('kills process tracked in LEGACY_FIREFOX_PID_FILE and removes the file', () => {
+    const killSpy = jest.spyOn(process, 'kill').mockImplementation(() => {});
+    const legacyFirefoxFile = path.join(os.homedir(), '.firefox-review.pid');
+    fs.writeFileSync(legacyFirefoxFile, `${process.pid}:7777`, 'utf8');
+    try {
+      const result = stopDaemon();
+      expect(result).toBe(true);
+      expect(killSpy).toHaveBeenCalledWith(process.pid, 'SIGTERM');
+      expect(fs.existsSync(legacyFirefoxFile)).toBe(false);
+    } finally {
+      killSpy.mockRestore();
+      try { fs.unlinkSync(legacyFirefoxFile); } catch {}
+    }
+  });
+
   test('kills process tracked in legacy PID file and removes the file', () => {
     const killSpy = jest.spyOn(process, 'kill').mockImplementation(() => {});
     fs.writeFileSync(LEGACY_PID_FILE, `${process.pid}:7777`, 'utf8');
@@ -386,6 +401,11 @@ describe('buildEntries', () => {
   test('returns empty array when mainRepoPath does not exist', () => {
     const entries = buildEntries('/nonexistent/path/abc123');
     expect(Array.isArray(entries)).toBe(true);
+    expect(entries).toHaveLength(0);
+  });
+
+  test('returns empty array when mainRepoPath is null', () => {
+    const entries = buildEntries(null);
     expect(entries).toHaveLength(0);
   });
 

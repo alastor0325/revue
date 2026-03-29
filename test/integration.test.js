@@ -229,6 +229,15 @@ describe('server HTTP integration', () => {
     expect(status).toBe(400);
   });
 
+  test('GET /api/filecontext returns 404 for a non-existent file at a valid commit', async () => {
+    const shortHash = commitHash.slice(0, 8);
+    const { status, body } = await httpRequest(
+      `${baseUrl}/api/filecontext?hash=${shortHash}&file=does-not-exist.js&start=1&end=5`
+    );
+    expect(status).toBe(404);
+    expect(body.error).toMatch(/Could not read file/i);
+  });
+
   test('GET /api/revdiff with invalid hashes returns 400', async () => {
     const { status, body } = await httpRequest(`${baseUrl}/api/revdiff?from=notahash&to=alsonotahash`);
     expect(status).toBe(400);
@@ -442,6 +451,15 @@ describe('revdiff integration', () => {
     expect(lines.some((l) => l.type === 'removed' && l.content === 'const y = 20;')).toBe(true);
   });
 
+  test('GET /api/revdiff returns empty files array when comparing a commit to itself', async () => {
+    const shortV1 = hashV1.slice(0, 8);
+    const { status, body } = await httpRequest(
+      `http://127.0.0.1:${revPort}/api/revdiff?from=${shortV1}&to=${shortV1}`
+    );
+    expect(status).toBe(200);
+    expect(body.files).toHaveLength(0); // same patch on both sides → no delta
+  });
+
   test('GET /api/revdiff returns the patch delta for real commit hashes', async () => {
     const shortV1 = hashV1.slice(0, 8);
     const shortV2 = hashV2.slice(0, 8);
@@ -518,6 +536,18 @@ describe('discoverWorktrees and worktree switching integration', () => {
     expect(body.ok).toBe(true);
     expect(body.worktreeName).toBe('repo');
     expect(body.worktreePath).toBe(wtMain);
+  });
+
+  test('GET /api/diff after POST /api/switch returns data from the new worktree', async () => {
+    // Switch back to the feature worktree (which has no commits ahead of main)
+    await httpRequest(`http://127.0.0.1:${wtPort}/api/switch`, {
+      method: 'POST',
+      body: { worktreeName: 'feature' },
+    });
+    const { status, body } = await httpRequest(`http://127.0.0.1:${wtPort}/api/diff`);
+    expect(status).toBe(200);
+    expect(body.worktreeName).toBe('feature');
+    expect(body.patches).toHaveLength(0);
   });
 });
 

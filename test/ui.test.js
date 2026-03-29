@@ -868,3 +868,118 @@ describe('nested file path in sidebar', () => {
     expect(await nestedPage.textContent('.file-nav-filename')).toBe('helper.js');
   });
 });
+
+// ── Worktree switcher bar ──────────────────────────────────────────────────
+// A real git worktree (via `git worktree add`) means /api/worktrees returns
+// two entries, so initWorktreeBar shows #worktree-bar with one pill per entry.
+
+describe('worktree switcher bar', () => {
+  let wtBarServer, wtBarPage, wtBarTmpDir, wtBarPort;
+  const mainRepoName = 'main-repo';
+
+  beforeAll(async () => {
+    wtBarTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-ui-wtbar-'));
+    const wtBarMain = path.join(wtBarTmpDir, mainRepoName);
+    const wtBarWork = path.join(wtBarTmpDir, `${mainRepoName}-feature`);
+
+    fs.mkdirSync(wtBarMain);
+    git(wtBarMain, 'init');
+    git(wtBarMain, 'config user.email "test@test.com"');
+    git(wtBarMain, 'config user.name "Test"');
+    fs.writeFileSync(path.join(wtBarMain, 'base.txt'), 'base\n');
+    git(wtBarMain, 'add .');
+    git(wtBarMain, 'commit -m "initial"');
+
+    // Create a real linked worktree and add a commit so patches are visible
+    git(wtBarMain, `worktree add -b feature "${wtBarWork}"`);
+    fs.writeFileSync(path.join(wtBarWork, 'patch.js'), 'const x = 1;\n');
+    git(wtBarWork, 'add .');
+    git(wtBarWork, 'commit -m "feat: add patch"');
+
+    const app = createApp({
+      worktreeName: 'feature',
+      worktreePath: wtBarWork,
+      mainRepoPath: wtBarMain,
+    });
+    wtBarPort = await findAvailablePort(19800);
+    await new Promise((resolve) => { wtBarServer = app.listen(wtBarPort, '127.0.0.1', resolve); });
+
+    wtBarPage = await browser.newPage();
+    await wtBarPage.goto(`http://127.0.0.1:${wtBarPort}`);
+    await wtBarPage.waitForSelector('.patch-heading', { state: 'visible' });
+  }, 30000);
+
+  afterAll(async () => {
+    await wtBarPage?.close();
+    await new Promise((resolve) => wtBarServer?.close(resolve));
+    fs.rmSync(wtBarTmpDir, { recursive: true, force: true });
+  });
+
+  test('worktree bar is visible when multiple worktrees exist', async () => {
+    expect(await wtBarPage.$eval('#worktree-bar', (el) => el.style.display)).not.toBe('none');
+  });
+
+  test('renders one pill per worktree entry', async () => {
+    const pills = await wtBarPage.$$('.worktree-pill');
+    expect(pills.length).toBe(2); // main repo + feature worktree
+  });
+
+  test('active pill corresponds to the current worktree', async () => {
+    const activePill = await wtBarPage.$('.worktree-pill.active');
+    expect(activePill).not.toBeNull();
+    expect(await activePill.getAttribute('data-name')).toBe('feature');
+  });
+
+  test('clicking an inactive pill fires POST /api/switch and makes it active', async () => {
+    const switchReqPromise = wtBarPage.waitForRequest(
+      (req) => req.url().includes('/api/switch') && req.method() === 'POST'
+    );
+    // Click the first pill (main repo — not active)
+    const pills = await wtBarPage.$$('.worktree-pill');
+    await pills[0].click();
+    const req = await switchReqPromise;
+    expect(JSON.parse(req.postData()).worktreeName).toBe(mainRepoName);
+    await wtBarPage.waitForFunction(
+      () => document.querySelector('.worktree-pill')?.classList.contains('active'),
+      { timeout: 5000 }
+    );
+  });
+});
+
+// ── Error state ────────────────────────────────────────────────────────────
+// When /api/diff returns a 500, loadAndRender must show #error-msg and hide
+// #loading.  Verified via Playwright route interception.
+
+describe('error state', () => {
+  let errPage;
+
+  beforeAll(async () => {
+    errPage = await browser.newPage();
+    await errPage.route('**/api/diff', (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'git exploded' }),
+      })
+    );
+    await errPage.goto(baseUrl);
+    await errPage.waitForFunction(
+      () => document.getElementById('error-msg').style.display !== 'none',
+      { timeout: 5000 }
+    );
+  }, 15000);
+
+  afterAll(async () => { await errPage?.close(); });
+
+  test('error message element is visible', async () => {
+    expect(await errPage.$eval('#error-msg', (el) => el.style.display)).not.toBe('none');
+  });
+
+  test('error message contains the server error text', async () => {
+    expect(await errPage.textContent('#error-msg')).toContain('git exploded');
+  });
+
+  test('loading indicator is hidden after error', async () => {
+    expect(await errPage.$eval('#loading', (el) => el.style.display)).toBe('none');
+  });
+});
