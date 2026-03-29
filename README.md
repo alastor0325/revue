@@ -96,16 +96,11 @@ nodemon watches `src/`, `public/`, and `bin/` and restarts the server on any cha
 Alternatively, `revue --restart` is sufficient for one-off server restarts when not actively editing code.
 
 Tests cover:
-- `parseDiff` — diff parsing (added/removed/context lines, multiple files, binary files, multiple hunks)
-- `parseCommitBody` — full commit message extraction from `git show` output
-- `parseWorktreeList` — worktree discovery parsing (including generic prefix stripping)
-- `formatCombinedPrompt` / `submitReview` — combined prompt structure, approved/skipped markers, commit message feedback, multi-patch feedback
-- Express routes — all API endpoints with mocked git and claude modules
-- `renderFile` — diff table structure, line rows, stats, HTML escaping, collapse toggle, expand context rows
-- `renderFileNav` — sidebar items, collapse/expand, file/dir hierarchy, stats layout
-- `buildPatchEl` / `initPatchNodes` / `switchPatch` / `renderTabs` — patch pre-rendering and tab switching
-- `loadAndRender` / `init` — page title, reload banner behaviour
-- Comment forms — draft persistence, inline comment display, click-to-comment vs text selection
+- **Git module** — `parseDiff`, `parseCommitBody`, `parseWorktreeList`, `getHeadHash`, `getMergeBase` (including origin/main fallback), `getCommits`, `getDiffBetweenCommits`, `lcsCompare`, `getPatchLines`, `getFileLines`
+- **Server routes** — all API endpoints with real git repos and real HTTP: `/api/diff`, `/api/state`, `/api/submit`, `/api/headhash`, `/api/reload` (SSE), `/api/revdiff`, `/api/patchdiff/:hash`, `/api/worktrees`, `/api/switch`, `/api/filecontext` (including shell-injection guard)
+- **`submitReview`** — combined prompt structure, approved/skipped/denied markers, commit message and inline feedback, multi-patch feedback
+- **Worktree switching** — `discoverWorktrees`, `/api/worktrees`, `/api/switch`, cache invalidation, per-worktree state files
+- **Browser UI** (real Chromium via Playwright): diff rendering, patch tabs, sidebar nav, approve/deny, inline comments, draft persistence, commit message comments, general feedback, expand-context rows, tab badges, worktree switcher bar, URL hash navigation, revision compare mode, update banner, result overlay, copy-prompt button, error states, empty-worktree state, nested file paths
 
 ## License
 
