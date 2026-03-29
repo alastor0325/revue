@@ -1,5 +1,6 @@
 'use strict';
 
+const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
@@ -420,10 +421,14 @@ function parseWorktreeList(output, mainRepoPath) {
  * @returns {Array<{ path: string, branch: string|null, worktreeName: string }>}
  */
 function discoverWorktrees(mainRepoPath) {
+  // Resolve symlinks so the path matches what git reports in worktree list output.
+  // On macOS, os.tmpdir() returns /var/... but git resolves it to /private/var/...
+  let resolvedMain = mainRepoPath;
+  try { resolvedMain = fs.realpathSync(mainRepoPath); } catch { /* fall back to unresolved */ }
   const output = execSync(`git -C "${mainRepoPath}" worktree list --porcelain`, {
     encoding: 'utf8',
   });
-  return parseWorktreeList(output, mainRepoPath);
+  return parseWorktreeList(output, resolvedMain);
 }
 
 /**

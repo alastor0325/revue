@@ -13,6 +13,7 @@ const { execSync } = require('child_process');
 
 const {
   getHeadHash, getCommits, getDiffPerCommit, getFileLines,
+  getDiffForCommit, getDiffBetweenCommits, discoverWorktrees,
 } = require('../src/git');
 const { createApp, startServer, findAvailablePort } = require('../src/server');
 const { git } = require('./helpers');
@@ -140,6 +141,15 @@ describe('git integration', () => {
     expect(result.totalLines).toBe(3);
     expect(result.lines).toHaveLength(3);
   });
+
+  test('getDiffForCommit returns real parsed diff for a specific commit', () => {
+    const files = getDiffForCommit(workRepoPath, commitHash);
+    expect(files).toHaveLength(1);
+    expect(files[0].newPath).toBe('feature.js');
+    const added = files[0].hunks[0].lines.filter((l) => l.type === 'added').map((l) => l.content);
+    expect(added).toContain('function hello() {');
+    expect(added).toContain('  return "hello";');
+  });
 });
 
 // ── server integration (real Express, no git mocks) ───────────────────────
@@ -235,6 +245,41 @@ describe('server HTTP integration', () => {
     expect(body.error).toMatch(/not found/i);
   });
 
+  test('GET /api/patchdiff/:hash returns real parsed diff for the commit', async () => {
+    const shortHash = commitHash.slice(0, 8);
+    const { status, body } = await httpRequest(`${baseUrl}/api/patchdiff/${shortHash}`);
+    expect(status).toBe(200);
+    expect(body.hash).toBe(shortHash);
+    expect(body.files).toHaveLength(1);
+    expect(body.files[0].newPath).toBe('feature.js');
+    const added = body.files[0].hunks[0].lines.filter((l) => l.type === 'added').map((l) => l.content);
+    expect(added).toContain('function hello() {');
+  });
+
+  test('GET /api/worktrees lists the main repo', async () => {
+    const { status, body } = await httpRequest(`${baseUrl}/api/worktrees`);
+    expect(status).toBe(200);
+    expect(body.current).toBe('work-repo');
+    expect(Array.isArray(body.worktrees)).toBe(true);
+    expect(body.worktrees.some((w) => w.isMain)).toBe(true);
+    expect(body.worktrees.some((w) => w.worktreeName === 'work-repo')).toBe(false); // work-repo is a clone, not a real git worktree
+  });
+
+  test('POST /api/submit success path writes feedback file and returns prompt', async () => {
+    const allFeedback = [{ hash: commitHash, comments: [], generalComment: 'LGTM' }];
+    const { status, body } = await httpRequest(`${baseUrl}/api/submit`, {
+      method: 'POST',
+      body: { allFeedback, approvedHashes: [commitHash], deniedHashes: [] },
+    });
+    expect(status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.feedbackPath).toContain('REVIEW_FEEDBACK_work-repo.md');
+    expect(fs.existsSync(body.feedbackPath)).toBe(true);
+    expect(typeof body.prompt).toBe('string');
+    expect(body.prompt.length).toBeGreaterThan(0);
+    fs.unlinkSync(body.feedbackPath);
+  });
+
   test('GET /api/reload sends SSE stream with server token', async () => {
     const raw = await new Promise((resolve, reject) => {
       const req = http.get(`${baseUrl}/api/reload`, (res) => {
@@ -308,5 +353,141 @@ describe('startServer lifecycle', () => {
   test('findAvailablePort skips an already-bound port', async () => {
     const next = await findAvailablePort(port);
     expect(next).toBeGreaterThan(port);
+  });
+});
+
+// ── getDiffBetweenCommits + GET /api/revdiff ──────────────────────────────
+// Fixture: two commits both modifying calc.js — v1 sets y=20, v2 sets y=200.
+// getDiffBetweenCommits compares the patch *introduced* by each commit,
+// so the delta shows the line changed between the two patch versions.
+
+describe('revdiff integration', () => {
+  let revTmpDir, revMain, revWork, hashV1, hashV2, revServer, revPort;
+
+  beforeAll(async () => {
+    revTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-revdiff-'));
+    revMain = path.join(revTmpDir, 'main');
+    revWork = path.join(revTmpDir, 'work');
+
+    fs.mkdirSync(revMain);
+    git(revMain, 'init');
+    git(revMain, 'config user.email "test@test.com"');
+    git(revMain, 'config user.name "Test"');
+    fs.writeFileSync(path.join(revMain, 'calc.js'), 'const x = 1;\nconst y = 2;\nconst z = 3;\n');
+    git(revMain, 'add .');
+    git(revMain, 'commit -m "initial"');
+
+    execSync(`git clone "${revMain}" "${revWork}"`, { encoding: 'utf8' });
+    git(revWork, 'config user.email "test@test.com"');
+    git(revWork, 'config user.name "Test"');
+
+    fs.writeFileSync(path.join(revWork, 'calc.js'), 'const x = 1;\nconst y = 20;\nconst z = 3;\n');
+    git(revWork, 'add .');
+    git(revWork, 'commit -m "v1: set y to 20"');
+    hashV1 = git(revWork, 'rev-parse HEAD');
+
+    fs.writeFileSync(path.join(revWork, 'calc.js'), 'const x = 1;\nconst y = 200;\nconst z = 3;\n');
+    git(revWork, 'add .');
+    git(revWork, 'commit -m "v2: set y to 200"');
+    hashV2 = git(revWork, 'rev-parse HEAD');
+
+    const app = createApp({ worktreeName: 'work', worktreePath: revWork, mainRepoPath: revMain });
+    revPort = await findAvailablePort(18700);
+    await new Promise((resolve) => { revServer = app.listen(revPort, '127.0.0.1', resolve); });
+  });
+
+  afterAll((done) => {
+    revServer.close(() => {
+      fs.rmSync(revTmpDir, { recursive: true, force: true });
+      done();
+    });
+  });
+
+  test('getDiffBetweenCommits shows lines that changed between the two patch versions', () => {
+    const files = getDiffBetweenCommits(revWork, hashV1, hashV2);
+    expect(files).toHaveLength(1);
+    expect(files[0].newPath).toBe('calc.js');
+    const lines = files[0].hunks[0].lines;
+    // v2 added 'const y = 200;' but v1 had 'const y = 20;'
+    expect(lines.some((l) => l.type === 'added' && l.content === 'const y = 200;')).toBe(true);
+    expect(lines.some((l) => l.type === 'removed' && l.content === 'const y = 20;')).toBe(true);
+  });
+
+  test('GET /api/revdiff returns the patch delta for real commit hashes', async () => {
+    const shortV1 = hashV1.slice(0, 8);
+    const shortV2 = hashV2.slice(0, 8);
+    const { status, body } = await httpRequest(
+      `http://127.0.0.1:${revPort}/api/revdiff?from=${shortV1}&to=${shortV2}`
+    );
+    expect(status).toBe(200);
+    expect(body.from).toBe(shortV1);
+    expect(body.to).toBe(shortV2);
+    const lines = body.files[0].hunks[0].lines;
+    expect(lines.some((l) => l.type === 'added' && l.content === 'const y = 200;')).toBe(true);
+    expect(lines.some((l) => l.type === 'removed' && l.content === 'const y = 20;')).toBe(true);
+  });
+});
+
+// ── discoverWorktrees + GET /api/worktrees + POST /api/switch ─────────────
+// Fixture: a real git repo with one `git worktree add` so discoverWorktrees
+// exercises the real `git worktree list --porcelain` path.
+
+describe('discoverWorktrees and worktree switching integration', () => {
+  let wtTmpDir, wtMain, wtWorktreePath, wtServer, wtPort;
+
+  beforeAll(async () => {
+    wtTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-wt-'));
+    wtMain = path.join(wtTmpDir, 'repo');
+    wtWorktreePath = path.join(wtTmpDir, 'repo-feature');
+
+    fs.mkdirSync(wtMain);
+    git(wtMain, 'init');
+    git(wtMain, 'config user.email "test@test.com"');
+    git(wtMain, 'config user.name "Test"');
+    fs.writeFileSync(path.join(wtMain, 'README'), 'hello\n');
+    git(wtMain, 'add .');
+    git(wtMain, 'commit -m "initial"');
+
+    // Create a real git worktree on a new branch
+    git(wtMain, `worktree add -b feature "${wtWorktreePath}"`);
+
+    const app = createApp({ worktreeName: 'feature', worktreePath: wtWorktreePath, mainRepoPath: wtMain });
+    wtPort = await findAvailablePort(18800);
+    await new Promise((resolve) => { wtServer = app.listen(wtPort, '127.0.0.1', resolve); });
+  });
+
+  afterAll((done) => {
+    wtServer.close(() => {
+      fs.rmSync(wtTmpDir, { recursive: true, force: true });
+      done();
+    });
+  });
+
+  test('discoverWorktrees finds the real worktree and strips the repo-name prefix', () => {
+    const worktrees = discoverWorktrees(wtMain);
+    expect(worktrees).toHaveLength(1);
+    expect(worktrees[0].worktreeName).toBe('feature');
+    // git resolves symlinks in paths; compare against the real path
+    expect(worktrees[0].path).toBe(fs.realpathSync(wtWorktreePath));
+    expect(worktrees[0].branch).toBe('feature');
+  });
+
+  test('GET /api/worktrees includes main repo and the real worktree', async () => {
+    const { status, body } = await httpRequest(`http://127.0.0.1:${wtPort}/api/worktrees`);
+    expect(status).toBe(200);
+    expect(body.current).toBe('feature');
+    expect(body.worktrees.some((w) => w.isMain && w.worktreeName === 'repo')).toBe(true);
+    expect(body.worktrees.some((w) => w.worktreeName === 'feature')).toBe(true);
+  });
+
+  test('POST /api/switch to main repo succeeds and updates the active worktree', async () => {
+    const { status, body } = await httpRequest(`http://127.0.0.1:${wtPort}/api/switch`, {
+      method: 'POST',
+      body: { worktreeName: 'repo' },
+    });
+    expect(status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.worktreeName).toBe('repo');
+    expect(body.worktreePath).toBe(wtMain);
   });
 });
