@@ -944,6 +944,16 @@ describe('worktree switcher bar', () => {
       { timeout: 5000 }
     );
   });
+
+  test('URL hash updates to reflect the active worktree after pill click', async () => {
+    // history.replaceState is called asynchronously after the switch response resolves
+    await wtBarPage.waitForFunction(
+      (name) => window.location.hash === '#' + name,
+      mainRepoName,
+      { timeout: 5000 }
+    );
+    expect(wtBarPage.url()).toContain('#' + mainRepoName);
+  });
 });
 
 // ── Error state ────────────────────────────────────────────────────────────
@@ -1054,7 +1064,7 @@ describe('empty worktree shows "No changes" state', () => {
     git(emptyWork, 'config user.name "Test"');
 
     const app = createApp({ worktreeName: 'work-repo', worktreePath: emptyWork, mainRepoPath: emptyMain });
-    const port = await findAvailablePort(19600);
+    const port = await findAvailablePort(19620);
     await new Promise((resolve) => { emptyServer = app.listen(port, '127.0.0.1', resolve); });
 
     emptyPage = await browser.newPage();
@@ -1195,5 +1205,321 @@ describe('current-prompt-bar appears after all patches reviewed and submitted', 
     expect(
       await promptBarPage.$eval('#current-prompt-bar', (el) => el.style.display)
     ).not.toBe('none');
+  });
+});
+
+// ── Inline comment edit — re-open shows original text ──────────────────────
+// Clicking an existing comment body opens the form pre-filled with the
+// saved text (not the draft), so the reviewer can see what they wrote.
+
+describe('inline comment edit — re-open shows original text', () => {
+  let editPage;
+
+  beforeAll(async () => { editPage = await openFreshPage(); }, 15000);
+  afterAll(async () => { await editPage?.close(); });
+
+  test('save a line comment then click its body to re-open the form pre-filled', async () => {
+    await editPage.click('.line-added .ln-content');
+    await editPage.waitForSelector('.comment-form-row textarea');
+    await editPage.fill('.comment-form-row textarea', 'Original comment text');
+    await editPage.click('.btn-save');
+    await editPage.waitForSelector('.comment-display-row');
+
+    // Click the comment body — removes display, opens form pre-filled
+    await editPage.click('.comment-body');
+    await editPage.waitForSelector('.comment-form-row textarea');
+
+    const value = await editPage.$eval('.comment-form-row textarea', (el) => el.value);
+    expect(value).toBe('Original comment text');
+  });
+
+  test('canceling the edit form does not lose the saved comment', async () => {
+    // Still in edit form from previous test — type new text then cancel
+    await editPage.fill('.comment-form-row textarea', 'Changed text');
+    await editPage.click('.btn-cancel');
+    await editPage.waitForFunction(() => !document.querySelector('.comment-form-row'));
+
+    // Approve then unapprove to trigger renderCurrentPatch() and re-show comment display
+    await editPage.click('.btn-approve');
+    await editPage.waitForSelector('.btn-unapprove');
+    await editPage.click('.btn-unapprove');
+    await editPage.waitForSelector('.btn-approve');
+    await editPage.waitForSelector('.comment-display-row');
+
+    expect(await editPage.textContent('.comment-body')).toBe('Original comment text');
+  });
+});
+
+// ── Draft comment persistence in memory ────────────────────────────────────
+// Typing in a form and clicking Cancel stores the text as a draft.
+// The draft row appears and clicking it re-opens the form pre-filled.
+// Clicking "Discard draft" removes the draft entirely.
+
+describe('draft comment persistence in memory', () => {
+  let draftPage;
+
+  beforeAll(async () => { draftPage = await openFreshPage(); }, 15000);
+  afterAll(async () => { await draftPage?.close(); });
+
+  test('canceling after typing shows a .comment-draft-row with the draft text', async () => {
+    await draftPage.click('.line-added .ln-content');
+    await draftPage.waitForSelector('.comment-form-row textarea');
+    await draftPage.fill('.comment-form-row textarea', 'Draft text here');
+    await draftPage.click('.btn-cancel');
+    await draftPage.waitForSelector('.comment-draft-row');
+    expect(await draftPage.textContent('.comment-draft-body')).toBe('Draft text here');
+  });
+
+  test('clicking the draft row reopens the form pre-filled with the draft text', async () => {
+    await draftPage.click('.comment-draft-inner');
+    await draftPage.waitForSelector('.comment-form-row textarea');
+    const value = await draftPage.$eval('.comment-form-row textarea', (el) => el.value);
+    expect(value).toBe('Draft text here');
+  });
+
+  test('clicking "Discard draft" removes the draft row and clears the draft', async () => {
+    await draftPage.click('.btn-discard');
+    await draftPage.waitForFunction(() => !document.querySelector('.comment-form-row'));
+    expect(await draftPage.$('.comment-draft-row')).toBeNull();
+  });
+});
+
+// ── General comment textarea disabled when patch is approved ───────────────
+// When a patch is approved the general comment textarea must be disabled so
+// the reviewer cannot accidentally add feedback to an already-approved patch.
+
+describe('general comment textarea disabled when patch is approved', () => {
+  let approvedPage;
+
+  beforeAll(async () => { approvedPage = await openFreshPage(); }, 15000);
+  afterAll(async () => { await approvedPage?.close(); });
+
+  test('textarea is enabled before approval', async () => {
+    expect(await approvedPage.$eval('.general-comment-textarea', (el) => el.disabled)).toBe(false);
+  });
+
+  test('textarea is disabled after approving the patch', async () => {
+    await approvedPage.click('.btn-approve');
+    await approvedPage.waitForSelector('.btn-unapprove');
+    expect(await approvedPage.$eval('.general-comment-textarea', (el) => el.disabled)).toBe(true);
+  });
+
+  test('textarea is re-enabled after unapproving the patch', async () => {
+    await approvedPage.click('.btn-unapprove');
+    await approvedPage.waitForSelector('.btn-approve');
+    expect(await approvedPage.$eval('.general-comment-textarea', (el) => el.disabled)).toBe(false);
+  });
+});
+
+// ── Tab badge shows comment count, disappears on approve ───────────────────
+// A .tab-badge is shown in the patch tab when there are comments and the
+// patch is not approved.  Approving removes the badge.
+// Uses an isolated server to avoid state contamination from prior tests.
+
+describe('tab badge shows comment count and disappears on approve', () => {
+  let badgeServer, badgePage, badgeTmpDir;
+
+  beforeAll(async () => {
+    badgeTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-ui-badge-'));
+    const badgeMain = path.join(badgeTmpDir, 'main');
+    const badgeWork = path.join(badgeTmpDir, 'work');
+
+    fs.mkdirSync(badgeMain);
+    git(badgeMain, 'init');
+    git(badgeMain, 'config user.email "test@test.com"');
+    git(badgeMain, 'config user.name "Test"');
+    fs.writeFileSync(path.join(badgeMain, 'base.txt'), 'base\n');
+    git(badgeMain, 'add .');
+    git(badgeMain, 'commit -m "initial"');
+
+    execSync(`git clone "${badgeMain}" "${badgeWork}"`, { encoding: 'utf8' });
+    git(badgeWork, 'config user.email "test@test.com"');
+    git(badgeWork, 'config user.name "Test"');
+    // Two commits so the tabs bar renders (the badge lives inside tab elements)
+    fs.writeFileSync(path.join(badgeWork, 'patch.js'), 'function hello() {}\n');
+    git(badgeWork, 'add .');
+    git(badgeWork, 'commit -m "feat: add hello"');
+    fs.writeFileSync(path.join(badgeWork, 'utils.js'), 'function add(a, b) { return a + b; }\n');
+    git(badgeWork, 'add .');
+    git(badgeWork, 'commit -m "feat: add utils"');
+
+    const app = createApp({ worktreeName: 'work', worktreePath: badgeWork, mainRepoPath: badgeMain });
+    const port = await findAvailablePort(19950);
+    await new Promise((resolve) => { badgeServer = app.listen(port, '127.0.0.1', resolve); });
+
+    badgePage = await browser.newPage();
+    await badgePage.goto(`http://127.0.0.1:${port}`);
+    await badgePage.waitForSelector('.patch-heading', { state: 'visible' });
+  }, 30000);
+
+  afterAll(async () => {
+    await badgePage?.close();
+    await new Promise((resolve) => badgeServer?.close(resolve));
+    fs.rmSync(badgeTmpDir, { recursive: true, force: true });
+  });
+
+  test('no tab badge before any comments', async () => {
+    expect(await badgePage.$('.tab-badge')).toBeNull();
+  });
+
+  test('saving a line comment stores it (tab badge updates on next approve/unapprove cycle)', async () => {
+    // setComment does not call renderTabs; badge only refreshes on approve/unapprove cycles.
+    await badgePage.click('.line-added .ln-content');
+    await badgePage.waitForSelector('.comment-form-row textarea');
+    await badgePage.fill('.comment-form-row textarea', 'Badge test comment');
+    await badgePage.click('.btn-save');
+    await badgePage.waitForSelector('.comment-display-row');
+  });
+
+  test('tab badge is absent when the patch is approved (renderTabs called, isApproved=true)', async () => {
+    await badgePage.click('.btn-approve');
+    await badgePage.waitForSelector('.btn-unapprove');
+    expect(await badgePage.$('.tab-badge')).toBeNull();
+  });
+
+  test('tab badge shows count 1 after unapproving (renderTabs reveals comment count)', async () => {
+    await badgePage.click('.btn-unapprove');
+    await badgePage.waitForSelector('.btn-approve');
+    await badgePage.waitForSelector('.tab-badge');
+    expect(await badgePage.textContent('.tab-badge')).toBe('1');
+  });
+});
+
+// ── Copy prompt button ─────────────────────────────────────────────────────
+// After submitting, the result overlay shows a "Copy prompt" button.
+// Clicking it copies the prompt text and changes the label to "Copied!".
+
+describe('copy prompt button changes label to "Copied!"', () => {
+  let copyPage;
+
+  beforeAll(async () => {
+    // addInitScript runs before page scripts — clipboard mock is in place
+    // before app.js wires up the copy button handler.
+    copyPage = await browser.newPage();
+    await copyPage.addInitScript(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        get: () => ({ writeText: () => Promise.resolve() }),
+        configurable: true,
+      });
+    });
+    await copyPage.goto(baseUrl);
+    await copyPage.waitForSelector('.patch-heading', { state: 'visible' });
+
+    await copyPage.fill('.general-comment-textarea', 'Copy prompt test.');
+    await copyPage.waitForFunction(() => !document.querySelector('#btn-submit').disabled);
+    await copyPage.click('#btn-submit');
+    await copyPage.waitForFunction(
+      () => document.getElementById('result-overlay')?.classList.contains('visible'),
+      { timeout: 15000 }
+    );
+  }, 60000);
+
+  afterAll(async () => {
+    await copyPage?.close();
+    try { fs.unlinkSync(path.join(workRepoPath, 'REVIEW_FEEDBACK_work-repo.md')); } catch {}
+  });
+
+  test('"Copy prompt" button reverts to "Copy prompt" label after auto-copy', async () => {
+    // submitReview auto-copies the prompt (changes label to "Copied!"); wait for the 2s revert
+    await copyPage.waitForFunction(
+      () => document.getElementById('btn-copy-prompt').textContent === 'Copy prompt',
+      { timeout: 5000 }
+    );
+    expect(await copyPage.textContent('#btn-copy-prompt')).toBe('Copy prompt');
+  });
+
+  test('clicking "Copy prompt" changes label to "Copied!"', async () => {
+    await copyPage.click('#btn-copy-prompt');
+    await copyPage.waitForFunction(
+      () => document.getElementById('btn-copy-prompt').textContent === 'Copied!'
+    );
+    expect(await copyPage.textContent('#btn-copy-prompt')).toBe('Copied!');
+  });
+});
+
+// ── Revision compare mode ──────────────────────────────────────────────────
+// When a patch was previously saved with an older commit hash and then
+// amended (new hash), detectRevisionChanges() adds a second revision entry.
+// getRevisionList() returns 2 entries → revision toggle bar is shown.
+// Clicking ⇄ enters compare mode (two bars, active ⇄); clicking ⇄ again exits.
+
+describe('revision compare mode', () => {
+  let revCompServer, revCompPage, revCompTmpDir;
+
+  beforeAll(async () => {
+    revCompTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-ui-revcomp-'));
+    const revCompMain = path.join(revCompTmpDir, 'main');
+    const revCompWork = path.join(revCompTmpDir, 'work');
+
+    fs.mkdirSync(revCompMain);
+    git(revCompMain, 'init');
+    git(revCompMain, 'config user.email "test@test.com"');
+    git(revCompMain, 'config user.name "Test"');
+    fs.writeFileSync(path.join(revCompMain, 'base.txt'), 'base\n');
+    git(revCompMain, 'add .');
+    git(revCompMain, 'commit -m "initial"');
+
+    execSync(`git clone "${revCompMain}" "${revCompWork}"`, { encoding: 'utf8' });
+    git(revCompWork, 'config user.email "test@test.com"');
+    git(revCompWork, 'config user.name "Test"');
+    fs.writeFileSync(path.join(revCompWork, 'patch.js'), 'const v = 1;\n');
+    git(revCompWork, 'add .');
+    git(revCompWork, 'commit -m "feat: initial patch"');
+
+    const oldHash = git(revCompWork, 'rev-parse HEAD');
+
+    // Pre-write state with oldHash as the only known revision so
+    // detectRevisionChanges() will detect a change when the hash differs.
+    const stateFile = path.join(revCompWork, 'REVIEW_STATE_work.json');
+    fs.writeFileSync(stateFile, JSON.stringify({
+      revisions: [{ savedAt: '2024-01-01T00:00:00.000Z', patches: [{ hash: oldHash, message: 'feat: initial patch' }] }],
+    }), 'utf8');
+
+    // Amend the commit so the HEAD hash changes
+    fs.writeFileSync(path.join(revCompWork, 'patch.js'), 'const v = 2;\n');
+    git(revCompWork, 'add .');
+    git(revCompWork, 'commit --amend --no-edit');
+
+    const app = createApp({ worktreeName: 'work', worktreePath: revCompWork, mainRepoPath: revCompMain });
+    const port = await findAvailablePort(19900);
+    await new Promise((resolve) => { revCompServer = app.listen(port, '127.0.0.1', resolve); });
+
+    revCompPage = await browser.newPage();
+    await revCompPage.goto(`http://127.0.0.1:${port}`);
+    await revCompPage.waitForSelector('.patch-heading', { state: 'visible' });
+  }, 30000);
+
+  afterAll(async () => {
+    await revCompPage?.close();
+    await new Promise((resolve) => revCompServer?.close(resolve));
+    fs.rmSync(revCompTmpDir, { recursive: true, force: true });
+  });
+
+  test('revision toggle bar is visible when two revisions exist', async () => {
+    expect(await revCompPage.$('.revision-toggle-bar')).not.toBeNull();
+  });
+
+  test('⇄ compare button is present and not active', async () => {
+    const btn = await revCompPage.$('.btn-compare-toggle');
+    expect(btn).not.toBeNull();
+    expect(await btn.evaluate((el) => el.classList.contains('active'))).toBe(false);
+  });
+
+  test('clicking ⇄ enters compare mode — two revision bars and active ⇄ button', async () => {
+    await revCompPage.click('.btn-compare-toggle');
+    await revCompPage.waitForFunction(
+      () => document.querySelector('.btn-compare-toggle.active') !== null
+    );
+    expect((await revCompPage.$$('.revision-toggle-bar')).length).toBe(2);
+    expect(await revCompPage.$('.btn-compare-toggle.active')).not.toBeNull();
+  });
+
+  test('clicking ⇄ (active) exits compare mode — one revision bar, non-active ⇄', async () => {
+    await revCompPage.click('.btn-compare-toggle.active');
+    await revCompPage.waitForFunction(
+      () => document.querySelector('.btn-compare-toggle.active') === null
+    );
+    expect((await revCompPage.$$('.revision-toggle-bar')).length).toBe(1);
+    expect(await revCompPage.$('.btn-compare-toggle')).not.toBeNull();
   });
 });

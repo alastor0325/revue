@@ -266,6 +266,25 @@ describe('server HTTP integration', () => {
     expect(body.error).toMatch(/not found/i);
   });
 
+  test('POST /api/switch with missing worktreeName returns 400', async () => {
+    const { status, body } = await httpRequest(`${baseUrl}/api/switch`, { method: 'POST', body: {} });
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/required/i);
+  });
+
+  test('POST /api/submit with only deniedHashes (no comments, no approvals) returns 200', async () => {
+    const allFeedback = [{ hash: commitHash, comments: [], generalComment: '' }];
+    const { status, body } = await httpRequest(`${baseUrl}/api/submit`, {
+      method: 'POST',
+      body: { allFeedback, approvedHashes: [], deniedHashes: [commitHash] },
+    });
+    expect(status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.feedbackPath).toContain('REVIEW_FEEDBACK');
+    expect(fs.existsSync(body.feedbackPath)).toBe(true);
+    fs.unlinkSync(body.feedbackPath);
+  });
+
   test('GET /api/patchdiff/:hash returns real parsed diff for the commit', async () => {
     const shortHash = commitHash.slice(0, 8);
     const { status, body } = await httpRequest(`${baseUrl}/api/patchdiff/${shortHash}`);
