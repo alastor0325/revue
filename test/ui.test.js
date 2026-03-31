@@ -1537,6 +1537,14 @@ describe('revision compare mode', () => {
     expect(await revCompPage.$('.revision-toggle-bar')).not.toBeNull();
   });
 
+  test('latest revision (· current) is the first button — leftmost', async () => {
+    const firstBtnText = await revCompPage.$eval(
+      '.revision-toggle-scroll .btn-toggle-revision:first-child',
+      (el) => el.textContent
+    );
+    expect(firstBtnText).toContain('current');
+  });
+
   test('⇄ compare button is present and not active', async () => {
     const btn = await revCompPage.$('.btn-compare-toggle');
     expect(btn).not.toBeNull();

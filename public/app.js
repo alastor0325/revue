@@ -1092,21 +1092,21 @@ function buildPatchEl(idx) {
       // is never covered and buttons fade in cleanly from the left edge.
       const scroll = document.createElement('div');
       scroll.className = 'revision-toggle-scroll';
-      revList.forEach((rev, i) => {
-        const isCurrent = (i === revList.length - 1);
+      [...revList].reverse().forEach((rev, i) => {
+        const originalIdx = revList.length - 1 - i;
+        const isCurrent = (i === 0);
         const btn = document.createElement('button');
         btn.className = 'btn-toggle-revision' + (rev.hash === activeHash ? ' active' : '');
         const dateStr = rev.savedAt
           ? new Date(rev.savedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
           : '';
-        btn.innerHTML = `<span class="rev-btn-label">Rev ${i + 1}${isCurrent ? ' · current' : ''}</span>${dateStr ? `<span class="rev-btn-date">${escapeHtml(dateStr)}</span>` : ''}`;
+        btn.innerHTML = `<span class="rev-btn-label">Rev ${originalIdx + 1}${isCurrent ? ' · current' : ''}</span>${dateStr ? `<span class="rev-btn-date">${escapeHtml(dateStr)}</span>` : ''}`;
         btn.title = rev.hash;
         btn.addEventListener('click', () => onSelect(rev.hash));
         scroll.appendChild(btn);
       });
       bar.appendChild(scroll);
       addDragScroll(scroll);
-      requestAnimationFrame(() => { scroll.scrollLeft = scroll.scrollWidth; });
       bar._scroll = scroll; // expose scroll container for extra button appends
       return bar;
     };
