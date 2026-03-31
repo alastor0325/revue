@@ -1151,7 +1151,7 @@ tr.comment-draft-row td {
   padding: 3px 7px;
   font-size: 13px;
   cursor: pointer;
-  margin-right: 4px;
+  margin: 0 4px;
 }
 .btn-compare-toggle:hover { background: #30363d; color: #e6edf3; }
 .btn-compare-toggle.active { background: #1f4b8e; border-color: #388bfd; color: #79c0ff; }

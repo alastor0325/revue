@@ -1559,6 +1559,17 @@ describe('revision compare mode', () => {
     expect(await btn.evaluate((el) => el.classList.contains('active'))).toBe(false);
   });
 
+  test('⇄ compare button is a direct child of the bar, not inside the scroll', async () => {
+    const isInsideScroll = await revCompPage.$eval('.btn-compare-toggle', (btn) =>
+      btn.closest('.revision-toggle-scroll') !== null
+    );
+    expect(isInsideScroll).toBe(false);
+    const isInsideBar = await revCompPage.$eval('.btn-compare-toggle', (btn) =>
+      btn.closest('.revision-toggle-bar') !== null
+    );
+    expect(isInsideBar).toBe(true);
+  });
+
   test('clicking ⇄ enters compare mode — two revision bars and active ⇄ button', async () => {
     await revCompPage.click('.btn-compare-toggle');
     await revCompPage.waitForFunction(

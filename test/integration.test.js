@@ -214,6 +214,15 @@ describe('server HTTP integration', () => {
     expect(get.body.approvals).toEqual({ [commitHash]: true });
   });
 
+  test('POST /api/state persists compareRevision; GET /api/state retrieves it — compare button depends on this', async () => {
+    const compareRevision = { 0: { from: 'abc123', to: 'def456' } };
+    await httpRequest(`${baseUrl}/api/state`, { method: 'POST', body: { compareRevision } });
+    const { status, body } = await httpRequest(`${baseUrl}/api/state`);
+    expect(status).toBe(200);
+    expect(body.compareRevision).toEqual(compareRevision);
+    await httpRequest(`${baseUrl}/api/state`, { method: 'POST', body: { compareRevision: {} } });
+  });
+
   test('GET /api/state preserves revision order — UI depends on this to show latest first', async () => {
     const revisions = [
       { savedAt: '2024-01-01T00:00:00.000Z', patches: [{ hash: 'aaa', message: 'first' }] },

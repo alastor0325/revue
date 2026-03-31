@@ -1114,7 +1114,6 @@ function buildPatchEl(idx) {
       };
       scroll.addEventListener('scroll', updateMask, { passive: true });
       updateMask();
-      bar._scroll = scroll; // expose scroll container for extra button appends
       return bar;
     };
 
@@ -1137,7 +1136,7 @@ function buildPatchEl(idx) {
         state.compareRevision[patchIdx] = { from: hash, to: state.compareRevision[patchIdx].to };
         renderCurrentPatch();
       });
-      fromBar._scroll.appendChild(exitBtn);
+      fromBar.insertBefore(exitBtn, fromBar.querySelector('.revision-toggle-scroll'));
 
       const toBar = makeRevBarEl(toLabelText, compareRev.to, (hash) => {
         state.compareRevision[patchIdx] = { from: state.compareRevision[patchIdx].from, to: hash };
@@ -1161,7 +1160,7 @@ function buildPatchEl(idx) {
         renderCurrentPatch();
         renderTabs();
       });
-      revBar._scroll.appendChild(compareBtn);
+      revBar.insertBefore(compareBtn, revBar.querySelector('.revision-toggle-scroll'));
       el.appendChild(revBar);
     }
   }
