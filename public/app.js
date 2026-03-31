@@ -42,6 +42,14 @@ function draftKey(patchHash, filePath, key) {
 }
 
 // ── Auto-save ──────────────────────────────────────────────────────────────
+
+function resetReviewState() {
+  state.comments = {};
+  state.generalComments = {};
+  state.approved = new Set();
+  state.denied = new Set();
+}
+
 let saveTimer = null;
 let savedPromptText = null;
 let _pollTimer = null;
@@ -1430,7 +1438,11 @@ async function submitReview() {
       setTimeout(() => { copyBtn.textContent = 'Copy prompt'; }, 2000);
     }).catch(() => {});  // silently ignore if clipboard access is denied
 
+    resetReviewState();
+    await saveState();
+
     renderTabs();
+    renderCurrentPatch();
   } catch (err) {
     submitError = err.message;
   } finally {
@@ -1601,10 +1613,7 @@ async function initWorktreeBar() {
 // Safe to call multiple times (worktree switch, manual refresh).
 async function loadAndRender() {
   // Reset ephemeral state before loading new worktree data
-  state.comments = {};
-  state.generalComments = {};
-  state.approved = new Set();
-  state.denied = new Set();
+  resetReviewState();
   state.patches = [];
   state.currentPatchIdx = 0;
   state.revisions = [];

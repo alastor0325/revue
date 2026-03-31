@@ -815,6 +815,44 @@ describe('result overlay', () => {
   });
 });
 
+// ── State cleared after successful submit ──────────────────────────────────
+// After submitReview() succeeds, comments/approvals are cleared in-memory and
+// persisted so a subsequent reload starts fresh.
+
+describe('state cleared after submit', () => {
+  let clearStatePage;
+
+  beforeAll(async () => {
+    clearStatePage = await openFreshPage();
+    await clearStatePage.fill('.general-comment-textarea', 'Clean slate test comment.');
+    await clearStatePage.waitForFunction(() => !document.querySelector('#btn-submit').disabled, { timeout: 5000 });
+    await clearStatePage.click('#btn-submit');
+    await clearStatePage.waitForFunction(
+      () => document.getElementById('result-overlay')?.classList.contains('visible'),
+      { timeout: 15000 }
+    );
+    // Close overlay so UI is fully settled
+    await clearStatePage.click('#btn-close-modal');
+    await clearStatePage.waitForFunction(
+      () => !document.getElementById('result-overlay').classList.contains('visible')
+    );
+  }, 60000);
+
+  afterAll(async () => {
+    await clearStatePage?.close();
+    try { fs.unlinkSync(path.join(workRepoPath, 'REVIEW_FEEDBACK_work-repo.md')); } catch {}
+  });
+
+  test('general comment textarea is empty after submit', async () => {
+    const value = await clearStatePage.$eval('.general-comment-textarea', (el) => el.value);
+    expect(value).toBe('');
+  });
+
+  test('submit button is disabled after submit (no remaining activity)', async () => {
+    expect(await clearStatePage.$eval('#btn-submit', (el) => el.disabled)).toBe(true);
+  });
+});
+
 // ── Nested file path in sidebar ────────────────────────────────────────────
 // A commit touching src/helper.js should show a .file-nav-dir label in the
 // sidebar with the directory prefix, and .file-nav-filename with just the
