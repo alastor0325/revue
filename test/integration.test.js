@@ -320,6 +320,37 @@ describe('server HTTP integration', () => {
     fs.unlinkSync(body.feedbackPath);
   });
 
+  test('state cleared via POST /api/state after submit is reflected in subsequent GET /api/state', async () => {
+    // Simulate having comments saved before submit
+    const priorState = { comments: { abc: { 'file.js': { L1: { text: 'nit' } } } }, generalComments: { abc: 'Overall ok' }, approved: ['abc'], denied: [] };
+    await httpRequest(`${baseUrl}/api/state`, { method: 'POST', body: priorState });
+
+    // Submit generates the feedback file
+    const allFeedback = [{ hash: commitHash, comments: [], generalComment: 'LGTM' }];
+    const submitRes = await httpRequest(`${baseUrl}/api/submit`, {
+      method: 'POST',
+      body: { allFeedback, approvedHashes: [commitHash], deniedHashes: [] },
+    });
+    expect(submitRes.status).toBe(200);
+
+    // Client clears state on disk after successful submit
+    const clearRes = await httpRequest(`${baseUrl}/api/state`, {
+      method: 'POST',
+      body: { comments: {}, generalComments: {}, approved: [], denied: [] },
+    });
+    expect(clearRes.status).toBe(200);
+
+    // Subsequent GET /api/state should return empty review state
+    const { status, body } = await httpRequest(`${baseUrl}/api/state`);
+    expect(status).toBe(200);
+    expect(body.comments).toEqual({});
+    expect(body.generalComments).toEqual({});
+    expect(body.approved).toEqual([]);
+    expect(body.denied).toEqual([]);
+
+    fs.unlinkSync(submitRes.body.feedbackPath);
+  });
+
   test('GET /api/state returns prompt from existing REVIEW_FEEDBACK MD file', async () => {
     const mdPath = path.join(workRepoPath, 'REVIEW_FEEDBACK_work-repo.md');
     fs.writeFileSync(mdPath, 'pre-existing review prompt', 'utf8');
