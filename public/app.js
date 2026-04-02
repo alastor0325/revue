@@ -1618,6 +1618,11 @@ async function initWorktreeBar() {
 // Fetches diff + state from the server and re-renders everything in-place.
 // Safe to call multiple times (worktree switch, manual refresh).
 async function loadAndRender() {
+  // Cancel any pending auto-save before resetting state.  Without this, a
+  // debounced save that was scheduled before the reload fires during the
+  // `await` below and writes the now-cleared state back to the server,
+  // losing any unsaved approvals/denials.
+  clearTimeout(saveTimer);
   // Reset ephemeral state before loading new worktree data
   resetReviewState();
   state.patches = [];

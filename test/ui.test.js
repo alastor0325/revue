@@ -759,6 +759,93 @@ describe('update banner', () => {
   });
 });
 
+// ── Approved status preserved despite pending auto-save on reload ──────────
+// loadAndRender() cancels the pending save timer before resetting state.
+// Without the cancel, a save scheduled by the last approve/deny fires during
+// loadAndRender's fetch await, writes cleared state (approved:[]) to the
+// server, and the reload loads back that empty list — losing the approval.
+
+describe('approved status preserved after reload (pending auto-save race)', () => {
+  let racePage;
+
+  beforeAll(async () => {
+    racePage = await openFreshPage();
+    // Start from a known-clean state
+    await racePage.request.post(`${baseUrl}/api/state`, {
+      headers: { 'Content-Type': 'application/json' },
+      data: JSON.stringify({ comments: {}, generalComments: {}, approved: [], denied: [], revisions: [] }),
+    });
+    await racePage.evaluate(() => { document.getElementById('update-banner').style.display = ''; });
+    await racePage.click('#btn-reload-page');
+    await racePage.waitForSelector('.patch-heading', { state: 'visible' });
+    // Let the baseline auto-save settle before the test begins
+    await racePage.waitForTimeout(600);
+  }, 15000);
+
+  afterAll(async () => {
+    // Reset server state so subsequent tests start clean
+    if (racePage) {
+      await racePage.request.post(`${baseUrl}/api/state`, {
+        headers: { 'Content-Type': 'application/json' },
+        data: JSON.stringify({ comments: {}, generalComments: {}, approved: [], denied: [], revisions: [] }),
+      });
+      await racePage.close();
+    }
+  });
+
+  test('pending auto-save is cancelled before state reset so server state is not corrupted', async () => {
+    // Approve the patch and wait for the auto-save to persist it to the server
+    await racePage.click('.btn-approve');
+    await racePage.waitForSelector('.btn-unapprove', { timeout: 3000 });
+    await racePage.waitForTimeout(600); // 500ms debounce + 100ms margin → server has approved:[hash]
+
+    // Arm a route intercept that holds the next GET /api/state.  This stretches
+    // the race window: the reload fetch stalls while the pending save timer can fire.
+    let releaseGet;
+    let holdNextGet = false;
+    await racePage.route('**/api/state', async (route, request) => {
+      if (request.method() === 'POST') {
+        await route.continue();
+      } else if (holdNextGet) {
+        holdNextGet = false;
+        await new Promise((res) => { releaseGet = res; });
+        await route.continue();
+      } else {
+        await route.continue();
+      }
+    });
+
+    try {
+      // Deny the patch to queue a new pending auto-save (fires 500ms from now).
+      // The server still has approved:[hash] from the save above.
+      await racePage.click('.btn-deny');
+
+      // Arm the hold and trigger reload within 500ms of the deny — before the
+      // save timer fires.  Without the clearTimeout fix, the timer fires during
+      // the held GET with cleared state (approved:[], denied:[]) and corrupts
+      // the server's state file before the GET resolves.
+      holdNextGet = true;
+      await racePage.evaluate(() => { document.getElementById('update-banner').style.display = ''; });
+      await racePage.click('#btn-reload-page');
+
+      // Pause 600ms (500ms debounce + 100ms margin) so the save timer fires while the GET is held
+      await racePage.waitForTimeout(600);
+
+      // Release the GET — loadAndRender can now finish loading
+      releaseGet?.();
+      await racePage.waitForSelector('.patch-heading', { state: 'visible' });
+      await racePage.waitForTimeout(200);
+
+      // The server's approved list should still be intact (from the save before
+      // the deny).  Without the fix the corrupt save overwrites it with [] and
+      // the patch no longer shows as approved.
+      expect(await racePage.$('.btn-unapprove')).not.toBeNull();
+    } finally {
+      await racePage.unroute('**/api/state');
+    }
+  });
+});
+
 // ── Result overlay ─────────────────────────────────────────────────────────
 // Submitting with all patches approved fires POST /api/submit, which writes
 // REVIEW_FEEDBACK_*.md and triggers the result overlay with the prompt text.
