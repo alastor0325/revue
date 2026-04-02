@@ -1485,7 +1485,7 @@ async function submitReview() {
     await saveState();
 
     renderTabs();
-    renderCurrentPatch();
+    initPatchNodes();
   } catch (err) {
     submitError = err.message;
   } finally {

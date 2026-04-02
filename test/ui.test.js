@@ -927,6 +927,75 @@ describe('state cleared after submit', () => {
   });
 });
 
+// ── Post-submit heading class sync ────────────────────────────────────────
+// After generating the review prompt, ALL patch elements must be rebuilt so
+// that non-active patches do not retain stale heading classes (e.g. a denied
+// heading that was cleared when denied state was wiped on submit).
+//
+// Regression: submitReview() previously called renderCurrentPatch() which
+// only rebuilt the currently-visible patch; switching to another patch after
+// submit would reveal a stale heading with the pre-submit styling.
+
+describe('patch heading classes updated for all patches after submit', () => {
+  let syncPage;
+
+  beforeAll(async () => {
+    syncPage = await openFreshPage();
+
+    // Deny patch 0 while on it (starts as active).
+    await syncPage.click('.btn-deny');
+    await syncPage.waitForFunction(() =>
+      document.querySelectorAll('.patch-tab')[0].classList.contains('denied')
+    );
+
+    // Switch to patch 1 — submit will fire with currentPatchIdx = 1,
+    // so only patch 1 would be rebuilt if the bug were still present.
+    await syncPage.$$('.patch-tab').then(([, t1]) => t1.click());
+    await syncPage.waitForFunction(() =>
+      document.querySelectorAll('.patch-tab')[1].classList.contains('active')
+    );
+
+    // Submit button is enabled because denied.size > 0.
+    await syncPage.waitForFunction(() => !document.querySelector('#btn-submit').disabled);
+    await syncPage.click('#btn-submit');
+    await syncPage.waitForFunction(
+      () => document.getElementById('result-overlay')?.classList.contains('visible'),
+      { timeout: 15000 }
+    );
+    await syncPage.click('#btn-close-modal');
+    await syncPage.waitForFunction(
+      () => !document.getElementById('result-overlay').classList.contains('visible')
+    );
+  }, 60000);
+
+  afterAll(async () => {
+    await syncPage?.close();
+    try { fs.unlinkSync(path.join(workRepoPath, 'REVIEW_FEEDBACK_work-repo.md')); } catch {}
+  });
+
+  test('denied heading removed from non-active patch after submit', async () => {
+    // Switch to patch 0, which was denied before submit and cleared after.
+    await syncPage.$$('.patch-tab').then(([t0]) => t0.click());
+    await syncPage.waitForFunction(() =>
+      document.querySelectorAll('.patch-tab')[0].classList.contains('active')
+    );
+
+    const hasDenied = await syncPage.$eval(
+      '.patch-heading',
+      (el) => el.classList.contains('patch-heading-denied')
+    );
+    expect(hasDenied).toBe(false);
+  });
+
+  test('denied tab class removed after submit', async () => {
+    const hasDenied = await syncPage.$eval(
+      '.patch-tab',
+      (el) => el.classList.contains('denied')
+    );
+    expect(hasDenied).toBe(false);
+  });
+});
+
 // ── Nested file path in sidebar ────────────────────────────────────────────
 // A commit touching src/helper.js should show a .file-nav-dir label in the
 // sidebar with the directory prefix, and .file-nav-filename with just the
