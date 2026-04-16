@@ -4,6 +4,10 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
+function normPath(p) {
+  return path.normalize(p).replace(/\\/g, '/');
+}
+
 /**
  * Return the current HEAD commit hash of the given repo/worktree.
  * Returns null if the repo has no commits yet.
@@ -21,23 +25,34 @@ function getHeadHash(worktreePath) {
 /**
  * Find the merge-base between the worktree HEAD and the upstream main branch.
  *
- * Prefers origin/main (always tracks mozilla-central regardless of local
- * checkout state) to avoid false "no patches" results when the main repo is
- * left in detached HEAD at the same commit as the worktree — a common
- * side-effect of jj workflows.  Falls back to the main repo's HEAD.
+ * Tries remote refs in order: origin/main, origin/master, origin/HEAD.
+ * Falls back to the main repo's HEAD only when it is a different path from the
+ * worktree — using the same path would yield merge-base HEAD HEAD = HEAD,
+ * producing zero commits (the bug that manifests with --repo on a standalone repo).
  */
 function getMergeBase(worktreePath, mainRepoPath) {
+  const candidates = [
+    `git -C "${worktreePath}" rev-parse origin/main`,
+    `git -C "${worktreePath}" rev-parse origin/master`,
+    `git -C "${worktreePath}" rev-parse origin/HEAD`,
+  ];
+
+  if (normPath(mainRepoPath) !== normPath(worktreePath)) {
+    candidates.push(`git -C "${mainRepoPath}" rev-parse HEAD`);
+  }
+
   let mainTip;
-  try {
-    mainTip = execSync(
-      `git -C "${worktreePath}" rev-parse origin/main`,
-      { encoding: 'utf8' }
-    ).trim();
-  } catch {
-    mainTip = execSync(
-      `git -C "${mainRepoPath}" rev-parse HEAD`,
-      { encoding: 'utf8' }
-    ).trim();
+  for (const cmd of candidates) {
+    try {
+      mainTip = execSync(cmd, { encoding: 'utf8' }).trim();
+      break;
+    } catch {
+      // continue
+    }
+  }
+
+  if (!mainTip) {
+    throw new Error('Cannot determine base commit: no origin/main, origin/master, or origin/HEAD found');
   }
 
   return execSync(
@@ -402,10 +417,7 @@ function parseWorktreeList(output, mainRepoPath) {
       return { path: wtPath, branch };
     })
     .filter(Boolean)
-    .filter((wt) => {
-      const norm = (p) => path.normalize(p).replace(/\\/g, '/');
-      return norm(wt.path) !== norm(mainRepoPath);
-    })
+    .filter((wt) => normPath(wt.path) !== normPath(mainRepoPath))
     .map((wt) => {
       const basename = path.basename(wt.path);
       const worktreeName = basename.startsWith(prefix) ? basename.slice(prefix.length) : basename;

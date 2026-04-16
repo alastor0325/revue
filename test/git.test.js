@@ -389,18 +389,56 @@ describe('getMergeBase', () => {
     );
   });
 
-  test('falls back to main repo HEAD when origin/main is not available', () => {
+  test('falls back to origin/master when origin/main is not available', () => {
     execSync
-      .mockImplementationOnce(() => { throw new Error('unknown revision'); }) // rev-parse origin/main fails
-      .mockReturnValueOnce('main-repo-head\n') // rev-parse HEAD on main repo
-      .mockReturnValueOnce('merge-base-hash\n');  // merge-base HEAD main-repo-head
+      .mockImplementationOnce(() => { throw new Error('unknown revision'); }) // origin/main fails
+      .mockReturnValueOnce('origin-master-hash\n')                            // origin/master succeeds
+      .mockReturnValueOnce('merge-base-hash\n');                              // merge-base
     const result = getMergeBase(WORKTREE, MAIN_REPO);
     expect(result).toBe('merge-base-hash');
     expect(execSync).toHaveBeenNthCalledWith(
       2,
+      `git -C "${WORKTREE}" rev-parse origin/master`,
+      { encoding: 'utf8' }
+    );
+  });
+
+  test('falls back to main repo HEAD when origin/main and origin/master are not available', () => {
+    execSync
+      .mockImplementationOnce(() => { throw new Error('unknown revision'); }) // origin/main fails
+      .mockImplementationOnce(() => { throw new Error('unknown revision'); }) // origin/master fails
+      .mockImplementationOnce(() => { throw new Error('unknown revision'); }) // origin/HEAD fails
+      .mockReturnValueOnce('main-repo-head\n')                                // mainRepoPath HEAD
+      .mockReturnValueOnce('merge-base-hash\n');                              // merge-base
+    const result = getMergeBase(WORKTREE, MAIN_REPO);
+    expect(result).toBe('merge-base-hash');
+    expect(execSync).toHaveBeenNthCalledWith(
+      4,
       `git -C "${MAIN_REPO}" rev-parse HEAD`,
       { encoding: 'utf8' }
     );
+  });
+
+  test('uses origin/master for standalone repo (worktreePath === mainRepoPath)', () => {
+    const REPO = '/fake/mp4parse';
+    execSync
+      .mockImplementationOnce(() => { throw new Error('unknown revision'); }) // origin/main fails
+      .mockReturnValueOnce('origin-master-hash\n')                            // origin/master succeeds
+      .mockReturnValueOnce('merge-base-hash\n');                              // merge-base
+    const result = getMergeBase(REPO, REPO);
+    expect(result).toBe('merge-base-hash');
+    // mainRepoPath HEAD must NOT be tried when paths are equal
+    expect(execSync).toHaveBeenCalledTimes(3);
+  });
+
+  test('throws when no base commit can be determined for standalone repo', () => {
+    const REPO = '/fake/mp4parse';
+    execSync
+      .mockImplementationOnce(() => { throw new Error('unknown revision'); }) // origin/main
+      .mockImplementationOnce(() => { throw new Error('unknown revision'); }) // origin/master
+      .mockImplementationOnce(() => { throw new Error('unknown revision'); }) // origin/HEAD
+      // mainRepoPath HEAD is NOT tried because paths are equal
+    expect(() => getMergeBase(REPO, REPO)).toThrow('Cannot determine base commit');
   });
 
   test('finds patches when main repo HEAD equals worktree HEAD (jj detached scenario)', () => {
