@@ -18,6 +18,15 @@ When a worktree has multiple commits the UI shows **tabs** — one per patch:
 
 Each tab shows a comment-count badge, a `✓` if approved, or a `✗` if denied. Tabs with amended commits show a `↑` badge.
 
+## Keyboard shortcuts
+
+| Key | Action |
+|---|---|
+| `←` / `→` | Switch to the previous / next patch tab |
+| `↑` / `↓` | Move to the previous / next file in the current patch (scrolls its diff into view) |
+
+Shortcuts are disabled while you are typing in a comment or feedback field, and while the review-prompt modal is open, so the arrows keep their normal behavior there.
+
 ## Per-patch actions
 
 Each patch has two buttons in the heading:

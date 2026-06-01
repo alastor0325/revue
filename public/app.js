@@ -19,7 +19,7 @@ import {
   patchEls, updateSubmitButton, removeExistingForm, showCommentForm,
   renderDraftDisplay, renderCommentDisplay, renderCommitMessageSection,
   restoreLineDisplay,
-  renderFileNav, renderFile,
+  renderFileNav, renderFile, navigateFile,
   renderTabs, switchPatch, buildPatchEl, renderCurrentPatch, initPatchNodes,
   addDragScroll, initTabsDragScroll, getFileNavCollapsed, setFileNavCollapsed,
   setupStickySidebarOffset,
@@ -507,11 +507,41 @@ async function fullRefresh() {
   } catch { /* network blip — next broadcast will retry */ }
 }
 
+// ── Keyboard shortcuts ───────────────────────────────────────────────────────
+// Left/Right arrows move between patch tabs; Up/Down arrows move between files
+// in the current patch.  Ignored while a text field is focused or the result
+// overlay is open, so the keys keep their native behavior there.
+function handleArrowKeys(e) {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+  // Bail on the common case (any non-arrow key) before touching the DOM, so
+  // ordinary typing never pays for the focus/overlay checks below.
+  const horizontal = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
+  const vertical   = e.key === 'ArrowUp'   || e.key === 'ArrowDown';
+  if (!horizontal && !vertical) return;
+
+  const t = e.target;
+  if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+  if ($('#result-overlay').classList.contains('visible')) return;
+
+  if (horizontal) {
+    const n = state.patches.length;
+    if (n <= 1) return;
+    const dir = e.key === 'ArrowLeft' ? -1 : 1;
+    const idx = Math.max(0, Math.min(n - 1, state.currentPatchIdx + dir));
+    if (idx === state.currentPatchIdx) return;
+    e.preventDefault();
+    switchPatch(idx);
+  } else {
+    if (navigateFile(e.key === 'ArrowUp' ? -1 : 1)) e.preventDefault();
+  }
+}
+
 async function init() {
   setupStickySidebarOffset();
   updateSubmitButton();
 
   $('#btn-submit').addEventListener('click', submitReview);
+  document.addEventListener('keydown', handleArrowKeys);
   initTabsDragScroll();
 
   $('#btn-copy-prompt').addEventListener('click', () => {

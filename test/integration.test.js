@@ -1210,3 +1210,67 @@ describe('getMergeBase — fallback without origin/main', () => {
     expect(commits[0].message).toBe('feat: add new');
   });
 });
+
+// ── Keyboard navigation data contract ──────────────────────────────────────
+// The arrow-key shortcuts rely on the shape of /api/diff: Left/Right switch
+// between patches (so there must be more than one patch entry) and Up/Down
+// move between files within a patch (so a patch's `files` array must list
+// every changed file, in a stable order the sidebar mirrors).
+
+describe('keyboard navigation data contract', () => {
+  let kbTmpDir, kbMain, kbWork, kbServer, kbPort;
+
+  beforeAll(async () => {
+    kbTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-kbnav-'));
+    kbMain = path.join(kbTmpDir, 'main');
+    kbWork = path.join(kbTmpDir, 'work');
+
+    fs.mkdirSync(kbMain);
+    git(kbMain, 'init');
+    git(kbMain, 'config user.email "test@test.com"');
+    git(kbMain, 'config user.name "Test"');
+    fs.writeFileSync(path.join(kbMain, 'base.txt'), 'base\n');
+    git(kbMain, 'add .');
+    git(kbMain, 'commit -m "initial"');
+
+    execSync(`git clone "${kbMain}" "${kbWork}"`, { encoding: 'utf8' });
+    git(kbWork, 'config user.email "test@test.com"');
+    git(kbWork, 'config user.name "Test"');
+
+    // Commit 1 — one file → the first patch tab.
+    fs.writeFileSync(path.join(kbWork, 'alpha.js'), 'const a = 1;\n');
+    git(kbWork, 'add .');
+    git(kbWork, 'commit -m "feat: add alpha"');
+
+    // Commit 2 — two files → gives Up/Down something to move between.
+    fs.writeFileSync(path.join(kbWork, 'beta.js'), 'const b = 2;\n');
+    fs.writeFileSync(path.join(kbWork, 'gamma.js'), 'const g = 3;\n');
+    git(kbWork, 'add .');
+    git(kbWork, 'commit -m "feat: add beta and gamma"');
+
+    const app = createApp({ worktreeName: 'work', worktreePath: kbWork, mainRepoPath: kbMain });
+    kbPort = await findAvailablePort(18900);
+    await new Promise((resolve) => { kbServer = app.listen(kbPort, '127.0.0.1', resolve); });
+  });
+
+  afterAll((done) => {
+    kbServer.close(() => {
+      fs.rmSync(kbTmpDir, { recursive: true, force: true });
+      done();
+    });
+  });
+
+  test('GET /api/diff returns multiple patches so Left/Right can switch tabs', async () => {
+    const { status, body } = await httpRequest(`http://127.0.0.1:${kbPort}/api/diff`);
+    expect(status).toBe(200);
+    expect(body.patches.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test('a multi-file patch lists every file in stable order so Up/Down can navigate', async () => {
+    const { body } = await httpRequest(`http://127.0.0.1:${kbPort}/api/diff`);
+    const multi = body.patches.find((p) => p.message === 'feat: add beta and gamma');
+    expect(multi).toBeTruthy();
+    const paths = multi.files.map((f) => f.newPath);
+    expect(paths).toEqual(['beta.js', 'gamma.js']);
+  });
+});

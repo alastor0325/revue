@@ -824,6 +824,23 @@ export function renderFileNav(files, diffWrap) {
   activateFileNav(buildNavItemsEl(files, diffWrap), diffWrap);
 }
 
+// Move the file-nav selection to the adjacent file in the current patch:
+// dir=-1 selects the previous file, dir=+1 the next.  Reuses each nav item's
+// click handler so the diff block scrolls into view and the highlight updates
+// exactly as a manual click would.  Returns true when the selection moved.
+export function navigateFile(dir) {
+  const nav = $('#file-nav');
+  if (!nav || nav.style.display === 'none') return false;
+  const items = $$('.file-nav-item', nav);
+  if (items.length === 0) return false;
+  let activeIdx = items.findIndex((it) => it.classList.contains('active'));
+  if (activeIdx < 0) activeIdx = 0;
+  const next = Math.max(0, Math.min(items.length - 1, activeIdx + dir));
+  if (next === activeIdx) return false;
+  items[next].click();
+  return true;
+}
+
 // ── Build a patch element (detached) ────────────────────────────────────────
 // Returns { el, diffWrap, navItemsEl } for the given patch index. The element
 // is not yet inserted into the DOM; the caller is responsible for placement.
@@ -1276,7 +1293,7 @@ if (typeof module !== 'undefined') {
     renderCommitMessageSection,
     renderExpandRow, countStats, renderFile,
     renderTabs, switchPatch,
-    buildNavItemsEl, activateFileNav, renderFileNav,
+    buildNavItemsEl, activateFileNav, renderFileNav, navigateFile,
     buildPatchEl, renderCurrentPatch, initPatchNodes,
     addDragScroll, initTabsDragScroll,
     getFileNavCollapsed, setFileNavCollapsed,

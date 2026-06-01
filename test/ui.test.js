@@ -164,6 +164,49 @@ describe('patch tabs', () => {
   });
 });
 
+// ── Keyboard shortcuts — patch tabs ─────────────────────────────────────────
+// Left/Right arrows move between patch tabs. Uses a fresh page so the active
+// tab starts at the first patch regardless of prior tests' interactions.
+
+describe('keyboard shortcuts — patch tabs', () => {
+  let kbPage;
+
+  beforeAll(async () => { kbPage = await openFreshPage(); }, 15000);
+  afterAll(async () => { await kbPage.close(); });
+
+  test('ArrowRight switches to the next patch tab', async () => {
+    await kbPage.keyboard.press('ArrowRight');
+    await kbPage.waitForFunction(() => document.querySelectorAll('.patch-tab')[1]?.classList.contains('active'));
+    expect(await kbPage.$$eval('.patch-tab', (tabs) => tabs[1].classList.contains('active'))).toBe(true);
+  });
+
+  test('ArrowRight at the last tab stays on the last tab', async () => {
+    await kbPage.keyboard.press('ArrowRight');
+    await kbPage.waitForTimeout(50);
+    expect(await kbPage.$$eval('.patch-tab', (tabs) => tabs[1].classList.contains('active'))).toBe(true);
+  });
+
+  test('ArrowLeft switches back to the previous patch tab', async () => {
+    await kbPage.keyboard.press('ArrowLeft');
+    await kbPage.waitForFunction(() => document.querySelectorAll('.patch-tab')[0]?.classList.contains('active'));
+    expect(await kbPage.$$eval('.patch-tab', (tabs) => tabs[0].classList.contains('active'))).toBe(true);
+  });
+
+  test('ArrowLeft at the first tab stays on the first tab', async () => {
+    await kbPage.keyboard.press('ArrowLeft');
+    await kbPage.waitForTimeout(50);
+    expect(await kbPage.$$eval('.patch-tab', (tabs) => tabs[0].classList.contains('active'))).toBe(true);
+  });
+
+  test('arrow keys are ignored while a textarea is focused', async () => {
+    await kbPage.focus('.general-comment-textarea');
+    await kbPage.keyboard.press('ArrowRight');
+    await kbPage.waitForTimeout(50);
+    // The keypress belongs to the textarea, not the switcher — tab 0 stays active.
+    expect(await kbPage.$$eval('.patch-tab', (tabs) => tabs[0].classList.contains('active'))).toBe(true);
+  });
+});
+
 // ── Sidebar (file nav) ─────────────────────────────────────────────────────
 
 describe('sidebar', () => {
@@ -689,6 +732,88 @@ describe('sidebar file highlight', () => {
     );
     expect(await items[0].evaluate((el) => el.classList.contains('active'))).toBe(true);
     expect(await items[1].evaluate((el) => el.classList.contains('active'))).toBe(false);
+  });
+});
+
+// ── Keyboard shortcuts — file navigation ────────────────────────────────────
+// A single patch touching three tall files in a short viewport. The files are
+// large enough that the page scrolls, so the scroll-driven highlight reliably
+// settles on the file the arrow key brought into view. We navigate between the
+// first and middle file: the last file in a patch can't be scrolled all the
+// way to the top of the viewport, so its highlight never settles active — an
+// existing property of the scroll-based sidebar, unrelated to the shortcut.
+
+describe('keyboard shortcuts — file navigation', () => {
+  let kbNavServer, kbNavPage, kbNavTmpDir;
+  const FILES = ['alpha', 'beta', 'gamma'];
+
+  beforeAll(async () => {
+    kbNavTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-ui-kbnav-'));
+    const kbNavMain = path.join(kbNavTmpDir, 'main');
+    const kbNavWork = path.join(kbNavTmpDir, 'work');
+
+    fs.mkdirSync(kbNavMain);
+    git(kbNavMain, 'init');
+    git(kbNavMain, 'config user.email "test@test.com"');
+    git(kbNavMain, 'config user.name "Test"');
+    const body = (p) => Array.from({ length: 60 }, (_, i) => `const ${p}${i} = ${i};`).join('\n') + '\n';
+    for (const f of FILES) fs.writeFileSync(path.join(kbNavMain, `${f}.js`), body(f[0]));
+    git(kbNavMain, 'add .');
+    git(kbNavMain, 'commit -m "initial"');
+
+    execSync(`git clone "${kbNavMain}" "${kbNavWork}"`, { encoding: 'utf8' });
+    git(kbNavWork, 'config user.email "test@test.com"');
+    git(kbNavWork, 'config user.name "Test"');
+    for (const f of FILES) {
+      fs.writeFileSync(path.join(kbNavWork, `${f}.js`), body(f[0]).replace(`const ${f[0]}0 = 0;`, `const ${f[0]}0 = 9;`));
+    }
+    git(kbNavWork, 'add .');
+    git(kbNavWork, 'commit -m "feat: update three files"');
+
+    const app = createApp({ worktreeName: 'work', worktreePath: kbNavWork, mainRepoPath: kbNavMain });
+    const port = await findAvailablePort(19900);
+    await new Promise((resolve) => { kbNavServer = app.listen(port, '127.0.0.1', resolve); });
+
+    // A short viewport guarantees the page scrolls so the scroll-driven file
+    // highlight tracks the arrow-key navigation.
+    kbNavPage = await browser.newPage({ viewport: { width: 1000, height: 600 } });
+    await kbNavPage.goto(`http://127.0.0.1:${port}`);
+    await kbNavPage.waitForSelector('.file-nav-item', { state: 'visible' });
+  }, 30000);
+
+  afterAll(async () => {
+    await kbNavPage?.close();
+    await new Promise((resolve) => kbNavServer?.close(resolve));
+    fs.rmSync(kbNavTmpDir, { recursive: true, force: true });
+  });
+
+  test('sidebar shows three file nav items with the first active', async () => {
+    const items = await kbNavPage.$$('.file-nav-item');
+    expect(items.length).toBe(3);
+    expect(await items[0].evaluate((el) => el.classList.contains('active'))).toBe(true);
+  });
+
+  // The arrow key reuses the nav item's click → smooth-scroll path; the scroll
+  // handler settles the highlight on the file actually scrolled into view, so
+  // wait for the scroll to finish before asserting the final selection.
+  test('ArrowDown moves the active file to the next item', async () => {
+    await kbNavPage.keyboard.press('ArrowDown');
+    await kbNavPage.waitForTimeout(600);
+    await kbNavPage.waitForFunction(
+      () => document.querySelectorAll('.file-nav-item')[1].classList.contains('active')
+    );
+    const items = await kbNavPage.$$('.file-nav-item');
+    expect(await items[1].evaluate((el) => el.classList.contains('active'))).toBe(true);
+  });
+
+  test('ArrowUp moves the active file back to the previous item', async () => {
+    await kbNavPage.keyboard.press('ArrowUp');
+    await kbNavPage.waitForTimeout(600);
+    await kbNavPage.waitForFunction(
+      () => document.querySelectorAll('.file-nav-item')[0].classList.contains('active')
+    );
+    const items = await kbNavPage.$$('.file-nav-item');
+    expect(await items[0].evaluate((el) => el.classList.contains('active'))).toBe(true);
   });
 });
 

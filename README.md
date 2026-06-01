@@ -50,6 +50,7 @@ Requires **Node.js ≥ 18**.
 | **Revision detection** | When commits are amended, a revision bar lets you compare old vs new diffs side-by-side. |
 | **Multi-tab sync** | Open the same worktree in any number of tabs, browsers, or windows. Edits stream over Server-Sent Events; open forms are never clobbered by a peer save. |
 | **Worktree switcher** | Running Claude in parallel on `myrepo-feature` and `myrepo-experiment`? Switch from the tab bar — no restart. |
+| **Keyboard navigation** | `←`/`→` switch patch tabs; `↑`/`↓` move between files in the current patch. Disabled while typing in a comment field. |
 | **Update banner** | Detects when Claude has pushed new commits to the worktree; click reload to pull them in without losing your session. |
 | **Background daemon** | `revue` starts in the background and returns control immediately. `revue --stop` / `--restart` for lifecycle. |
 
