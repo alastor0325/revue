@@ -22,7 +22,7 @@ import {
   renderFileNav, renderFile, navigateFile,
   renderTabs, switchPatch, buildPatchEl, renderCurrentPatch, initPatchNodes,
   addDragScroll, initTabsDragScroll, getFileNavCollapsed, setFileNavCollapsed,
-  setupStickySidebarOffset,
+  setupStickySidebarOffset, formatPatchDate,
 } from './renderer.js';
 
 // ── DOM helpers ────────────────────────────────────────────────────────────
@@ -637,6 +637,7 @@ if (typeof module !== 'undefined') {
     switchPatch,
     patchEls,
     addDragScroll,
+    formatPatchDate,
     // app.js exports
     submitReview,
     loadAndRender,

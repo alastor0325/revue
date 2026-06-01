@@ -860,6 +860,17 @@ export function navigateFile(dir) {
   return true;
 }
 
+// Format a commit's ISO date for the patch heading. Returns '' for a missing
+// or unparseable value so the caller can omit the element entirely.
+export function formatPatchDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleString(undefined, {
+    year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+}
+
 // ── Build a patch element (detached) ────────────────────────────────────────
 // Returns { el, diffWrap, navItemsEl } for the given patch index. The element
 // is not yet inserted into the DOM; the caller is responsible for placement.
@@ -886,10 +897,12 @@ export function buildPatchEl(idx) {
   heading.className = 'patch-heading' +
     (isApproved ? ' patch-heading-approved' : '') +
     (isDenied ? ' patch-heading-denied' : '');
+  const dateStr = formatPatchDate(patch.date);
   heading.innerHTML = `
     <span class="patch-heading-label">Part ${patchNum}${total > 1 ? ` of ${total}` : ''}</span>
     <span class="patch-heading-msg">${escapeHtml(patch.message)}</span>
-    <span class="patch-heading-hash">${escapeHtml(patch.hash)}</span>`;
+    <span class="patch-heading-hash">${escapeHtml(patch.hash)}</span>
+    ${dateStr ? `<span class="patch-heading-date" title="Last modified">${escapeHtml(dateStr)}</span>` : ''}`;
 
   // Approve + Skip buttons grouped at the right
   const btnGroup = document.createElement('div');
@@ -1313,7 +1326,7 @@ if (typeof module !== 'undefined') {
     renderExpandRow, countStats, renderFile,
     renderTabs, switchPatch,
     buildNavItemsEl, activateFileNav, renderFileNav, navigateFile,
-    buildPatchEl, renderCurrentPatch, initPatchNodes,
+    buildPatchEl, renderCurrentPatch, initPatchNodes, formatPatchDate,
     addDragScroll, initTabsDragScroll,
     getFileNavCollapsed, setFileNavCollapsed,
     setupStickySidebarOffset,

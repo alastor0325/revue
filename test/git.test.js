@@ -339,17 +339,49 @@ describe('getHeadHash', () => {
 // ── getCommits ─────────────────────────────────────────────────────────────
 
 describe('getCommits', () => {
-  test('silently skips malformed log lines that have no space', () => {
+  // The log format is unit-separator (\x1f) delimited: %h\x1f%cI\x1f%s.
+  const US = '\x1f';
+
+  test('parses hash, committer date, and subject (with spaces) from each line', () => {
     // getMergeBase needs 2 calls (rev-parse origin/main, then merge-base HEAD <tip>)
     // getCommits then needs 1 more (git log)
     execSync
       .mockReturnValueOnce('deadbeef\n')  // rev-parse origin/main → mainTip
       .mockReturnValueOnce('baseabc\n')   // merge-base HEAD deadbeef → base
-      .mockReturnValueOnce('abc1234 normal commit\nNOSPACE\ndef5678 another commit\n');
+      .mockReturnValueOnce(
+        `abc1234${US}2026-06-01T10:00:00+00:00${US}feat: do a thing\n` +
+        `def5678${US}2026-06-02T11:30:00+00:00${US}chore: tidy up\n`
+      );
     const result = getCommits('/fake/worktree', '/fake/main');
-    expect(result).toHaveLength(2);
-    expect(result[0].hash).toBe('abc1234');
-    expect(result[1].hash).toBe('def5678');
+    expect(result).toEqual([
+      { hash: 'abc1234', date: '2026-06-01T10:00:00+00:00', message: 'feat: do a thing' },
+      { hash: 'def5678', date: '2026-06-02T11:30:00+00:00', message: 'chore: tidy up' },
+    ]);
+  });
+
+  test('requests the committer date via the %cI format field', () => {
+    execSync
+      .mockReturnValueOnce('deadbeef\n')
+      .mockReturnValueOnce('baseabc\n')
+      .mockReturnValueOnce('');
+    getCommits('/fake/worktree', '/fake/main');
+    expect(execSync).toHaveBeenLastCalledWith(
+      'git -C "/fake/worktree" log --reverse --format="%h%x1f%cI%x1f%s" baseabc..HEAD',
+      { encoding: 'utf8' }
+    );
+  });
+
+  test('silently skips malformed lines that have no hash field', () => {
+    execSync
+      .mockReturnValueOnce('deadbeef\n')
+      .mockReturnValueOnce('baseabc\n')
+      .mockReturnValueOnce(
+        `abc1234${US}2026-06-01T10:00:00+00:00${US}first\n` +
+        `\n` + // blank/malformed line → no hash → skipped
+        `def5678${US}2026-06-02T10:00:00+00:00${US}second\n`
+      );
+    const result = getCommits('/fake/worktree', '/fake/main');
+    expect(result.map((c) => c.hash)).toEqual(['abc1234', 'def5678']);
   });
 });
 

@@ -27,6 +27,10 @@ Each tab shows a comment-count badge, a `✓` if approved, or a `✗` if denied.
 
 Shortcuts are disabled while you are typing in a comment or feedback field, and while the review-prompt modal is open, so the arrows keep their normal behavior there.
 
+## Patch heading
+
+Each patch heading shows its **Part** label, the commit subject, the short hash, and the commit's **last-modified time** (the committer date, which advances whenever the commit is amended or rebased). The timestamp is left-aligned on the same row as the Approve/Deny buttons, in a smaller muted font.
+
 ## Per-patch actions
 
 Each patch has two buttons in the heading:

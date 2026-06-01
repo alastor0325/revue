@@ -130,6 +130,45 @@ describe('page structure', () => {
   });
 });
 
+// ── Patch heading last-modified date ────────────────────────────────────────
+// The heading shows the commit's last-modified time, left-aligned, at the same
+// height as the Approve/Deny buttons. Uses a fresh page so the heading is in
+// its initial rendered state.
+
+describe('patch heading last-modified date', () => {
+  let datePage;
+
+  beforeAll(async () => { datePage = await openFreshPage(); }, 15000);
+  afterAll(async () => { await datePage.close(); });
+
+  test('heading shows a last-modified date element', async () => {
+    const dateEl = await datePage.$('.patch-heading .patch-heading-date');
+    expect(dateEl).not.toBeNull();
+  });
+
+  test('the date reads as a real timestamp with a year', async () => {
+    const text = await datePage.textContent('.patch-heading .patch-heading-date');
+    expect(text.trim().length).toBeGreaterThan(0);
+    expect(text).toMatch(/\d{4}/); // includes the year
+  });
+
+  test('the date carries a "Last modified" tooltip', async () => {
+    expect(await datePage.$eval('.patch-heading .patch-heading-date', (el) => el.title)).toBe('Last modified');
+  });
+
+  test('the date sits to the left of the action buttons', async () => {
+    const ok = await datePage.evaluate(() => {
+      const heading = document.querySelector('.patch-heading');
+      const date = heading.querySelector('.patch-heading-date').getBoundingClientRect();
+      const actions = heading.querySelector('.patch-heading-actions').getBoundingClientRect();
+      // Same row (vertically overlapping) and the date is left of the buttons.
+      const sameRow = date.top < actions.bottom && actions.top < date.bottom;
+      return sameRow && date.left < actions.left;
+    });
+    expect(ok).toBe(true);
+  });
+});
+
 // ── Patch tabs ─────────────────────────────────────────────────────────────
 
 describe('patch tabs', () => {

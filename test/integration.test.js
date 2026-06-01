@@ -105,6 +105,14 @@ describe('git integration', () => {
     expect(commits[0].hash).toMatch(/^[0-9a-f]+$/);
   });
 
+  test('getCommits includes the committer date as ISO-8601 matching git', () => {
+    const commits = getCommits(workRepoPath, mainRepoPath);
+    const gitDate = git(workRepoPath, `show -s --format=%cI ${commitHash}`);
+    expect(commits[0].date).toBe(gitDate);
+    // Must be a parseable timestamp the UI can format.
+    expect(Number.isNaN(Date.parse(commits[0].date))).toBe(false);
+  });
+
   test('getCommits returns [] when worktree has no commits ahead of main', () => {
     const commits = getCommits(mainRepoPath, mainRepoPath);
     expect(commits).toEqual([]);
@@ -189,6 +197,10 @@ describe('server HTTP integration', () => {
     expect(body.patches).toHaveLength(1);
     expect(body.patches[0].message).toBe('feat: add hello function');
     expect(body.patches[0].files[0].newPath).toBe('feature.js');
+    // The patch heading shows the last-modified time, so the date must survive
+    // the JSON round-trip as a parseable ISO string.
+    expect(typeof body.patches[0].date).toBe('string');
+    expect(Number.isNaN(Date.parse(body.patches[0].date))).toBe(false);
   });
 
   test('GET /api/diff returns consistent data on repeated calls', async () => {

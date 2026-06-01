@@ -75,6 +75,36 @@ describe('buildPatchEl', () => {
     const { diffWrap } = buildPatchEl(0);
     expect(diffWrap).toBeNull();
   });
+
+  test('renders the last-modified date when the patch has one', () => {
+    state.patches = makePatches('Part 1 - fix the thing');
+    state.patches[0].date = '2026-06-01T12:34:00Z';
+    const { el } = buildPatchEl(0);
+    const dateEl = el.querySelector('.patch-heading-date');
+    expect(dateEl).not.toBeNull();
+    expect(dateEl.textContent.trim().length).toBeGreaterThan(0);
+    expect(dateEl.title).toBe('Last modified');
+  });
+
+  test('omits the date element when the patch has no date', () => {
+    state.patches = makePatches('Part 1 - fix the thing'); // makePatches sets no date
+    const { el } = buildPatchEl(0);
+    expect(el.querySelector('.patch-heading-date')).toBeNull();
+  });
+});
+
+describe('formatPatchDate', () => {
+  const { formatPatchDate } = require('../public/app');
+
+  test('returns a non-empty human string for a valid ISO date', () => {
+    expect(formatPatchDate('2026-06-01T12:34:00Z').length).toBeGreaterThan(0);
+  });
+
+  test('returns empty string for missing or unparseable input', () => {
+    expect(formatPatchDate(null)).toBe('');
+    expect(formatPatchDate(undefined)).toBe('');
+    expect(formatPatchDate('not a date')).toBe('');
+  });
 });
 
 describe('initPatchNodes', () => {

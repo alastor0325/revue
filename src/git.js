@@ -63,7 +63,9 @@ function getMergeBase(worktreePath, mainRepoPath) {
 
 /**
  * Get list of commits ahead of the merge-base.
- * Returns array of { hash, message } objects, oldest first.
+ * Returns array of { hash, message, date } objects, oldest first.
+ * `date` is the committer date as a strict ISO-8601 string (%cI), which tracks
+ * the last time the commit was written — it advances on amend/rebase.
  * Returns [] if the worktree has no commits or the merge-base cannot be determined.
  */
 function getCommits(worktreePath, mainRepoPath) {
@@ -73,19 +75,22 @@ function getCommits(worktreePath, mainRepoPath) {
   } catch {
     return [];
   }
+  // Unit-separator (\x1f) delimited fields so subjects with spaces parse cleanly.
+  // %h matches the abbreviated hash the rest of the app keys on.
   const output = execSync(
-    `git -C "${worktreePath}" log --oneline --reverse ${base}..HEAD`,
+    `git -C "${worktreePath}" log --reverse --format="%h%x1f%cI%x1f%s" ${base}..HEAD`,
     { encoding: 'utf8' }
   ).trim();
 
   if (!output) return [];
 
   return output.split('\n').map((line) => {
-    const spaceIdx = line.indexOf(' ');
-    if (spaceIdx === -1) return null;
+    const parts = line.split('\x1f');
+    if (!parts[0]) return null;
     return {
-      hash: line.slice(0, spaceIdx),
-      message: line.slice(spaceIdx + 1),
+      hash: parts[0],
+      date: parts[1] || null,
+      message: parts[2] || '',
     };
   }).filter(Boolean);
 }
@@ -366,8 +371,9 @@ function getDiffForCommit(worktreePath, hash) {
 
 /**
  * Get per-commit diffs. Returns an array of patch objects (oldest first):
- * { hash, message, body, files }
+ * { hash, message, date, body, files }
  * message — subject line only (first line)
+ * date    — committer date (ISO-8601), tracks the last time the commit changed
  * body    — full commit message (subject + blank line + body if present)
  */
 function getDiffPerCommit(worktreePath, mainRepoPath) {
@@ -382,6 +388,7 @@ function getDiffPerCommit(worktreePath, mainRepoPath) {
     return {
       hash: commit.hash,
       message: commit.message,
+      date: commit.date,
       body: parseCommitBody(raw),
       files: parseDiff(raw),
     };
