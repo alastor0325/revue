@@ -1090,6 +1090,63 @@ describe('revdiff integration', () => {
   });
 });
 
+// ── Revision comparison file scoping ───────────────────────────────────────
+// A comparison must show only the files the `to` revision changes. Files that
+// only the `from` revision touched (e.g. an unrelated commit the position-
+// matched snapshot points at after a rebase) must not leak into the view.
+
+describe('revision comparison file scoping', () => {
+  let scTmpDir, scRepo, scServer, scPort, fromHash, toHash;
+
+  beforeAll(async () => {
+    scTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-scope-'));
+    scRepo = path.join(scTmpDir, 'repo');
+    fs.mkdirSync(scRepo);
+    git(scRepo, 'init -q');
+    git(scRepo, 'config user.email "test@test.com"');
+    git(scRepo, 'config user.name "Test"');
+    fs.writeFileSync(path.join(scRepo, 'a.js'), 'const a = 0;\n');
+    fs.writeFileSync(path.join(scRepo, 'b.js'), 'const b = 0;\n');
+    git(scRepo, 'add .');
+    git(scRepo, 'commit -q -m "base"');
+    const baseHash = git(scRepo, 'rev-parse HEAD');
+
+    // `from` revision changes BOTH a.js and b.js.
+    fs.writeFileSync(path.join(scRepo, 'a.js'), 'const a = 1;\n');
+    fs.writeFileSync(path.join(scRepo, 'b.js'), 'const b = 1;\n');
+    git(scRepo, 'add .');
+    git(scRepo, 'commit -q -m "from: change a and b"');
+    fromHash = git(scRepo, 'rev-parse HEAD');
+
+    // `to` revision (off the same base) changes ONLY a.js.
+    git(scRepo, `checkout -q -b rebased ${baseHash}`);
+    fs.writeFileSync(path.join(scRepo, 'a.js'), 'const a = 2;\n');
+    git(scRepo, 'add .');
+    git(scRepo, 'commit -q -m "to: change a only"');
+    toHash = git(scRepo, 'rev-parse HEAD');
+
+    const app = createApp({ worktreeName: 'repo', worktreePath: scRepo, mainRepoPath: scRepo });
+    scPort = await findAvailablePort(18950);
+    await new Promise((resolve) => { scServer = app.listen(scPort, '127.0.0.1', resolve); });
+  });
+
+  afterAll((done) => {
+    scServer.close(() => {
+      fs.rmSync(scTmpDir, { recursive: true, force: true });
+      done();
+    });
+  });
+
+  test('GET /api/revdiff returns only files the `to` revision changes', async () => {
+    const { status, body } = await httpRequest(
+      `http://127.0.0.1:${scPort}/api/revdiff?from=${fromHash.slice(0, 8)}&to=${toHash.slice(0, 8)}`
+    );
+    expect(status).toBe(200);
+    // b.js was changed only by `from` → excluded; a.js is what `to` changes.
+    expect(body.files.map((f) => f.newPath)).toEqual(['a.js']);
+  });
+});
+
 // ── discoverWorktrees + GET /api/worktrees + POST /api/switch ─────────────
 // Fixture: a real git repo with one `git worktree add` so discoverWorktrees
 // exercises the real `git worktree list --porcelain` path.

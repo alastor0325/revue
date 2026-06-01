@@ -691,6 +691,25 @@ describe('getDiffBetweenCommits', () => {
     const lines = files[0].hunks[0].lines;
     expect(lines.find((l) => l.type === 'removed' && l.content === '  droppedLine();')).toBeTruthy();
   });
+
+  test('scopes to the files the `to` revision changes — files only `from` touched are excluded', () => {
+    // The `from` revision changes foo.cpp AND unrelated.cpp; the `to` revision
+    // changes only foo.cpp. unrelated.cpp must NOT appear: it is not part of
+    // what the revision under review changes (e.g. it came from another commit
+    // that the position-matched `from` snapshot happened to point at).
+    const fromShow =
+      'commit abc\n\n    Subject\n\n' +
+      'diff --git a/foo.cpp b/foo.cpp\n--- a/foo.cpp\n+++ b/foo.cpp\n@@ -1,1 +1,2 @@\n line1\n+fromFoo\n' +
+      'diff --git a/unrelated.cpp b/unrelated.cpp\n--- a/unrelated.cpp\n+++ b/unrelated.cpp\n@@ -1,1 +1,2 @@\n base\n+unrelatedChange\n';
+    const toShow =
+      'commit def\n\n    Subject\n\n' +
+      'diff --git a/foo.cpp b/foo.cpp\n--- a/foo.cpp\n+++ b/foo.cpp\n@@ -1,1 +1,2 @@\n line1\n+toFoo\n';
+    execSync
+      .mockReturnValueOnce(fromShow)
+      .mockReturnValueOnce(toShow);
+    const files = getDiffBetweenCommits('/repo', 'abc111', 'def222');
+    expect(files.map((f) => f.newPath)).toEqual(['foo.cpp']);
+  });
 });
 
 // ── getPatchLines ─────────────────────────────────────────────────────────

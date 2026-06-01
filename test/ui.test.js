@@ -2102,6 +2102,86 @@ describe('revision compare mode', () => {
   });
 });
 
+// ── Revision comparison file scoping ───────────────────────────────────────
+// The compare view must show only files the current (to) revision changes. An
+// older revision touched two files; the amended current one touches just one.
+// Comparing them must show only that one file — the other is not part of what
+// this revision changes.
+
+describe('revision comparison file scoping', () => {
+  let scServer, scPage, scTmpDir;
+
+  beforeAll(async () => {
+    scTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-ui-scope-'));
+    const scMain = path.join(scTmpDir, 'main');
+    const scWork = path.join(scTmpDir, 'work');
+
+    fs.mkdirSync(scMain);
+    git(scMain, 'init');
+    git(scMain, 'config user.email "test@test.com"');
+    git(scMain, 'config user.name "Test"');
+    fs.writeFileSync(path.join(scMain, 'fileA.js'), 'const a = 0;\n');
+    fs.writeFileSync(path.join(scMain, 'fileB.js'), 'const b = 0;\n');
+    git(scMain, 'add .');
+    git(scMain, 'commit -m "initial"');
+
+    execSync(`git clone "${scMain}" "${scWork}"`, { encoding: 'utf8' });
+    git(scWork, 'config user.email "test@test.com"');
+    git(scWork, 'config user.name "Test"');
+
+    // Old revision changes BOTH files.
+    fs.writeFileSync(path.join(scWork, 'fileA.js'), 'const a = 1;\n');
+    fs.writeFileSync(path.join(scWork, 'fileB.js'), 'const b = 1;\n');
+    git(scWork, 'add .');
+    git(scWork, 'commit -m "feat: change A and B"');
+    const oldHash = git(scWork, 'rev-parse HEAD');
+
+    // Record the old revision in state so a comparison target exists.
+    fs.writeFileSync(
+      path.join(scWork, 'REVIEW_STATE_work.json'),
+      JSON.stringify({
+        revisions: [{ savedAt: '2024-06-15T12:00:00.000Z', patches: [{ hash: oldHash, message: 'feat: change A and B' }] }],
+      }),
+      'utf8'
+    );
+
+    // Amend so the current revision changes ONLY fileA (fileB back to base).
+    // Stage just the source files — `git add .` would sweep the REVIEW_STATE
+    // file written above into the commit.
+    fs.writeFileSync(path.join(scWork, 'fileB.js'), 'const b = 0;\n');
+    fs.writeFileSync(path.join(scWork, 'fileA.js'), 'const a = 2;\n');
+    git(scWork, 'add fileA.js fileB.js');
+    git(scWork, 'commit --amend --no-edit');
+
+    const app = createApp({ worktreeName: 'work', worktreePath: scWork, mainRepoPath: scMain });
+    const port = await findAvailablePort(20100);
+    await new Promise((resolve) => { scServer = app.listen(port, '127.0.0.1', resolve); });
+
+    scPage = await browser.newPage();
+    await scPage.goto(`http://127.0.0.1:${port}`);
+    await scPage.waitForSelector('.patch-heading', { state: 'visible' });
+  }, 30000);
+
+  afterAll(async () => {
+    await scPage?.close();
+    await new Promise((resolve) => scServer?.close(resolve));
+    fs.rmSync(scTmpDir, { recursive: true, force: true });
+  });
+
+  test('compare view shows only the file the current revision changes', async () => {
+    // Two revisions exist → the compare (⇄) button is shown.
+    await scPage.waitForSelector('.btn-compare-toggle');
+    await scPage.click('.btn-compare-toggle');
+    // Wait for the comparison diff to load its file blocks.
+    await scPage.waitForSelector('.diff-compare-readonly .file-block');
+    const paths = await scPage.$$eval(
+      '.diff-compare-readonly .file-header .file-path',
+      (els) => els.map((e) => e.textContent)
+    );
+    expect(paths).toEqual(['fileA.js']); // fileB.js (changed only by the old rev) is excluded
+  });
+});
+
 // ── Approval persistence across reload — diff fingerprint ──────────────────
 // These tests exercise the core rule: approval survives a reload when the
 // diff content is unchanged (e.g. commit message amend, rebase), but is

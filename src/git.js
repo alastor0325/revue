@@ -316,6 +316,12 @@ function lcsCompare(fromLines, toLines) {
  * introduces (git show) rather than comparing full tree states.
  * This avoids including changes from other commits in the series.
  *
+ * The comparison is scoped to the files the `to` revision changes — the patch
+ * being reviewed. Files that only the `from` revision touched are omitted: they
+ * are not part of what this revision changes, and when patch identity shifts
+ * across a rebase (revisions are matched by series position) `from` can be an
+ * unrelated commit whose files would otherwise leak into the view.
+ *
  * Returns file diffs in the same format as parseDiff, where:
  *   added   = line is new to toHash's patch
  *   removed = line was in fromHash's patch but dropped in toHash's
@@ -328,10 +334,11 @@ function getDiffBetweenCommits(worktreePath, fromHash, toHash) {
 
   const fromMap = new Map(fromFiles.map((f) => [f.newPath || f.oldPath, f]));
   const toMap   = new Map(toFiles.map((f)   => [f.newPath || f.oldPath, f]));
-  const allPaths = [...new Set([...fromMap.keys(), ...toMap.keys()])];
+  // Only files the `to` revision changes — see the scoping note above.
+  const toPaths = [...toMap.keys()];
 
   const result = [];
-  for (const filePath of allPaths) {
+  for (const filePath of toPaths) {
     const fromLines = getPatchLines(fromMap.get(filePath));
     const toLines   = getPatchLines(toMap.get(filePath));
     const compared  = lcsCompare(fromLines, toLines);
