@@ -817,6 +817,110 @@ describe('keyboard shortcuts — file navigation', () => {
   });
 });
 
+// ── Keyboard shortcuts — active tab scrolls into view ───────────────────────
+// Many patches in a narrow viewport overflow the tab bar's width, so the
+// last tab starts off-screen. Switching to it must scroll the bar to reveal
+// it — otherwise the reviewer has to hunt for the active tab by dragging.
+
+describe('keyboard shortcuts — active tab scrolls into view', () => {
+  let tabScrollServer, tabScrollPage, tabScrollTmpDir;
+  const PATCH_COUNT = 8;
+
+  beforeAll(async () => {
+    tabScrollTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-ui-tabscroll-'));
+    const tsMain = path.join(tabScrollTmpDir, 'main');
+    const tsWork = path.join(tabScrollTmpDir, 'work');
+
+    fs.mkdirSync(tsMain);
+    git(tsMain, 'init');
+    git(tsMain, 'config user.email "test@test.com"');
+    git(tsMain, 'config user.name "Test"');
+    fs.writeFileSync(path.join(tsMain, 'base.txt'), 'base\n');
+    git(tsMain, 'add .');
+    git(tsMain, 'commit -m "initial"');
+
+    execSync(`git clone "${tsMain}" "${tsWork}"`, { encoding: 'utf8' });
+    git(tsWork, 'config user.email "test@test.com"');
+    git(tsWork, 'config user.name "Test"');
+    for (let i = 0; i < PATCH_COUNT; i++) {
+      fs.writeFileSync(path.join(tsWork, `file${i}.js`), `const v${i} = ${i};\n`);
+      git(tsWork, 'add .');
+      git(tsWork, `commit -m "feat: add a reasonably long patch subject number ${i}"`);
+    }
+
+    const app = createApp({ worktreeName: 'work', worktreePath: tsWork, mainRepoPath: tsMain });
+    const port = await findAvailablePort(20000);
+    await new Promise((resolve) => { tabScrollServer = app.listen(port, '127.0.0.1', resolve); });
+
+    // Narrow viewport so the eight tabs overflow the bar's width.
+    tabScrollPage = await browser.newPage({ viewport: { width: 520, height: 700 } });
+    await tabScrollPage.goto(`http://127.0.0.1:${port}`);
+    await tabScrollPage.waitForSelector('.patch-tab', { state: 'visible' });
+  }, 30000);
+
+  afterAll(async () => {
+    await tabScrollPage?.close();
+    await new Promise((resolve) => tabScrollServer?.close(resolve));
+    fs.rmSync(tabScrollTmpDir, { recursive: true, force: true });
+  });
+
+  test('the tab bar overflows its visible width', async () => {
+    expect((await tabScrollPage.$$('.patch-tab')).length).toBe(PATCH_COUNT);
+    const overflows = await tabScrollPage.$eval('#patch-tabs-bar', (bar) => bar.scrollWidth > bar.clientWidth + 1);
+    expect(overflows).toBe(true);
+  });
+
+  test('the last tab is off-screen before navigating to it', async () => {
+    const visible = await tabScrollPage.evaluate(() => {
+      const bar = document.getElementById('patch-tabs-bar');
+      const tabs = document.querySelectorAll('.patch-tab');
+      const t = tabs[tabs.length - 1].getBoundingClientRect();
+      const b = bar.getBoundingClientRect();
+      return t.right <= b.right + 1;
+    });
+    expect(visible).toBe(false);
+  });
+
+  // Poll the visibility condition rather than waiting a fixed time: a long
+  // smooth scroll across many tabs can take longer than any single timeout.
+  const lastTabVisible = () => {
+    const bar = document.getElementById('patch-tabs-bar');
+    const tabs = document.querySelectorAll('.patch-tab');
+    const t = tabs[tabs.length - 1].getBoundingClientRect();
+    const b = bar.getBoundingClientRect();
+    return t.left >= b.left - 1 && t.right <= b.right + 1;
+  };
+  const firstTabVisible = () => {
+    const bar = document.getElementById('patch-tabs-bar');
+    const t = document.querySelectorAll('.patch-tab')[0].getBoundingClientRect();
+    const b = bar.getBoundingClientRect();
+    return t.left >= b.left - 1 && t.right <= b.right + 1;
+  };
+
+  test('ArrowRight to the last tab scrolls it fully into view', async () => {
+    for (let i = 0; i < PATCH_COUNT - 1; i++) {
+      await tabScrollPage.keyboard.press('ArrowRight');
+    }
+    await tabScrollPage.waitForFunction(() => {
+      const tabs = document.querySelectorAll('.patch-tab');
+      return tabs[tabs.length - 1].classList.contains('active');
+    });
+    await tabScrollPage.waitForFunction(lastTabVisible);
+    expect(await tabScrollPage.evaluate(lastTabVisible)).toBe(true);
+  });
+
+  test('ArrowLeft back to the first tab scrolls it into view', async () => {
+    for (let i = 0; i < PATCH_COUNT - 1; i++) {
+      await tabScrollPage.keyboard.press('ArrowLeft');
+    }
+    await tabScrollPage.waitForFunction(() =>
+      document.querySelectorAll('.patch-tab')[0].classList.contains('active')
+    );
+    await tabScrollPage.waitForFunction(firstTabVisible);
+    expect(await tabScrollPage.evaluate(firstTabVisible)).toBe(true);
+  });
+});
+
 // ── Revue title link ───────────────────────────────────────────────────────
 
 describe('Revue title link', () => {

@@ -1273,4 +1273,13 @@ describe('keyboard navigation data contract', () => {
     const paths = multi.files.map((f) => f.newPath);
     expect(paths).toEqual(['beta.js', 'gamma.js']);
   });
+
+  // The tab bar renders one tab per patch in the server's order, and Left/Right
+  // (plus the scroll-active-tab-into-view behavior) map directly to that order.
+  // If the server reordered patches, arrow navigation would jump unpredictably.
+  test('patches come back in oldest-first commit order so tabs map to that order', async () => {
+    const { body } = await httpRequest(`http://127.0.0.1:${kbPort}/api/diff`);
+    const messages = body.patches.map((p) => p.message);
+    expect(messages).toEqual(['feat: add alpha', 'feat: add beta and gamma']);
+  });
 });

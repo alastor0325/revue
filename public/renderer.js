@@ -643,10 +643,29 @@ export function switchPatch(idx) {
     activateFileNav(entry.navItemsEl, entry.diffWrap);
   }
   // Update active tab in-place — no DOM rebuild on switch
-  document.querySelectorAll('#patch-tabs .patch-tab').forEach((btn, i) => {
+  const tabs = document.querySelectorAll('#patch-tabs .patch-tab');
+  tabs.forEach((btn, i) => {
     btn.classList.toggle('active', i === idx);
   });
+  // Keep the active tab visible: when the tab bar overflows the page width the
+  // newly-selected tab may sit off-screen (e.g. after an arrow-key switch), so
+  // scroll the bar just enough to bring it into view.
+  scrollTabIntoView(tabs[idx]);
   updateSubmitButton();
+}
+
+// Horizontally scroll #patch-tabs-bar so `tab` is fully visible, nudging only
+// when the tab is clipped past either edge.
+function scrollTabIntoView(tab) {
+  const bar = $('#patch-tabs-bar');
+  if (!bar || !tab) return;
+  const barRect = bar.getBoundingClientRect();
+  const tabRect = tab.getBoundingClientRect();
+  if (tabRect.left < barRect.left) {
+    bar.scrollBy({ left: tabRect.left - barRect.left - 8, behavior: 'smooth' });
+  } else if (tabRect.right > barRect.right) {
+    bar.scrollBy({ left: tabRect.right - barRect.right + 8, behavior: 'smooth' });
+  }
 }
 
 // ── File navigation sidebar ─────────────────────────────────────────────────
