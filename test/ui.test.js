@@ -2000,8 +2000,10 @@ describe('revision compare mode', () => {
     // Pre-write state with oldHash as the only known revision so
     // detectRevisionChanges() will detect a change when the hash differs.
     const stateFile = path.join(revCompWork, 'REVIEW_STATE_work.json');
+    // Midday mid-year so the formatted year is 2024 regardless of the test
+    // browser's timezone (a midnight-UTC value can render as the prior year).
     fs.writeFileSync(stateFile, JSON.stringify({
-      revisions: [{ savedAt: '2024-01-01T00:00:00.000Z', patches: [{ hash: oldHash, message: 'feat: initial patch' }] }],
+      revisions: [{ savedAt: '2024-06-15T12:00:00.000Z', patches: [{ hash: oldHash, message: 'feat: initial patch' }] }],
     }), 'utf8');
 
     // Amend the commit so the HEAD hash changes
@@ -2034,6 +2036,26 @@ describe('revision compare mode', () => {
       (el) => el.textContent
     );
     expect(firstBtnText).toContain('current');
+  });
+
+  test('current revision button shows the commit date, matching the heading', async () => {
+    const headingDate = (await revCompPage.textContent('.patch-heading .patch-heading-date')).trim();
+    const currentRevDate = (await revCompPage.$eval(
+      '.revision-toggle-scroll .btn-toggle-revision:first-child .rev-btn-date',
+      (el) => el.textContent
+    )).trim();
+    expect(headingDate.length).toBeGreaterThan(0);
+    // Same source (committer date), same formatter → identical strings.
+    expect(currentRevDate).toBe(headingDate);
+  });
+
+  test('older revision without a commit date falls back to its saved time', async () => {
+    // The pre-written Rev 1 snapshot has savedAt 2024-01-01 and no date field.
+    const oldestRevDate = await revCompPage.$eval(
+      '.revision-toggle-scroll .btn-toggle-revision:last-child .rev-btn-date',
+      (el) => el.textContent
+    );
+    expect(oldestRevDate).toContain('2024');
   });
 
   test('no left fade when at scrollLeft=0 — first button fully visible', async () => {

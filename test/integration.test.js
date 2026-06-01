@@ -252,6 +252,20 @@ describe('server HTTP integration', () => {
     await httpRequest(`${baseUrl}/api/state`, { method: 'POST', body: { revisions: [] } });
   });
 
+  // The revision toggle bar shows each revision's committer date, which the
+  // client stores inside the per-patch snapshot. That date must survive the
+  // state round-trip or a reload would fall back to the snapshot save time.
+  test('GET /api/state preserves the committer date stored in a revision snapshot', async () => {
+    const revisions = [
+      { savedAt: '2024-01-01T00:00:00.000Z', patches: [{ hash: 'aaa', message: 'first', date: '2026-06-01T09:15:00+00:00' }] },
+    ];
+    await httpRequest(`${baseUrl}/api/state`, { method: 'POST', body: { revisions } });
+    const { status, body } = await httpRequest(`${baseUrl}/api/state`);
+    expect(status).toBe(200);
+    expect(body.revisions[0].patches[0].date).toBe('2026-06-01T09:15:00+00:00');
+    await httpRequest(`${baseUrl}/api/state`, { method: 'POST', body: { revisions: [] } });
+  });
+
   test('GET /api/filecontext returns real file lines', async () => {
     const shortHash = commitHash.slice(0, 8);
     const { status, body } = await httpRequest(

@@ -97,6 +97,7 @@ export function detectRevisionChanges() {
   const currentSnapshot = state.patches.map((p) => ({
     hash: p.hash,
     message: p.message,
+    date: p.date,
     diffFingerprint: diffFingerprint(p),
   }));
 
@@ -133,8 +134,10 @@ export function detectRevisionChanges() {
   }
 }
 
-// Returns [{hash, savedAt}] ordered oldest-to-newest for the given patch position.
-// The last entry is always the current revision.
+// Returns [{hash, savedAt, date}] ordered oldest-to-newest for the given patch
+// position. `date` is the commit's committer date (matching the patch heading);
+// it is undefined for snapshots recorded before the field existed, in which
+// case the UI falls back to savedAt. The last entry is always the current revision.
 export function getRevisionList(patchIdx) {
   const seen = new Set();
   const list = [];
@@ -142,7 +145,7 @@ export function getRevisionList(patchIdx) {
     const p = rev.patches[patchIdx];
     if (p && !seen.has(p.hash)) {
       seen.add(p.hash);
-      list.push({ hash: p.hash, savedAt: rev.savedAt });
+      list.push({ hash: p.hash, savedAt: rev.savedAt, date: p.date });
     }
   }
   return list;

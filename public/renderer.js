@@ -968,9 +968,10 @@ export function buildPatchEl(idx) {
         const isCurrent = (i === 0);
         const btn = document.createElement('button');
         btn.className = 'btn-toggle-revision' + (rev.hash === activeHash ? ' active' : '');
-        const dateStr = rev.savedAt
-          ? new Date(rev.savedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-          : '';
+        // Prefer the commit's committer date so this matches the patch
+        // heading; fall back to the revue snapshot time for older revisions
+        // recorded before the date field existed.
+        const dateStr = formatPatchDate(rev.date || rev.savedAt);
         btn.innerHTML = `<span class="rev-btn-label">Rev ${originalIdx + 1}${isCurrent ? ' · current' : ''}</span>${dateStr ? `<span class="rev-btn-date">${escapeHtml(dateStr)}</span>` : ''}`;
         btn.title = rev.hash;
         btn.addEventListener('click', () => onSelect(rev.hash));
