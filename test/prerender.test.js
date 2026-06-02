@@ -156,6 +156,7 @@ describe('initPatchNodes', () => {
 
 describe('switchPatch', () => {
   beforeEach(() => {
+    window.scrollTo = jest.fn(); // jsdom doesn't implement it
     global.fetch.mockImplementation((url) => {
       if (url === '/api/worktrees') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ current: 'x', worktrees: [] }) });
@@ -185,6 +186,14 @@ describe('switchPatch', () => {
     initPatchNodes();
     switchPatch(1);
     expect(state.currentPatchIdx).toBe(1);
+  });
+
+  test('resets the page scroll to the top so the new patch starts at its head', () => {
+    state.patches = makePatches('A', 'B');
+    initPatchNodes();
+    window.scrollTo.mockClear();
+    switchPatch(1);
+    expect(window.scrollTo).toHaveBeenCalledWith(0, 0);
   });
 });
 

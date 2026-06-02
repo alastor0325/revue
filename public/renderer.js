@@ -651,6 +651,9 @@ export function switchPatch(idx) {
   // newly-selected tab may sit off-screen (e.g. after an arrow-key switch), so
   // scroll the bar just enough to bring it into view.
   scrollTabIntoView(tabs[idx]);
+  // Start each patch from the top — don't inherit the previous tab's scroll
+  // position, which would drop the reader into the middle of an unrelated diff.
+  window.scrollTo(0, 0);
   updateSubmitButton();
 }
 

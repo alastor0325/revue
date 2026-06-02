@@ -606,6 +606,20 @@ describe('server HTTP integration', () => {
     expect(body).toMatch(/<link\s+rel="icon"[^>]*type="image\/svg\+xml"[^>]*href="favicon\.svg"/);
   });
 
+  // The back-to-top control must ship in the HTML and be a fixed-position
+  // element hidden by default (app.js toggles .visible on scroll).
+  test('GET / serves the back-to-top button and /style.css positions it fixed and hidden', async () => {
+    const html = await httpRequest(`${baseUrl}/`);
+    expect(html.status).toBe(200);
+    expect(html.body).toMatch(/<button[^>]*id="btn-back-to-top"/);
+
+    const css = await httpRequest(`${baseUrl}/style.css`);
+    expect(css.status).toBe(200);
+    expect(css.body).toMatch(/#btn-back-to-top\s*{[^}]*position:\s*fixed/);
+    expect(css.body).toMatch(/#btn-back-to-top\s*{[^}]*display:\s*none/);
+    expect(css.body).toMatch(/#btn-back-to-top\.visible\s*{[^}]*display:\s*block/);
+  });
+
   // JetBrains Mono ships programming ligatures that fuse != == >= -> into
   // single glyphs.  In code review the raw characters matter — what the
   // reviewer sees must be exactly what is in the file.  This rule is the

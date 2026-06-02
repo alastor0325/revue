@@ -18,6 +18,12 @@ When a worktree has multiple commits the UI shows **tabs** — one per patch:
 
 Each tab shows a comment-count badge, a `✓` if approved, or a `✗` if denied. Tabs with amended commits show a `↑` badge.
 
+Switching tabs always starts the new patch from the top — the previous tab's scroll position is not carried over.
+
+## Back to top
+
+While reading a long diff, a floating **↑ Top** button appears once you scroll past the first screenful; click it to jump back to the top.
+
 ## Keyboard shortcuts
 
 | Key | Action |

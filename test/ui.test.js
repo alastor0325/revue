@@ -254,6 +254,89 @@ describe('sticky patch heading', () => {
   });
 });
 
+// ── Scroll behavior: tab reset + back-to-top ────────────────────────────────
+// Two tall patches in a short viewport so the page scrolls. Verifies that
+// switching tabs starts at the top, and the floating back-to-top button shows
+// once scrolled past a viewport and returns you to the top.
+
+describe('scroll behavior', () => {
+  let scrollServer, scrollPage, scrollTmpDir;
+
+  beforeAll(async () => {
+    scrollTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-ui-scroll-'));
+    const sMain = path.join(scrollTmpDir, 'main');
+    const sWork = path.join(scrollTmpDir, 'work');
+
+    fs.mkdirSync(sMain);
+    git(sMain, 'init');
+    git(sMain, 'config user.email "test@test.com"');
+    git(sMain, 'config user.name "Test"');
+    fs.writeFileSync(path.join(sMain, 'big1.js'), 'const a = 0;\n');
+    fs.writeFileSync(path.join(sMain, 'big2.js'), 'const b = 0;\n');
+    git(sMain, 'add .');
+    git(sMain, 'commit -m "initial"');
+
+    execSync(`git clone "${sMain}" "${sWork}"`, { encoding: 'utf8' });
+    git(sWork, 'config user.email "test@test.com"');
+    git(sWork, 'config user.name "Test"');
+    const long = (p) => Array.from({ length: 80 }, (_, i) => `const ${p}${i} = ${i};`).join('\n') + '\n';
+    fs.writeFileSync(path.join(sWork, 'big1.js'), long('a'));
+    git(sWork, 'add .');
+    git(sWork, 'commit -m "feat: change big1"');
+    fs.writeFileSync(path.join(sWork, 'big2.js'), long('b'));
+    git(sWork, 'add .');
+    git(sWork, 'commit -m "feat: change big2"');
+
+    const app = createApp({ worktreeName: 'work', worktreePath: sWork, mainRepoPath: sMain });
+    const port = await findAvailablePort(20400);
+    await new Promise((resolve) => { scrollServer = app.listen(port, '127.0.0.1', resolve); });
+
+    scrollPage = await browser.newPage({ viewport: { width: 900, height: 500 } });
+    await scrollPage.goto(`http://127.0.0.1:${port}`);
+    await scrollPage.waitForSelector('.patch-tab', { state: 'visible' });
+  }, 30000);
+
+  afterAll(async () => {
+    await scrollPage?.close();
+    await new Promise((resolve) => scrollServer?.close(resolve));
+    fs.rmSync(scrollTmpDir, { recursive: true, force: true });
+  });
+
+  test('switching patch tabs resets the page scroll to the top', async () => {
+    // Start on patch 1, scroll deep into its diff.
+    await scrollPage.$$('.patch-tab').then(([t0]) => t0.click());
+    await scrollPage.evaluate(() => window.scrollTo(0, 600));
+    await scrollPage.waitForFunction(() => window.scrollY > 200);
+    // Switch to patch 2 — should jump back to the top.
+    await scrollPage.$$('.patch-tab').then(([, t1]) => t1.click());
+    await scrollPage.waitForFunction(() => window.scrollY === 0);
+    expect(await scrollPage.evaluate(() => window.scrollY)).toBe(0);
+  });
+
+  test('back-to-top button is hidden at the top of the page', async () => {
+    await scrollPage.evaluate(() => window.scrollTo(0, 0));
+    await scrollPage.waitForFunction(() => window.scrollY === 0);
+    const visible = await scrollPage.$eval('#btn-back-to-top', (el) => getComputedStyle(el).display !== 'none');
+    expect(visible).toBe(false);
+  });
+
+  test('back-to-top button appears after scrolling past a viewport', async () => {
+    await scrollPage.evaluate(() => window.scrollTo(0, window.innerHeight + 200));
+    await scrollPage.waitForFunction(() => document.getElementById('btn-back-to-top').classList.contains('visible'));
+    const visible = await scrollPage.$eval('#btn-back-to-top', (el) => getComputedStyle(el).display !== 'none');
+    expect(visible).toBe(true);
+  });
+
+  test('clicking back-to-top returns to the top and hides the button', async () => {
+    await scrollPage.click('#btn-back-to-top');
+    await scrollPage.waitForFunction(() => window.scrollY === 0);
+    expect(await scrollPage.evaluate(() => window.scrollY)).toBe(0);
+    await scrollPage.waitForFunction(() => !document.getElementById('btn-back-to-top').classList.contains('visible'));
+    const visible = await scrollPage.$eval('#btn-back-to-top', (el) => getComputedStyle(el).display !== 'none');
+    expect(visible).toBe(false);
+  });
+});
+
 // ── Patch tabs ─────────────────────────────────────────────────────────────
 
 describe('patch tabs', () => {

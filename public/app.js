@@ -536,12 +536,31 @@ function handleArrowKeys(e) {
   }
 }
 
+// ── Back-to-top button ───────────────────────────────────────────────────────
+// Shows a floating "↑ Top" button once the page is scrolled past one viewport
+// (i.e. the reader is deep in / at the end of a long diff) and jumps back up.
+function initBackToTop() {
+  const btn = $('#btn-back-to-top');
+  if (!btn) return;
+  let visible = false;
+  const sync = () => {
+    const show = window.scrollY > window.innerHeight;
+    if (show === visible) return; // only touch the DOM when it actually flips
+    visible = show;
+    btn.classList.toggle('visible', show);
+  };
+  window.addEventListener('scroll', sync, { passive: true });
+  btn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+  sync(); // handle a reload that restored a scrolled position
+}
+
 async function init() {
   setupStickySidebarOffset();
   updateSubmitButton();
 
   $('#btn-submit').addEventListener('click', submitReview);
   document.addEventListener('keydown', handleArrowKeys);
+  initBackToTop();
   initTabsDragScroll();
 
   $('#btn-copy-prompt').addEventListener('click', () => {
