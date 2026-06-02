@@ -62,19 +62,11 @@ function getMergeBase(worktreePath, mainRepoPath) {
 }
 
 /**
- * Get list of commits ahead of the merge-base.
- * Returns array of { hash, message, date } objects, oldest first.
- * `date` is the committer date as a strict ISO-8601 string (%cI), which tracks
- * the last time the commit was written — it advances on amend/rebase.
- * Returns [] if the worktree has no commits or the merge-base cannot be determined.
+ * List the commits in `base..HEAD` (oldest first) given an already-resolved
+ * base. Split out from getCommits so callers that also need the base (e.g.
+ * getDiffPerCommit) resolve the merge-base once instead of twice.
  */
-function getCommits(worktreePath, mainRepoPath) {
-  let base;
-  try {
-    base = getMergeBase(worktreePath, mainRepoPath);
-  } catch {
-    return [];
-  }
+function getCommitsFromBase(worktreePath, base) {
   // Unit-separator (\x1f) delimited fields so subjects with spaces parse cleanly.
   // %h matches the abbreviated hash the rest of the app keys on.
   const output = execSync(
@@ -93,6 +85,23 @@ function getCommits(worktreePath, mainRepoPath) {
       message: parts[2] || '',
     };
   }).filter(Boolean);
+}
+
+/**
+ * Get list of commits ahead of the merge-base.
+ * Returns array of { hash, message, date } objects, oldest first.
+ * `date` is the committer date as a strict ISO-8601 string (%cI), which tracks
+ * the last time the commit was written — it advances on amend/rebase.
+ * Returns [] if the worktree has no commits or the merge-base cannot be determined.
+ */
+function getCommits(worktreePath, mainRepoPath) {
+  let base;
+  try {
+    base = getMergeBase(worktreePath, mainRepoPath);
+  } catch {
+    return [];
+  }
+  return getCommitsFromBase(worktreePath, base);
 }
 
 /**
@@ -377,18 +386,69 @@ function getDiffForCommit(worktreePath, hash) {
 }
 
 /**
+ * Split combined `git log -p` output into per-commit blocks keyed by the
+ * abbreviated hash on each `commit <hash>` boundary line. Each block has the
+ * same shape `git show` produces (commit/Author/Date headers, indented
+ * message, then the diff), so parseCommitBody/parseDiff consume it unchanged.
+ *
+ * Only a real boundary line matches: diff content lines are prefixed with
+ * +/-/space and message lines are indented, so none begin with `commit <hex>`
+ * at column 0.
+ */
+function splitCommitChunks(raw) {
+  const map = new Map();
+  const re = /^commit ([0-9a-f]+)/gm;
+  let prev = null;
+  let m;
+  while ((m = re.exec(raw)) !== null) {
+    if (prev) map.set(prev.hash, raw.slice(prev.index, m.index));
+    prev = { hash: m[1], index: m.index };
+  }
+  if (prev) map.set(prev.hash, raw.slice(prev.index));
+  return map;
+}
+
+/**
  * Get per-commit diffs. Returns an array of patch objects (oldest first):
  * { hash, message, date, body, files }
  * message — subject line only (first line)
  * date    — committer date (ISO-8601), tracks the last time the commit changed
  * body    — full commit message (subject + blank line + body if present)
+ *
+ * Fast path: a single `git log -p` over the whole range, split into per-commit
+ * blocks. This replaces one `git show` process per commit — dramatically faster
+ * for multi-commit series (the process-spawn overhead dominated). If the bulk
+ * read fails (e.g. output exceeds the buffer) or a commit's block is missing,
+ * it falls back to a per-commit `git show` for correctness.
  */
 function getDiffPerCommit(worktreePath, mainRepoPath) {
-  const commits = getCommits(worktreePath, mainRepoPath);
-  return commits.map((commit) => {
-    // git show outputs commit metadata then the diff; parseDiff ignores everything
-    // before the first "diff --git" line so this works without extra flags.
+  let base;
+  try {
+    base = getMergeBase(worktreePath, mainRepoPath);
+  } catch {
+    return []; // no commits / base cannot be determined
+  }
+  const commits = getCommitsFromBase(worktreePath, base);
+  if (commits.length === 0) return [];
+
+  let chunks = null;
+  try {
     const raw = execSync(
+      `git -C "${worktreePath}" log -p --reverse --abbrev-commit ${base}..HEAD`,
+      { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }
+    );
+    chunks = splitCommitChunks(raw);
+  } catch {
+    chunks = null; // fall back to per-commit `git show` below
+  }
+
+  return commits.map((commit) => {
+    // Both getCommits' %h and `git log -p --abbrev-commit` use the repo's
+    // default abbreviation, so the hashes match. If a block is missing (or the
+    // bulk read failed), fall back to `git show` for that commit — parseDiff/
+    // parseCommitBody ignore everything before the first "diff --git" and the
+    // commit headers respectively, so both block shapes parse identically.
+    const raw = chunks?.get(commit.hash) || execSync(
       `git -C "${worktreePath}" show ${commit.hash}`,
       { encoding: 'utf8', maxBuffer: 50 * 1024 * 1024 }
     );

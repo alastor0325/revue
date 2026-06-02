@@ -138,6 +138,54 @@ describe('git integration', () => {
     expect(added).toContain('}');
   });
 
+  // getDiffPerCommit reads the whole series with a single `git log -p` and
+  // splits it into per-commit blocks. This guards that each commit is matched
+  // to its OWN files (and message/body), with no cross-commit leakage.
+  test('getDiffPerCommit isolates each commit to its own files across a multi-commit series', () => {
+    const md = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-multi-'));
+    const main = path.join(md, 'main');
+    const work = path.join(md, 'work');
+    try {
+      fs.mkdirSync(main);
+      git(main, 'init');
+      git(main, 'config user.email "test@test.com"');
+      git(main, 'config user.name "Test"');
+      fs.writeFileSync(path.join(main, 'alpha.js'), 'const a = 0;\n');
+      git(main, 'add .');
+      git(main, 'commit -m "initial"');
+
+      execSync(`git clone "${main}" "${work}"`, { encoding: 'utf8' });
+      git(work, 'config user.email "test@test.com"');
+      git(work, 'config user.name "Test"');
+
+      fs.writeFileSync(path.join(work, 'alpha.js'), 'const a = 1;\n');
+      git(work, 'add .');
+      git(work, 'commit -m "feat: change alpha" -m "Body for alpha."');
+
+      fs.writeFileSync(path.join(work, 'beta.js'), 'const b = 1;\n');
+      fs.writeFileSync(path.join(work, 'gamma.js'), 'const g = 1;\n');
+      git(work, 'add .');
+      git(work, 'commit -m "feat: add beta and gamma"');
+
+      fs.writeFileSync(path.join(work, 'alpha.js'), 'const a = 2;\n');
+      git(work, 'add .');
+      git(work, 'commit -m "fix: alpha again"');
+
+      const patches = getDiffPerCommit(work, main);
+      expect(patches.map((p) => p.message)).toEqual([
+        'feat: change alpha', 'feat: add beta and gamma', 'fix: alpha again',
+      ]);
+      // Each commit shows only the files it changed — no leakage from siblings.
+      expect(patches[0].files.map((f) => f.newPath)).toEqual(['alpha.js']);
+      expect(patches[1].files.map((f) => f.newPath)).toEqual(['beta.js', 'gamma.js']);
+      expect(patches[2].files.map((f) => f.newPath)).toEqual(['alpha.js']);
+      // Full multi-line body is preserved for the first commit.
+      expect(patches[0].body).toContain('Body for alpha.');
+    } finally {
+      fs.rmSync(md, { recursive: true, force: true });
+    }
+  });
+
   test('getFileLines returns real file content at a commit', () => {
     const result = getFileLines(workRepoPath, commitHash, 'feature.js', 1, 2);
     expect(result.totalLines).toBe(3);
