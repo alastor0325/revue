@@ -540,7 +540,11 @@ button { font-family: inherit; }
 #files-changed {
   flex: 1 1 auto;
   min-width: 0;
-  padding: 24px 32px 64px;
+  /* No top padding: the patch heading is sticky, so any gap above it would be
+     a one-time space the heading slides through before pinning — a visible
+     jump as you start scrolling. Starting flush (like #file-nav) keeps the
+     heading in the same place at rest and when pinned. */
+  padding: 0 32px 64px;
   max-width: 1280px;
 }
 

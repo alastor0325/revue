@@ -218,6 +218,18 @@ describe('sticky patch heading', () => {
     expect(pos).toBe('sticky');
   });
 
+  test('heading does not shift between rest and scrolled (no jump)', async () => {
+    await shPage.evaluate(() => window.scrollTo(0, 0));
+    await shPage.waitForFunction(() => window.scrollY === 0);
+    const atRest = await shPage.$eval('.patch-heading', (el) => el.getBoundingClientRect().top);
+    await shPage.evaluate(() => window.scrollTo(0, 600));
+    await shPage.waitForFunction(() => window.scrollY > 200);
+    const scrolled = await shPage.$eval('.patch-heading', (el) => el.getBoundingClientRect().top);
+    // The heading occupies the same spot whether at the top or scrolled — it
+    // starts flush under the top bar, so there is no slide-up-then-pin jump.
+    expect(Math.abs(atRest - scrolled)).toBeLessThanOrEqual(1);
+  });
+
   test('heading stays pinned under the top bar after scrolling down', async () => {
     await shPage.evaluate(() => window.scrollTo(0, 700));
     await shPage.waitForFunction(() => window.scrollY > 200);
