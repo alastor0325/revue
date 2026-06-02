@@ -65,6 +65,10 @@ Both can be undone by clicking again. Patches with no comments and not denied ar
 
 If a patch has been amended or rebased since the last review session, its tab shows a `↑` badge. A **Revision** bar appears above the diff with one button per recorded revision (`Rev 1`, `Rev 2`, `Rev 3 · current`). Click any revision button to compare diffs between versions.
 
+## Re-review after an approved patch changes
+
+When you **approve** a patch and a later revision changes that patch's *own* code, the approval is cleared (per *same code = same approval*) and the patch is flagged for re-review: a `⚠` marker on its tab and a banner inside it — *"You approved this patch, but its code changed in the latest revision — please re-review."* Approving or denying again clears the flag. The check uses each patch's own added/removed lines, so a rebase that only shifts context, or changes to other patches' files, does **not** trigger it.
+
 ## Submitting feedback
 
 When you're done reviewing all patches, click the **Generate Review Prompt** button. It:

@@ -420,6 +420,10 @@ button { font-family: inherit; }
   font-weight: 700;
 }
 
+/* Approved patch whose code changed in a new revision — needs re-review. */
+.patch-tab.needs-rereview .tab-part { color: var(--amber); }
+.tab-rereview-icon { color: var(--amber); margin-left: 4px; font-weight: 700; }
+
 .tab-badge {
   display: inline-block;
   background: var(--amber);
@@ -648,7 +652,7 @@ button { font-family: inherit; }
 .btn-undeny:hover { filter: brightness(1.08); }
 
 /* ─── Approve / Deny notices ────────────────────────────────────────────── */
-.approve-notice, .deny-notice {
+.approve-notice, .deny-notice, .rereview-notice {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -668,8 +672,14 @@ button { font-family: inherit; }
   border: 1px solid var(--red-line);
   color: var(--red);
 }
+.rereview-notice {
+  background: var(--amber-bg);
+  border: 1px solid var(--amber-line);
+  color: var(--amber);
+}
 .approve-notice-icon { font-size: 16px; color: var(--green); }
 .deny-notice-icon    { font-size: 16px; color: var(--red); }
+.rereview-notice-icon { font-size: 16px; color: var(--amber); }
 
 .diff-approved-readonly { opacity: 0.45; pointer-events: none; }
 

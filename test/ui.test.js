@@ -2406,6 +2406,106 @@ describe('revision comparison file scoping', () => {
   });
 });
 
+// ── Re-review indication for an approved patch that changed ─────────────────
+// Approve a patch, then amend that commit so its own diff changes. On reload
+// the approval is cleared (existing behavior) AND the patch is flagged: a ⚠
+// marker on its tab and a banner in the patch. Acting on it clears the flag.
+
+describe('re-review indication after an approved patch changes', () => {
+  let rrServer, rrPage, rrTmpDir, rrWork;
+
+  beforeAll(async () => {
+    rrTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-ui-rereview-'));
+    const rrMain = path.join(rrTmpDir, 'main');
+    rrWork = path.join(rrTmpDir, 'work');
+
+    fs.mkdirSync(rrMain);
+    git(rrMain, 'init');
+    git(rrMain, 'config user.email "test@test.com"');
+    git(rrMain, 'config user.name "Test"');
+    fs.writeFileSync(path.join(rrMain, 'a.js'), 'const a = 0;\n');
+    fs.writeFileSync(path.join(rrMain, 'b.js'), 'const b = 0;\n');
+    git(rrMain, 'add .');
+    git(rrMain, 'commit -m "initial"');
+
+    execSync(`git clone "${rrMain}" "${rrWork}"`, { encoding: 'utf8' });
+    git(rrWork, 'config user.email "test@test.com"');
+    git(rrWork, 'config user.name "Test"');
+    // Part 1 (stable) then Part 2 (the tip, which we approve then amend).
+    fs.writeFileSync(path.join(rrWork, 'a.js'), 'const a = 1;\n');
+    git(rrWork, 'add .');
+    git(rrWork, 'commit -m "feat: part 1"');
+    fs.writeFileSync(path.join(rrWork, 'b.js'), 'const b = 1;\n');
+    git(rrWork, 'add .');
+    git(rrWork, 'commit -m "feat: part 2"');
+
+    const app = createApp({ worktreeName: 'work', worktreePath: rrWork, mainRepoPath: rrMain });
+    const port = await findAvailablePort(20500);
+    await new Promise((resolve) => { rrServer = app.listen(port, '127.0.0.1', resolve); });
+
+    rrPage = await browser.newPage();
+    await rrPage.goto(`http://127.0.0.1:${port}`);
+    await rrPage.waitForSelector('.patch-heading', { state: 'visible' });
+
+    // Approve Part 2 (the tip), then let the revision baseline + approval save.
+    await rrPage.$$('.patch-tab').then(([, t1]) => t1.click());
+    await rrPage.waitForFunction(() => document.querySelectorAll('.patch-tab')[1].classList.contains('active'));
+    // Each patch has its own (hidden) Approve button — target the visible one.
+    await rrPage.click('.btn-approve:visible');
+    await rrPage.waitForSelector('.btn-unapprove:visible');
+    await rrPage.waitForTimeout(700); // let saveRevisionsNow + saveDecisionNow land
+
+    // Amend the tip so Part 2's own diff content changes (new fingerprint).
+    fs.writeFileSync(path.join(rrWork, 'b.js'), 'const b = 2;\n');
+    git(rrWork, 'add .');
+    git(rrWork, 'commit --amend --no-edit');
+
+    await rrPage.reload();
+    await rrPage.waitForSelector('.patch-heading', { state: 'visible' });
+    await rrPage.waitForTimeout(300); // detectRevisionChanges runs on load
+  }, 30000);
+
+  afterAll(async () => {
+    await rrPage?.close();
+    await new Promise((resolve) => rrServer?.close(resolve));
+    fs.rmSync(rrTmpDir, { recursive: true, force: true });
+  });
+
+  test('the changed patch tab gets a re-review marker', async () => {
+    await rrPage.waitForFunction(() =>
+      document.querySelectorAll('.patch-tab')[1].classList.contains('needs-rereview')
+    );
+    const tab = (await rrPage.$$('.patch-tab'))[1];
+    expect(await tab.evaluate((el) => el.classList.contains('needs-rereview'))).toBe(true);
+    expect(await tab.$('.tab-rereview-icon')).not.toBeNull();
+  });
+
+  test('the unchanged patch tab has no re-review marker', async () => {
+    const tab = (await rrPage.$$('.patch-tab'))[0];
+    expect(await tab.evaluate((el) => el.classList.contains('needs-rereview'))).toBe(false);
+  });
+
+  test('the changed patch shows a re-review banner and its approval was cleared', async () => {
+    await rrPage.$$('.patch-tab').then(([, t1]) => t1.click());
+    await rrPage.waitForFunction(() => document.querySelectorAll('.patch-tab')[1].classList.contains('active'));
+    expect(await rrPage.$('.rereview-notice')).not.toBeNull();
+    // Approval was cleared — the visible patch's button reads "Approve" again.
+    expect(await rrPage.textContent('.btn-approve:visible')).toBe('Approve');
+  });
+
+  test('re-approving clears the banner and the tab marker', async () => {
+    await rrPage.click('.btn-approve:visible');
+    await rrPage.waitForSelector('.btn-unapprove:visible');
+    await rrPage.waitForFunction(() => !document.querySelector('.rereview-notice'));
+    expect(await rrPage.$('.rereview-notice')).toBeNull();
+    await rrPage.waitForFunction(() =>
+      !document.querySelectorAll('.patch-tab')[1].classList.contains('needs-rereview')
+    );
+    const tab = (await rrPage.$$('.patch-tab'))[1];
+    expect(await tab.evaluate((el) => el.classList.contains('needs-rereview'))).toBe(false);
+  });
+});
+
 // ── Approval persistence across reload — diff fingerprint ──────────────────
 // These tests exercise the core rule: approval survives a reload when the
 // diff content is unchanged (e.g. commit message amend, rebase), but is

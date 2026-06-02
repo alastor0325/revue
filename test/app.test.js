@@ -209,20 +209,39 @@ describe('migrateApprovals — fingerprint-aware', () => {
     expect(result.approved.has('old')).toBe(false);
   });
 
-  test('different fingerprint, different hash → approved cleared', () => {
+  test('different fingerprint, different hash → approved cleared and flagged for re-review', () => {
     const prev = [patch('old', FP1)];
     const curr = [patch('new', FP2)];
     const result = migrateApprovals(prev, curr, new Set(['old']), new Set());
     expect(result.approved.has('old')).toBe(false);
     expect(result.approved.has('new')).toBe(false);
+    // The new revision of a once-approved patch is flagged so the UI can
+    // prompt a re-review.
+    expect(result.reapprovalNeeded.has('new')).toBe(true);
   });
 
-  test('different fingerprint → denied cleared too', () => {
+  test('different fingerprint → denied cleared too (not flagged for re-review)', () => {
     const prev = [patch('old', FP1)];
     const curr = [patch('new', FP2)];
     const result = migrateApprovals(prev, curr, new Set(), new Set(['old']));
     expect(result.denied.has('old')).toBe(false);
     expect(result.denied.has('new')).toBe(false);
+    // Only previously-approved patches need the re-review flag.
+    expect(result.reapprovalNeeded.has('new')).toBe(false);
+  });
+
+  test('same fingerprint → no re-review flag (approval just carried forward)', () => {
+    const prev = [patch('old', FP1)];
+    const curr = [patch('new', FP1)];
+    const result = migrateApprovals(prev, curr, new Set(['old']), new Set());
+    expect(result.reapprovalNeeded.size).toBe(0);
+  });
+
+  test('changed fingerprint but never approved → no re-review flag', () => {
+    const prev = [patch('old', FP1)];
+    const curr = [patch('new', FP2)];
+    const result = migrateApprovals(prev, curr, new Set(), new Set());
+    expect(result.reapprovalNeeded.size).toBe(0);
   });
 
   test('no fingerprint on either side → falls back to hash migration', () => {

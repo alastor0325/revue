@@ -6,7 +6,7 @@ import {
   COMMIT_FILE, COMMIT_KEY,
 } from './state.js';
 import {
-  saveCommentNow, saveDecisionNow,
+  saveCommentNow, saveDecisionNow, saveRevisionsNow,
   scheduleDraftSave, saveDraftNow, scheduleGeneralCommentSave,
   refreshPromptBar,
 } from './persistence.js';
@@ -613,11 +613,14 @@ export function renderTabs() {
     const isDenied = state.denied.has(patch.hash);
     const commentCount = commentsForPatch(patch.hash).length;
 
+    const needsReReview = state.reapprovalNeeded.has(patch.hash);
+
     const tab = btns[idx];
     tab.className = 'patch-tab' +
       (idx === state.currentPatchIdx ? ' active' : '') +
       (isApproved ? ' approved' : '') +
       (isDenied ? ' denied' : '') +
+      (needsReReview ? ' needs-rereview' : '') +
       (state.updatedPatches[idx] ? ' updated' : '');
 
     const badge = commentCount > 0 && !isApproved
@@ -625,11 +628,14 @@ export function renderTabs() {
       : '';
     const approvedIcon = isApproved ? ' <span class="tab-approved-icon">✓</span>' : '';
     const deniedIcon = isDenied ? ' <span class="tab-denied-icon">✗</span>' : '';
+    // Re-review marker for an approved patch whose code changed in a new
+    // revision. Distinct from the generic "updated" ↑ badge.
+    const reReviewIcon = needsReReview ? ' <span class="tab-rereview-icon">⚠</span>' : '';
     const updatedIcon = state.updatedPatches[idx]
       ? ' <span class="tab-updated-icon">↑</span>'
       : '';
 
-    tab.innerHTML = `<span class="tab-part">Part ${idx + 1}</span><span class="tab-msg">${escapeHtml(patch.message)}${badge}${approvedIcon}${deniedIcon}${updatedIcon}</span>`;
+    tab.innerHTML = `<span class="tab-part">Part ${idx + 1}</span><span class="tab-msg">${escapeHtml(patch.message)}${badge}${approvedIcon}${deniedIcon}${reReviewIcon}${updatedIcon}</span>`;
   });
 }
 
@@ -893,6 +899,14 @@ export function formatPatchDate(iso) {
   });
 }
 
+// Clear the "needs re-review" flag once the reviewer acts on the patch (any
+// approve/deny decision counts as having re-reviewed), and persist the change.
+function clearReReview(hash) {
+  // Set.delete returns false when the hash wasn't flagged — skip the save then.
+  if (!state.reapprovalNeeded.delete(hash)) return;
+  saveRevisionsNow(state.revisions, [...state.approved], [...state.denied], [...state.reapprovalNeeded]);
+}
+
 // ── Build a patch element (detached) ────────────────────────────────────────
 // Returns { el, diffWrap, navItemsEl } for the given patch index. The element
 // is not yet inserted into the DOM; the caller is responsible for placement.
@@ -937,6 +951,7 @@ export function buildPatchEl(idx) {
     const wasApproved = state.approved.has(patch.hash);
     if (wasApproved) unapprovePatch(patch.hash); else approvePatch(patch.hash);
     saveDecisionNow(patch.hash, wasApproved ? 'unapprove' : 'approve');
+    clearReReview(patch.hash);
     renderTabs();
     renderCurrentPatch();
     updateSubmitButton();
@@ -950,6 +965,7 @@ export function buildPatchEl(idx) {
     const wasDenied = state.denied.has(patch.hash);
     if (wasDenied) undenyPatch(patch.hash); else denyPatch(patch.hash);
     saveDecisionNow(patch.hash, wasDenied ? 'undeny' : 'deny');
+    clearReReview(patch.hash);
     renderTabs();
     renderCurrentPatch();
     updateSubmitButton();
@@ -1142,6 +1158,18 @@ export function buildPatchEl(idx) {
 
     summaryBox.appendChild(summaryList);
     el.appendChild(summaryBox);
+  }
+
+  // Re-review notice — an approved patch whose own code changed in a newer
+  // revision. The approval was already cleared; prompt the reviewer to look
+  // again. Acting (approve/deny) clears the flag.
+  if (state.reapprovalNeeded.has(patch.hash)) {
+    const reNotice = document.createElement('div');
+    reNotice.className = 'rereview-notice';
+    reNotice.innerHTML = `
+      <span class="rereview-notice-icon">⚠</span>
+      <span>You approved this patch, but its code changed in the latest revision — please re-review.</span>`;
+    el.appendChild(reNotice);
   }
 
   // Deny notice — show below general comment box but before diff

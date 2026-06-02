@@ -8,6 +8,9 @@ export const state = {
   generalComments: {},  // free-form patch-level feedback, keyed by patchHash
   approved: new Set(),  // patchHashes the reviewer approved
   denied: new Set(),    // patchHashes the reviewer denied
+  // patchHashes that were approved but whose own diff changed in a newer
+  // revision — the approval was cleared and the patch needs re-review. Persisted.
+  reapprovalNeeded: new Set(),
   patches: [],
   currentPatchIdx: 0,
   revisions: [],        // [{ savedAt, patches: [{hash, message}] }] — persisted
@@ -37,6 +40,7 @@ export function resetReviewState() {
   state.generalComments = {};
   state.approved = new Set();
   state.denied = new Set();
+  state.reapprovalNeeded = new Set();
 }
 
 export function allPatchesFinished() {

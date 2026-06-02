@@ -56,6 +56,9 @@ export function diffFingerprint(patch) {
 export function migrateApprovals(prevPatches, currPatches, approved, denied) {
   const newApproved = new Set(approved);
   const newDenied   = new Set(denied);
+  // New (current) hashes whose approval was just dropped because the patch's
+  // own diff changed — the reviewer should be told to re-review these.
+  const reapprovalNeeded = new Set();
   for (let i = 0; i < Math.min(prevPatches.length, currPatches.length); i++) {
     const prev = prevPatches[i];
     const curr = currPatches[i];
@@ -72,7 +75,9 @@ export function migrateApprovals(prevPatches, currPatches, approved, denied) {
     const diffChanged = hasFp && normalizeFingerprint(prev.diffFingerprint) !== curr.diffFingerprint;
 
     if (diffChanged) {
-      // Actual code changed — reviewer must re-evaluate
+      // Actual code changed — reviewer must re-evaluate. If they had approved
+      // this patch, flag the new revision so they know to re-review it.
+      if (newApproved.has(prev.hash)) reapprovalNeeded.add(curr.hash);
       newApproved.delete(prev.hash);
       newDenied.delete(prev.hash);
     } else {
@@ -87,7 +92,7 @@ export function migrateApprovals(prevPatches, currPatches, approved, denied) {
       }
     }
   }
-  return { approved: newApproved, denied: newDenied };
+  return { approved: newApproved, denied: newDenied, reapprovalNeeded };
 }
 
 export function detectRevisionChanges() {
@@ -107,7 +112,7 @@ export function detectRevisionChanges() {
     // given the same prev/curr snapshots, so two tabs racing this write end
     // up writing the same sets.
     state.revisions.push({ savedAt: new Date().toISOString(), patches: currentSnapshot });
-    saveRevisionsNow(state.revisions, [...state.approved], [...state.denied]);
+    saveRevisionsNow(state.revisions, [...state.approved], [...state.denied], [...state.reapprovalNeeded]);
     return;
   }
 
@@ -128,9 +133,14 @@ export function detectRevisionChanges() {
     const migrated = migrateApprovals(prevPatches, currentSnapshot, state.approved, state.denied);
     state.approved = migrated.approved;
     state.denied   = migrated.denied;
+    // Accumulate newly-invalidated approvals, then prune to patches that still
+    // exist so stale hashes (e.g. a dropped patch) don't linger on disk.
+    for (const h of migrated.reapprovalNeeded) state.reapprovalNeeded.add(h);
+    const currentHashes = new Set(state.patches.map((p) => p.hash));
+    state.reapprovalNeeded = new Set([...state.reapprovalNeeded].filter((h) => currentHashes.has(h)));
     state.revisions.push({ savedAt: new Date().toISOString(), patches: currentSnapshot });
     if (state.revisions.length > 10) state.revisions = state.revisions.slice(-10);
-    saveRevisionsNow(state.revisions, [...state.approved], [...state.denied]);
+    saveRevisionsNow(state.revisions, [...state.approved], [...state.denied], [...state.reapprovalNeeded]);
   }
 }
 

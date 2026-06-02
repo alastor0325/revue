@@ -864,6 +864,37 @@ describe('server HTTP integration', () => {
     expect(res.status).toBe(200);
   });
 
+  // The re-review flag (approved patches whose code changed in a new revision)
+  // rides along with the revisions write and must survive the round-trip so the
+  // indication persists across reloads.
+  test('POST /api/state/revisions round-trips reapprovalNeeded', async () => {
+    await resetState();
+    const post = await httpRequest(`${baseUrl}/api/state/revisions`, {
+      method: 'POST',
+      body: { revisions: [], approved: ['keep'], denied: [], reapprovalNeeded: ['changed1', 'changed2'] },
+    });
+    expect(post.status).toBe(200);
+    const { body } = await httpRequest(`${baseUrl}/api/state`);
+    expect(body.reapprovalNeeded).toEqual(['changed1', 'changed2']);
+    await httpRequest(`${baseUrl}/api/state/revisions`, {
+      method: 'POST', body: { revisions: [], approved: [], denied: [], reapprovalNeeded: [] },
+    });
+  });
+
+  test('POST /api/state/revisions rejects a non-array reapprovalNeeded with 400', async () => {
+    const { status } = await httpRequest(`${baseUrl}/api/state/revisions`, {
+      method: 'POST', body: { revisions: [], approved: [], denied: [], reapprovalNeeded: 'nope' },
+    });
+    expect(status).toBe(400);
+  });
+
+  test('POST /api/state/revisions still accepts a payload omitting reapprovalNeeded (older clients)', async () => {
+    const { status } = await httpRequest(`${baseUrl}/api/state/revisions`, {
+      method: 'POST', body: { revisions: [], approved: [], denied: [] },
+    });
+    expect(status).toBe(200);
+  });
+
   // ── SSE state-events stream (Task 3a) ─────────────────────────────────
   // Two listeners must both receive a delta event.  Each event carries the
   // origin tab id + per-tab seq so peer tabs can dedupe duplicates that

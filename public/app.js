@@ -89,6 +89,9 @@ async function submitReview() {
       generalComments: state.generalComments,
       approved: [...state.approved],
       denied: [...state.denied],
+      // Preserve across the full-replace write: a changed-since-approved patch
+      // still needs re-review after generating the prompt.
+      reapprovalNeeded: [...state.reapprovalNeeded],
       revisions: state.revisions,
       drafts,
     });
@@ -292,6 +295,7 @@ function applySavedState(saved) {
   if (saved.generalComments) state.generalComments = saved.generalComments;
   if (saved.approved) state.approved = new Set(saved.approved);
   if (saved.denied) state.denied = new Set(saved.denied);
+  if (saved.reapprovalNeeded) state.reapprovalNeeded = new Set(saved.reapprovalNeeded);
   if (saved.revisions) state.revisions = saved.revisions;
   if (saved.prompt) setSavedPromptText(saved.prompt);
   replaceDrafts(saved.drafts || null);

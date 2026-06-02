@@ -124,8 +124,8 @@ export function saveDecisionNow(patchHash, kind) {
   return postJson('/api/state/decision', { patchHash, kind });
 }
 
-export function saveRevisionsNow(revisions, approved, denied) {
-  return postJson('/api/state/revisions', { revisions, approved, denied });
+export function saveRevisionsNow(revisions, approved, denied, reapprovalNeeded = []) {
+  return postJson('/api/state/revisions', { revisions, approved, denied, reapprovalNeeded });
 }
 
 // ── Debounced saves for typed text ─────────────────────────────────────────

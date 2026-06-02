@@ -295,14 +295,18 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
     }
   });
 
-  // POST /api/state/revisions — { revisions, approved, denied }
+  // POST /api/state/revisions — { revisions, approved, denied, reapprovalNeeded? }
   // Used by the load-time revision-detection path which records a new revision
-  // snapshot AND migrates approved/denied hashes for amended commits.  The
-  // three fields belong together so they go in one lock-protected write.
+  // snapshot AND migrates approved/denied hashes for amended commits.  These
+  // fields belong together so they go in one lock-protected write.
+  // reapprovalNeeded is optional (older clients omit it) and stored verbatim.
   app.post('/api/state/revisions', async (req, res) => {
-    const { revisions, approved, denied } = req.body || {};
+    const { revisions, approved, denied, reapprovalNeeded } = req.body || {};
     if (!Array.isArray(revisions) || !Array.isArray(approved) || !Array.isArray(denied)) {
       return res.status(400).json({ error: 'revisions, approved, denied must all be arrays.' });
+    }
+    if (reapprovalNeeded !== undefined && !Array.isArray(reapprovalNeeded)) {
+      return res.status(400).json({ error: 'reapprovalNeeded must be an array when provided.' });
     }
     const statePath = stateFilePath();
     try {
@@ -311,6 +315,7 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
         state.revisions = revisions;
         state.approved = approved;
         state.denied = denied;
+        if (reapprovalNeeded !== undefined) state.reapprovalNeeded = reapprovalNeeded;
         atomicWriteStateFile(statePath, state);
       });
       publishStateEvent({ kind: 'revisions' }, req);
