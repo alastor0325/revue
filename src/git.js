@@ -105,6 +105,16 @@ function getCommits(worktreePath, mainRepoPath) {
 }
 
 /**
+ * Resolve a path from a `---`/`+++` diff header line. Strips the `a/`/`b/`
+ * prefix, and maps git's `/dev/null` (the file is absent on this side — added
+ * or deleted) to null so callers fall back to the path that does exist.
+ */
+function diffHeaderPath(raw, prefix) {
+  if (raw === '/dev/null') return null;
+  return raw.startsWith(prefix) ? raw.slice(2) : raw;
+}
+
+/**
  * Parse a unified diff string into structured data.
  * Returns array of file objects:
  * {
@@ -161,18 +171,17 @@ function parseDiff(diffText) {
       continue;
     }
 
-    // Old file path
+    // Old file path (null for an added file — see diffHeaderPath).
     if (line.startsWith('--- ')) {
-      const p = line.slice(4);
-      currentFile.oldPath = p.startsWith('a/') ? p.slice(2) : p;
+      currentFile.oldPath = diffHeaderPath(line.slice(4), 'a/');
       i++;
       continue;
     }
 
-    // New file path
+    // New file path (null for a deleted file, so the UI shows oldPath rather
+    // than rendering git's "/dev/null" — whose basename is "null").
     if (line.startsWith('+++ ')) {
-      const p = line.slice(4);
-      currentFile.newPath = p.startsWith('b/') ? p.slice(2) : p;
+      currentFile.newPath = diffHeaderPath(line.slice(4), 'b/');
       i++;
       continue;
     }

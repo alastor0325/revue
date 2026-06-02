@@ -208,6 +208,40 @@ describe('git integration', () => {
     expect(added).toContain('function hello() {');
     expect(added).toContain('  return "hello";');
   });
+
+  // A commit that deletes a file must expose the deleted path (oldPath), not a
+  // null/"/dev/null" newPath that the UI would render as the filename "null".
+  test('a commit deleting a file keeps the deleted path as oldPath with newPath null', () => {
+    const md = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-del-'));
+    const main = path.join(md, 'main');
+    const work = path.join(md, 'work');
+    try {
+      fs.mkdirSync(main);
+      git(main, 'init');
+      git(main, 'config user.email "test@test.com"');
+      git(main, 'config user.name "Test"');
+      fs.writeFileSync(path.join(main, 'doomed.js'), 'const a = 1;\nconst b = 2;\n');
+      git(main, 'add .');
+      git(main, 'commit -m "initial"');
+
+      execSync(`git clone "${main}" "${work}"`, { encoding: 'utf8' });
+      git(work, 'config user.email "test@test.com"');
+      git(work, 'config user.name "Test"');
+      fs.rmSync(path.join(work, 'doomed.js'));
+      git(work, 'add -A');
+      git(work, 'commit -m "feat: remove doomed.js"');
+
+      const patches = getDiffPerCommit(work, main);
+      expect(patches).toHaveLength(1);
+      const file = patches[0].files[0];
+      expect(file.oldPath).toBe('doomed.js');
+      expect(file.newPath).toBeNull();
+      // The path the UI displays (newPath || oldPath) is the real file.
+      expect(file.newPath || file.oldPath).toBe('doomed.js');
+    } finally {
+      fs.rmSync(md, { recursive: true, force: true });
+    }
+  });
 });
 
 // ── server integration (real Express, no git mocks) ───────────────────────

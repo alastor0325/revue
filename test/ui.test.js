@@ -1454,6 +1454,62 @@ describe('nested file path in sidebar', () => {
   });
 });
 
+// ── Deleted file path ──────────────────────────────────────────────────────
+// A commit that deletes a file must show the deleted file's real path in the
+// sidebar and diff header — not "null" (the basename of the "/dev/null" path
+// git uses for the removed side).
+
+describe('deleted file path', () => {
+  let delServer, delPage, delTmpDir;
+
+  beforeAll(async () => {
+    delTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-ui-del-'));
+    const delMain = path.join(delTmpDir, 'main');
+    const delWork = path.join(delTmpDir, 'work');
+
+    fs.mkdirSync(delMain);
+    git(delMain, 'init');
+    git(delMain, 'config user.email "test@test.com"');
+    git(delMain, 'config user.name "Test"');
+    fs.writeFileSync(path.join(delMain, 'doomed.js'), 'const a = 1;\nconst b = 2;\n');
+    git(delMain, 'add .');
+    git(delMain, 'commit -m "initial"');
+
+    execSync(`git clone "${delMain}" "${delWork}"`, { encoding: 'utf8' });
+    git(delWork, 'config user.email "test@test.com"');
+    git(delWork, 'config user.name "Test"');
+    fs.rmSync(path.join(delWork, 'doomed.js'));
+    git(delWork, 'add -A');
+    git(delWork, 'commit -m "feat: remove doomed.js"');
+
+    const app = createApp({ worktreeName: 'work', worktreePath: delWork, mainRepoPath: delMain });
+    const port = await findAvailablePort(20300);
+    await new Promise((resolve) => { delServer = app.listen(port, '127.0.0.1', resolve); });
+
+    delPage = await browser.newPage();
+    await delPage.goto(`http://127.0.0.1:${port}`);
+    await delPage.waitForSelector('.file-nav-item', { state: 'visible' });
+  }, 30000);
+
+  afterAll(async () => {
+    await delPage?.close();
+    await new Promise((resolve) => delServer?.close(resolve));
+    fs.rmSync(delTmpDir, { recursive: true, force: true });
+  });
+
+  test('sidebar shows the deleted file name, not "null"', async () => {
+    const name = await delPage.textContent('.file-nav-filename');
+    expect(name).toBe('doomed.js');
+    expect(name).not.toBe('null');
+  });
+
+  test('diff header shows the deleted file path, not /dev/null', async () => {
+    const header = await delPage.textContent('.file-header');
+    expect(header).toContain('doomed.js');
+    expect(header).not.toContain('/dev/null');
+  });
+});
+
 // ── Worktree switcher bar ──────────────────────────────────────────────────
 // A real git worktree (via `git worktree add`) means /api/worktrees returns
 // two entries, so initWorktreeBar shows #worktree-bar with one pill per entry.

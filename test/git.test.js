@@ -136,7 +136,8 @@ diff --git a/real.js b/real.js
     const files = parseDiff(diff);
     expect(files).toHaveLength(1);
     expect(files[0].newPath).toBe('new.js');
-    expect(files[0].oldPath).toBe('/dev/null');
+    // /dev/null is not a real path — keep it null so the UI uses newPath.
+    expect(files[0].oldPath).toBeNull();
 
     const lines = files[0].hunks[0].lines;
     expect(lines).toHaveLength(2);
@@ -155,6 +156,9 @@ diff --git a/real.js b/real.js
     const files = parseDiff(diff);
     expect(files).toHaveLength(1);
     expect(files[0].oldPath).toBe('old.js');
+    // newPath must be null, not "/dev/null": the UI does `newPath || oldPath`,
+    // and a literal "/dev/null" would render its basename "null" as the file.
+    expect(files[0].newPath).toBeNull();
 
     const lines = files[0].hunks[0].lines;
     expect(lines).toHaveLength(2);
