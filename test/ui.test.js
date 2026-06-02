@@ -169,6 +169,79 @@ describe('patch heading last-modified date', () => {
   });
 });
 
+// ── Sticky patch heading ────────────────────────────────────────────────────
+// The heading (with Approve/Deny) is pinned under the top bar so it stays
+// reachable while scrolling a long diff. A tall single-file patch in a short
+// viewport guarantees the page scrolls.
+
+describe('sticky patch heading', () => {
+  let shServer, shPage, shTmpDir;
+
+  beforeAll(async () => {
+    shTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-ui-sticky-'));
+    const shMain = path.join(shTmpDir, 'main');
+    const shWork = path.join(shTmpDir, 'work');
+
+    fs.mkdirSync(shMain);
+    git(shMain, 'init');
+    git(shMain, 'config user.email "test@test.com"');
+    git(shMain, 'config user.name "Test"');
+    fs.writeFileSync(path.join(shMain, 'big.js'), 'const x = 0;\n');
+    git(shMain, 'add .');
+    git(shMain, 'commit -m "initial"');
+
+    execSync(`git clone "${shMain}" "${shWork}"`, { encoding: 'utf8' });
+    git(shWork, 'config user.email "test@test.com"');
+    git(shWork, 'config user.name "Test"');
+    const big = Array.from({ length: 80 }, (_, i) => `const v${i} = ${i};`).join('\n') + '\n';
+    fs.writeFileSync(path.join(shWork, 'big.js'), big);
+    git(shWork, 'add .');
+    git(shWork, 'commit -m "feat: a long patch"');
+
+    const app = createApp({ worktreeName: 'work', worktreePath: shWork, mainRepoPath: shMain });
+    const port = await findAvailablePort(20200);
+    await new Promise((resolve) => { shServer = app.listen(port, '127.0.0.1', resolve); });
+
+    shPage = await browser.newPage({ viewport: { width: 900, height: 500 } });
+    await shPage.goto(`http://127.0.0.1:${port}`);
+    await shPage.waitForSelector('.patch-heading', { state: 'visible' });
+  }, 30000);
+
+  afterAll(async () => {
+    await shPage?.close();
+    await new Promise((resolve) => shServer?.close(resolve));
+    fs.rmSync(shTmpDir, { recursive: true, force: true });
+  });
+
+  test('patch heading uses sticky positioning', async () => {
+    const pos = await shPage.$eval('.patch-heading', (el) => getComputedStyle(el).position);
+    expect(pos).toBe('sticky');
+  });
+
+  test('heading stays pinned under the top bar after scrolling down', async () => {
+    await shPage.evaluate(() => window.scrollTo(0, 700));
+    await shPage.waitForFunction(() => window.scrollY > 200);
+    const { headingTop, topBarH } = await shPage.evaluate(() => ({
+      headingTop: document.querySelector('.patch-heading').getBoundingClientRect().top,
+      topBarH: document.getElementById('top-bar').getBoundingClientRect().height,
+    }));
+    // Pinned: the heading sits right at the bottom edge of the top bar.
+    expect(Math.abs(headingTop - topBarH)).toBeLessThanOrEqual(4);
+  });
+
+  test('Approve is fully in view while scrolled down, and toggles when clicked', async () => {
+    await shPage.evaluate(() => window.scrollTo(0, 700));
+    const inView = await shPage.evaluate(() => {
+      const r = document.querySelector('.btn-approve').getBoundingClientRect();
+      return r.top >= 0 && r.bottom <= window.innerHeight;
+    });
+    expect(inView).toBe(true); // reachable without scrolling back up
+    await shPage.click('.btn-approve');
+    await shPage.waitForSelector('.btn-unapprove');
+    expect(await shPage.textContent('.btn-unapprove')).toBe('Approved ✓');
+  });
+});
+
 // ── Patch tabs ─────────────────────────────────────────────────────────────
 
 describe('patch tabs', () => {

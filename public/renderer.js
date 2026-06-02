@@ -675,6 +675,21 @@ let fileNavCollapsed = false;
 let _stickyOffsetSetup = false;
 let _topBarHeight = 0;
 
+// The current patch's heading is sticky under the top bar (style.css). Returns
+// its live height, or 0 when no patch is active.
+function stickyHeadingHeight() {
+  const heading = patchEls[state.currentPatchIdx]?.el?.querySelector('.patch-heading');
+  return heading ? heading.getBoundingClientRect().height : 0;
+}
+
+// Distance from the viewport top to where readable content begins: below the
+// top bar and the pinned patch heading, plus a small breathing gap. Both the
+// file-nav scroll target and the scroll-spy threshold use this so a block is
+// never parked behind the sticky heading.
+function stickyTopOffset() {
+  return _topBarHeight + stickyHeadingHeight() + 8;
+}
+
 // Why this exists: web-font swap-in (Space Grotesk) and dynamic top-bar
 // children (update banner, prompt bar) change #top-bar's height after first
 // paint. The sidebar's sticky offset (style.css) tracks the resulting value
@@ -753,7 +768,7 @@ export function buildNavItemsEl(files, diffWrap) {
     item.addEventListener('click', () => {
       if (!block) return;
       navItems.forEach((ni, i) => ni.classList.toggle('active', i === idx));
-      const y = block.getBoundingClientRect().top + window.scrollY - _topBarHeight - 8;
+      const y = block.getBoundingClientRect().top + window.scrollY - stickyTopOffset();
       window.scrollTo({ top: y, behavior: 'smooth' });
     });
 
@@ -817,10 +832,14 @@ export function activateFileNav(navItemsEl, diffWrap) {
   const blocks   = navItemsEl._blocks   || [];
 
   function updateActive() {
+    // Mark the last block whose top has scrolled under the pinned heading as
+    // active — i.e. the file the reader is actually looking at, not one hidden
+    // behind the heading.
+    const threshold = stickyTopOffset();
     let activeIdx = 0;
     for (let i = 0; i < blocks.length; i++) {
       const rect = blocks[i].getBoundingClientRect();
-      if (rect.top <= _topBarHeight + 32) activeIdx = i;
+      if (rect.top <= threshold) activeIdx = i;
     }
     navItems.forEach((item, i) => item.classList.toggle('active', i === activeIdx));
     const activeItem = navItems[activeIdx];

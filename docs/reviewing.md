@@ -31,6 +31,8 @@ Shortcuts are disabled while you are typing in a comment or feedback field, and 
 
 Each patch heading shows its **Part** label, the commit subject, the short hash, and the commit's **last-modified time** (the committer date, which advances whenever the commit is amended or rebased). The timestamp is left-aligned on the same row as the Approve/Deny buttons, in a smaller muted font.
 
+The heading is **pinned** under the top bar (like the file sidebar), so the Approve/Deny buttons stay reachable while you scroll a long diff — finish reading and act on the patch without scrolling back up.
+
 ## Per-patch actions
 
 Each patch has two buttons in the heading:

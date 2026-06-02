@@ -589,6 +589,16 @@ describe('server HTTP integration', () => {
     expect(body).toMatch(/max-height:\s*calc\(100vh\s*-\s*var\(--top-bar-height/);
   });
 
+  // The patch heading is pinned under the top bar so Approve/Deny stay
+  // reachable while scrolling a long diff. If this regresses, the buttons
+  // scroll away and the reviewer has to scroll back up to act on a patch.
+  test('GET /style.css pins the patch heading under the top bar', async () => {
+    const { status, body } = await httpRequest(`${baseUrl}/style.css`);
+    expect(status).toBe(200);
+    expect(body).toMatch(/\.patch-heading\s*{[^}]*position:\s*sticky/);
+    expect(body).toMatch(/\.patch-heading\s*{[^}]*top:\s*var\(--top-bar-height/);
+  });
+
   // The autosave indicator cycles through "", "Saving…", "Saved", and
   // "Save failed" while the user types.  Without a fixed slot the inline
   // span grows from 0 to ~80 px wide and 0 to one-line tall, shifting the

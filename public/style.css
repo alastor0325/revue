@@ -545,12 +545,22 @@ button { font-family: inherit; }
 }
 
 /* ─── Patch heading ─────────────────────────────────────────────────────── */
+/* Sticky under the top bar (like #file-nav) so Approve/Deny stay reachable
+   while scrolling a long diff — no need to scroll back up to act on a patch.
+   renderer.js adds this heading's height to the file-nav scroll offsets so a
+   block scrolled into view isn't hidden behind the pinned heading. */
 .patch-heading {
   display: flex;
   align-items: center;
   gap: 12px;
   margin: 0 0 18px;
   flex-wrap: wrap;
+  position: sticky;
+  top: var(--top-bar-height, 0px);
+  z-index: 50;
+  background: var(--bg);
+  padding: 8px 0;
+  border-bottom: 1px solid var(--rule);
 }
 .patch-heading-label {
   font-family: var(--font-mono);
