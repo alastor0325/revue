@@ -132,10 +132,12 @@ function isRunning(pid) {
 }
 
 /**
- * Stop all running instances. Returns true if at least one was stopped.
+ * Stop all running instances by sending SIGTERM. Returns the array of PIDs that
+ * were signalled (still running at the time). Callers should `waitForExit` on
+ * the result before reusing the port — the processes don't die synchronously.
  */
 function stopDaemon() {
-  let stoppedAny = false;
+  const killed = [];
 
   // Handle legacy single-instance PID files (both new and old tool names).
   for (const legacyFile of [LEGACY_PID_FILE, LEGACY_FIREFOX_PID_FILE]) {
@@ -147,7 +149,7 @@ function stopDaemon() {
           process.kill(pid, 'SIGTERM');
           const port = content.split(':')[1];
           console.log(`Stopped revue (PID ${pid}${port ? `, port ${port}` : ''}).`);
-          stoppedAny = true;
+          killed.push(pid);
         }
       } catch {}
       try { fs.unlinkSync(legacyFile); } catch {}
@@ -167,14 +169,33 @@ function stopDaemon() {
     try { fs.unlinkSync(inst.filePath); } catch {}
     const portStr = inst.port ? `, port ${inst.port}` : '';
     console.log(`Stopped revue (PID ${inst.pid}${portStr}).`);
-    stoppedAny = true;
+    killed.push(inst.pid);
   }
 
-  if (!stoppedAny) {
+  if (killed.length === 0) {
     console.log('No running revue instance found.');
-    return false;
   }
-  return true;
+  return killed;
+}
+
+/**
+ * Wait for the given PIDs to actually exit after a SIGTERM, so the port they
+ * held is released before we return.  SIGTERM is asynchronous: returning from
+ * stopDaemon() immediately leaves a window where the dying daemon still holds
+ * its port, which made a quick `--stop` + `--port N` reuse land on N+1.  Any
+ * process that ignores SIGTERM past the timeout is force-killed with SIGKILL.
+ */
+async function waitForExit(pids, { timeoutMs = 5000, pollMs = 100 } = {}) {
+  if (!pids || pids.length === 0) return;
+  const deadline = Date.now() + timeoutMs;
+  let remaining = pids.filter(isRunning);
+  while (remaining.length > 0 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, pollMs));
+    remaining = remaining.filter(isRunning);
+  }
+  for (const pid of remaining) {
+    try { process.kill(pid, 'SIGKILL'); } catch {}
+  }
 }
 
 async function daemonize(worktreeArgs) {
@@ -273,14 +294,14 @@ async function main() {
   }
 
   if (flag === '--stop') {
-    stopDaemon();
+    await waitForExit(stopDaemon()); // block until the port is actually released
     return;
   }
 
   if (flag === '--restart') {
-    stopDaemon();
-    // Brief pause to let the ports free up
-    await new Promise((r) => setTimeout(r, 500));
+    // Wait for the old instance(s) to fully exit so the port is free before
+    // the new one tries to bind it.
+    await waitForExit(stopDaemon());
     daemonize(rawArgs.slice(1));
     return;
   }
@@ -357,7 +378,7 @@ if (require.main === module) {
 }
 
 module.exports = {
-  readPid, readAllInstances, isRunning, stopDaemon, waitForPort,
+  readPid, readAllInstances, isRunning, stopDaemon, waitForExit, waitForPort,
   buildEntries, pickDefaultEntry, parseArgs, pidFilePath, ensurePidsDir,
   readConfig, writeConfig, runInit, printHelp,
   LEGACY_PID_FILE, CONFIG_FILE,

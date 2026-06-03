@@ -12,7 +12,7 @@ jest.mock('../src/git', () => ({ discoverWorktrees: jest.fn() }));
 
 const { discoverWorktrees } = require('../src/git');
 const {
-  readPid, readAllInstances, isRunning, stopDaemon,
+  readPid, readAllInstances, isRunning, stopDaemon, waitForExit,
   waitForPort, buildEntries, pickDefaultEntry, parseArgs,
   pidFilePath, ensurePidsDir, LEGACY_PID_FILE,
   readConfig, writeConfig, runInit, printHelp, CONFIG_FILE,
@@ -247,9 +247,9 @@ describe('isRunning', () => {
 // ── stopDaemon ─────────────────────────────────────────────────────────────
 
 describe('stopDaemon', () => {
-  test('returns false and prints message when no instances are running', () => {
+  test('returns an empty array and prints message when no instances are running', () => {
     const result = stopDaemon();
-    expect(result === false || result === true).toBe(true); // does not throw
+    expect(result).toEqual([]); // nothing killed
   });
 
   test('kills process tracked in LEGACY_FIREFOX_PID_FILE and removes the file', () => {
@@ -258,7 +258,7 @@ describe('stopDaemon', () => {
     fs.writeFileSync(legacyFirefoxFile, `${process.pid}:7777`, 'utf8');
     try {
       const result = stopDaemon();
-      expect(result).toBe(true);
+      expect(result).toContain(process.pid);
       expect(killSpy).toHaveBeenCalledWith(process.pid, 'SIGTERM');
       expect(fs.existsSync(legacyFirefoxFile)).toBe(false);
     } finally {
@@ -272,7 +272,7 @@ describe('stopDaemon', () => {
     fs.writeFileSync(LEGACY_PID_FILE, `${process.pid}:7777`, 'utf8');
     try {
       const result = stopDaemon();
-      expect(result).toBe(true);
+      expect(result).toContain(process.pid);
       expect(killSpy).toHaveBeenCalledWith(process.pid, 'SIGTERM');
       expect(fs.existsSync(LEGACY_PID_FILE)).toBe(false);
     } finally {
@@ -297,7 +297,7 @@ describe('stopDaemon', () => {
     writePidEntry(process.pid, 7778); // new-style entry (same pid, different port for test)
     try {
       const result = stopDaemon();
-      expect(result).toBe(true);
+      expect(result).toContain(process.pid);
       expect(killSpy).toHaveBeenCalledWith(process.pid, 'SIGTERM');
       expect(fs.existsSync(LEGACY_PID_FILE)).toBe(false);
     } finally {
@@ -326,7 +326,7 @@ describe('stopDaemon', () => {
     writePidEntry(process.pid, 7777);
     try {
       const result = stopDaemon();
-      expect(result).toBe(true);
+      expect(result).toContain(process.pid);
       expect(fs.existsSync(pidFilePath(process.pid))).toBe(false);
       expect(killSpy).toHaveBeenCalledWith(process.pid, 'SIGTERM');
     } finally {
@@ -354,7 +354,7 @@ describe('stopDaemon', () => {
     // any process.kill call will return (not throw), making isRunning return true.
     try {
       const result = stopDaemon();
-      expect(result).toBe(true);
+      expect(result).toEqual(expect.arrayContaining([fakePid1, fakePid2]));
       expect(fs.existsSync(pidFilePath(fakePid1))).toBe(false);
       expect(fs.existsSync(pidFilePath(fakePid2))).toBe(false);
       expect(killSpy).toHaveBeenCalledWith(fakePid1, 'SIGTERM');
@@ -363,6 +363,40 @@ describe('stopDaemon', () => {
       killSpy.mockRestore();
       removePidEntry(fakePid1);
       removePidEntry(fakePid2);
+    }
+  });
+});
+
+// ── waitForExit ────────────────────────────────────────────────────────────
+
+describe('waitForExit', () => {
+  test('resolves immediately for an empty pid list', async () => {
+    await expect(waitForExit([])).resolves.toBeUndefined();
+    await expect(waitForExit(undefined)).resolves.toBeUndefined();
+  });
+
+  test('returns without SIGKILL when the process is already gone', async () => {
+    const killSpy = jest.spyOn(process, 'kill').mockImplementation(() => {});
+    const deadPid = 2147483646; // not running → isRunning(0-probe) throws under real kill
+    killSpy.mockImplementation(() => { throw new Error('ESRCH'); }); // simulate dead
+    try {
+      await waitForExit([deadPid], { timeoutMs: 200, pollMs: 10 });
+      // process.kill was only used for the isRunning probe (signal 0), never SIGKILL
+      expect(killSpy).not.toHaveBeenCalledWith(deadPid, 'SIGKILL');
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
+
+  test('force-kills a process that ignores SIGTERM past the timeout', async () => {
+    // process.kill never throws → isRunning always true → the pid "won't die".
+    const killSpy = jest.spyOn(process, 'kill').mockImplementation(() => {});
+    const stubbornPid = 2147483645;
+    try {
+      await waitForExit([stubbornPid], { timeoutMs: 60, pollMs: 10 });
+      expect(killSpy).toHaveBeenCalledWith(stubbornPid, 'SIGKILL');
+    } finally {
+      killSpy.mockRestore();
     }
   });
 });
