@@ -165,20 +165,37 @@ describe('switchPatch', () => {
     });
   });
 
-  test('hides old patch and shows new one without rebuilding DOM', () => {
+  test('hides old patch and shows the new one; revisiting does not rebuild', () => {
     state.patches = makePatches('A', 'B', 'C');
     initPatchNodes();
 
-    const elA = patchEls[0].el;
-    const elB = patchEls[1].el;
+    const elA = patchEls[0].el; // active patch, already built
 
-    switchPatch(1);
-
+    switchPatch(1); // first visit to B builds it lazily
     expect(elA.style.display).toBe('none');
-    expect(elB.style.display).toBe('');
-    // Elements should be the same objects — no rebuild
-    expect(patchEls[0].el).toBe(elA);
+    expect(patchEls[1].el.style.display).toBe('');
+    expect(patchEls[0].el).toBe(elA); // the active patch is untouched
+
+    // Revisiting an already-built patch must NOT rebuild its DOM (anti-flicker).
+    const elB = patchEls[1].el;
+    switchPatch(0);
+    switchPatch(1);
     expect(patchEls[1].el).toBe(elB);
+    expect(patchEls[0].el).toBe(elA);
+  });
+
+  test('non-active patches are not built until first viewed', () => {
+    state.patches = makePatches('A', 'B', 'C');
+    initPatchNodes();
+    // Only the active patch's diff is in the DOM up front.
+    expect(patchEls[0].built).toBe(true);
+    expect(patchEls[1].built).toBe(false);
+    expect(patchEls[2].built).toBe(false);
+    expect(patchEls[0].el.querySelector('.diff-table')).not.toBeNull();
+    expect(patchEls[1].el.querySelector('.diff-table')).toBeNull(); // placeholder
+    switchPatch(1);
+    expect(patchEls[1].built).toBe(true);
+    expect(patchEls[1].el.querySelector('.diff-table')).not.toBeNull();
   });
 
   test('updates currentPatchIdx', () => {

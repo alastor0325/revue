@@ -700,6 +700,19 @@ describe('POST /api/switch', () => {
     expect(getDiffPerCommit).toHaveBeenCalledWith('/fake/firefox-bugXYZ', expect.any(String));
   });
 
+  test('switching away and back serves the diff from a per-worktree cache (no recompute)', async () => {
+    const app = makeApp();
+    getDiffPerCommit.mockClear(); // count only this test's calls (HEAD is constant)
+    await request(app).post('/api/switch').send({ worktreeName: 'bugXYZ' });
+    await request(app).get('/api/diff'); // computes bugXYZ
+    await request(app).post('/api/switch').send({ worktreeName: 'bugABC' });
+    await request(app).get('/api/diff'); // computes bugABC
+    await request(app).post('/api/switch').send({ worktreeName: 'bugXYZ' });
+    await request(app).get('/api/diff'); // bugXYZ again — must hit the cache
+    const xyzCalls = getDiffPerCommit.mock.calls.filter((c) => c[0] === '/fake/firefox-bugXYZ');
+    expect(xyzCalls).toHaveLength(1); // computed once, cached across the switch away and back
+  });
+
   test('returns 404 when the requested worktree does not exist', async () => {
     const app = makeApp();
     const res = await request(app).post('/api/switch').send({ worktreeName: 'doesNotExist' });

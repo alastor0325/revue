@@ -643,7 +643,7 @@ export function switchPatch(idx) {
   removeExistingForm();
   if (patchEls[state.currentPatchIdx]) patchEls[state.currentPatchIdx].el.style.display = 'none';
   state.currentPatchIdx = idx;
-  const entry = patchEls[idx];
+  const entry = ensurePatchBuilt(idx); // build this patch's diff on first view
   if (entry) {
     entry.el.style.display = '';
     activateFileNav(entry.navItemsEl, entry.diffWrap);
@@ -1294,7 +1294,7 @@ export function renderCurrentPatch() {
   const idx = state.currentPatchIdx;
   const { el, diffWrap, navItemsEl } = buildPatchEl(idx);
   const existing = patchEls[idx];
-  patchEls[idx] = { el, diffWrap, navItemsEl };
+  patchEls[idx] = { el, diffWrap, navItemsEl, built: true };
   if (existing) {
     existing.el.replaceWith(el);
   } else {
@@ -1303,8 +1303,24 @@ export function renderCurrentPatch() {
   activateFileNav(navItemsEl, diffWrap);
 }
 
-// Build all patch elements and insert them into #files-changed.
-// Called once after the initial diff load; tab switches use show/hide after this.
+// Build the full diff DOM for patch `idx` if it hasn't been built yet, swapping
+// its lazy placeholder out in place. Returns the (now built) patchEls entry.
+// Lazy building keeps the initial render of a many-patch worktree cheap: only
+// the visible patch's diff is built up front; the rest are built on first view.
+function ensurePatchBuilt(idx) {
+  const entry = patchEls[idx];
+  if (!entry || entry.built) return entry;
+  const built = buildPatchEl(idx);
+  built.built = true;
+  built.el.style.display = entry.el.style.display;
+  entry.el.replaceWith(built.el);
+  patchEls[idx] = built;
+  return built;
+}
+
+// Insert one element per patch into #files-changed.  Only the active patch's
+// diff is built now; the others get a cheap placeholder and are built on first
+// switch (see ensurePatchBuilt).  Tab switches use show/hide after this.
 export function initPatchNodes() {
   const container = $('#files-changed');
   patchEls.length = 0;
@@ -1323,10 +1339,18 @@ export function initPatchNodes() {
 
   const frag = document.createDocumentFragment();
   for (let i = 0; i < state.patches.length; i++) {
-    const { el, diffWrap, navItemsEl } = buildPatchEl(i);
-    el.style.display = i === state.currentPatchIdx ? '' : 'none';
-    patchEls.push({ el, diffWrap, navItemsEl });
-    frag.appendChild(el);
+    let entry;
+    if (i === state.currentPatchIdx) {
+      entry = buildPatchEl(i);
+      entry.built = true;
+      entry.el.style.display = '';
+    } else {
+      const el = document.createElement('div');
+      el.style.display = 'none';
+      entry = { el, diffWrap: null, navItemsEl: null, built: false };
+    }
+    patchEls.push(entry);
+    frag.appendChild(entry.el);
   }
   container.replaceChildren(frag);
   const cur = patchEls[state.currentPatchIdx];

@@ -672,6 +672,32 @@ describe('inline line comments', () => {
 // Verifies the anti-flicker fix: renderTabs() reuses existing tab DOM elements
 // rather than destroying and recreating them, so tabs don't flash on state changes.
 
+// ── Lazy patch rendering ────────────────────────────────────────────────────
+// Only the active patch's diff is built on load; other tabs are built on first
+// view. Keeps the initial render cheap for many-patch worktrees.
+
+describe('lazy patch rendering', () => {
+  let lazyPage;
+
+  beforeAll(async () => { lazyPage = await openFreshPage(); }, 15000);
+  afterAll(async () => { await lazyPage.close(); });
+
+  test('only the active patch diff is built on load', async () => {
+    const paths = await lazyPage.$$eval('.file-header .file-path', (els) => els.map((e) => e.textContent));
+    expect(paths).toContain('feature.js');     // active patch (Part 1)
+    expect(paths).not.toContain('utils.js');   // Part 2 not built yet
+  });
+
+  test('switching to a patch builds its diff on demand', async () => {
+    await lazyPage.$$('.patch-tab').then(([, t1]) => t1.click());
+    await lazyPage.waitForFunction(() =>
+      [...document.querySelectorAll('.file-header .file-path')].some((e) => e.textContent === 'utils.js')
+    );
+    const paths = await lazyPage.$$eval('.file-header .file-path', (els) => els.map((e) => e.textContent));
+    expect(paths).toContain('utils.js');
+  });
+});
+
 describe('tab rendering stability', () => {
   test('tab DOM elements survive tab switches', async () => {
     await page.evaluate(() => { document.querySelector('.patch-tab').__stable = true; });

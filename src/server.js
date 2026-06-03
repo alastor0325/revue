@@ -59,9 +59,15 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
   let worktreeName = initialWorktreeName;
   let worktreePath = initialWorktreePath;
 
-  // Cache patches, invalidated automatically when the worktree HEAD changes
+  // Parsed patches, cached per worktree and invalidated automatically when that
+  // worktree's HEAD changes.  Keyed by worktree path so switching away and back
+  // to a large worktree doesn't recompute its (expensive) diff — the second
+  // visit is served from cache.  patchesCache mirrors the active worktree's
+  // entry so the existing callers stay simple.
   let patchesCache = null;
-  let cachedHeadHash = null;
+  const diffCache = new Map(); // worktreePath -> { headHash, patches }
+  const DIFF_CACHE_MAX = 8;    // bound memory: revue is a long-lived daemon and
+                               // each worktree's parsed diff can be several MB
 
   // ── Per-worktree async mutex ─────────────────────────────────────────────
   // Serialises read-modify-write on the state file so the bulk POST and
@@ -148,11 +154,19 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
 
   function loadData() {
     const currentHead = getHeadHash(worktreePath);
-    if (patchesCache && cachedHeadHash === currentHead) return;
+    const cached = diffCache.get(worktreePath);
+    if (cached && cached.headHash === currentHead) {
+      patchesCache = cached.patches;
+      diffCache.delete(worktreePath);                 // re-insert as most-recently-used
+      diffCache.set(worktreePath, cached);
+      return;
+    }
     console.log('Computing git diff...');
     try {
       patchesCache = getDiffPerCommit(worktreePath, mainRepoPath);
-      cachedHeadHash = currentHead;
+      diffCache.set(worktreePath, { headHash: currentHead, patches: patchesCache });
+      // Evict the least-recently-used worktree once over the cap.
+      while (diffCache.size > DIFF_CACHE_MAX) diffCache.delete(diffCache.keys().next().value);
       const totalFiles = patchesCache.reduce((n, p) => n + p.files.length, 0);
       console.log(
         `Found ${patchesCache.length} patch(es), ${totalFiles} changed file(s) total.`
@@ -534,8 +548,7 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
       }
       worktreeName = found.worktreeName;
       worktreePath = found.path;
-      patchesCache = null;
-      cachedHeadHash = null;
+      patchesCache = null; // repopulated from diffCache (or recomputed) on next loadData
       res.json({ ok: true, worktreeName, worktreePath });
     } catch (err) {
       res.status(500).json({ error: err.message });
