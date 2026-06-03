@@ -85,11 +85,15 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
     catch { return {}; }
   }
 
-  // Write JSON to <statePath>.tmp then rename, so a crashed write never leaves
-  // a half-file that the next reader would treat as empty.  Writes are serialised
-  // per statePath by withStateLock, so a single `.tmp` suffix can't collide.
+  // Write JSON to a temp file then rename, so a crashed write never leaves a
+  // half-file that the next reader would treat as empty.  The temp name is
+  // unique per write (pid + counter): withStateLock serialises writes within
+  // one process, but a second revue process for the same worktree (e.g. a brief
+  // overlap during `--restart`) would otherwise share a fixed `.tmp` path and
+  // could interleave into a corrupt file.
+  let tmpWriteCounter = 0;
   function atomicWriteStateFile(statePath, obj) {
-    const tmp = `${statePath}.tmp`;
+    const tmp = `${statePath}.${process.pid}.${tmpWriteCounter++}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), 'utf8');
     fs.renameSync(tmp, statePath);
   }
@@ -131,21 +135,30 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
   });
 
   // GET /api/state — load persisted review state, including existing prompt if available.
-  // Reads inline (not via readStateFile) so a malformed state JSON falls through
-  // to the bare `{}` fallback below, matching the long-standing contract.
+  // Distinguishes "no state file yet" (a clean empty start) from "a state file
+  // exists but can't be parsed" (corruption). In the latter case it returns
+  // `unreadable: true` so the client refuses to overwrite the file with a fresh
+  // baseline — which would turn a recoverable corrupt file into permanent loss
+  // of the reviewer's approvals.
   app.get('/api/state', (req, res) => {
     const statePath = stateFilePath();
     const mdPath = path.join(worktreePath, `REVIEW_FEEDBACK_${worktreeName}.md`);
+
+    let prompt = null;
+    try { prompt = fs.readFileSync(mdPath, 'utf8'); } catch { /* prompt is best-effort */ }
+
+    // existsSync (not a read+catch) is deliberate: only a genuinely absent file
+    // is a clean empty start. A read error on an existing file (corruption,
+    // permissions) must fall through to `unreadable` so the client won't
+    // overwrite recoverable data.
+    if (!fs.existsSync(statePath)) {
+      return res.json({ prompt });
+    }
     try {
-      const state = fs.existsSync(statePath)
-        ? JSON.parse(fs.readFileSync(statePath, 'utf8'))
-        : {};
-      const prompt = fs.existsSync(mdPath)
-        ? fs.readFileSync(mdPath, 'utf8')
-        : null;
+      const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
       res.json({ ...state, prompt });
     } catch {
-      res.json({});
+      res.json({ unreadable: true, prompt });
     }
   });
 

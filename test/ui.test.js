@@ -2506,6 +2506,71 @@ describe('re-review indication after an approved patch changes', () => {
   });
 });
 
+// ── Corrupt saved-state is preserved, not overwritten ──────────────────────
+// If the REVIEW_STATE file exists but can't be parsed, loading the worktree
+// must NOT overwrite it with a fresh baseline (which would permanently destroy
+// the reviewer's saved approvals). The file is left intact and a warning shown.
+
+describe('corrupt saved-state is not overwritten on load', () => {
+  let csServer, csPage, csTmpDir, csStatePath;
+  const CORRUPT = 'not valid json !!! {{{';
+
+  beforeAll(async () => {
+    csTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-ui-corrupt-'));
+    const csMain = path.join(csTmpDir, 'main');
+    const csWork = path.join(csTmpDir, 'work');
+
+    fs.mkdirSync(csMain);
+    git(csMain, 'init');
+    git(csMain, 'config user.email "test@test.com"');
+    git(csMain, 'config user.name "Test"');
+    fs.writeFileSync(path.join(csMain, 'base.txt'), 'base\n');
+    git(csMain, 'add .');
+    git(csMain, 'commit -m "initial"');
+
+    execSync(`git clone "${csMain}" "${csWork}"`, { encoding: 'utf8' });
+    git(csWork, 'config user.email "test@test.com"');
+    git(csWork, 'config user.name "Test"');
+    fs.writeFileSync(path.join(csWork, 'feature.js'), 'const v = 1;\n');
+    git(csWork, 'add .');
+    git(csWork, 'commit -m "feat: a patch"');
+
+    // A corrupt state file is present before the page ever loads.
+    csStatePath = path.join(csWork, 'REVIEW_STATE_work.json');
+    fs.writeFileSync(csStatePath, CORRUPT, 'utf8');
+
+    const app = createApp({ worktreeName: 'work', worktreePath: csWork, mainRepoPath: csMain });
+    const port = await findAvailablePort(20700);
+    await new Promise((resolve) => { csServer = app.listen(port, '127.0.0.1', resolve); });
+
+    csPage = await browser.newPage();
+    await csPage.goto(`http://127.0.0.1:${port}`);
+    await csPage.waitForSelector('.patch-heading', { state: 'visible' });
+    await csPage.waitForTimeout(700); // give any (incorrect) save a chance to fire
+  }, 30000);
+
+  afterAll(async () => {
+    await csPage?.close();
+    await new Promise((resolve) => csServer?.close(resolve));
+    fs.rmSync(csTmpDir, { recursive: true, force: true });
+  });
+
+  test('the corrupt state file is left byte-for-byte intact (not overwritten)', () => {
+    expect(fs.readFileSync(csStatePath, 'utf8')).toBe(CORRUPT);
+  });
+
+  test('a non-fatal warning is shown but the diff still renders', async () => {
+    const warn = await csPage.$eval('#state-warning', (el) => ({
+      visible: getComputedStyle(el).display !== 'none',
+      text: el.textContent,
+    }));
+    expect(warn.visible).toBe(true);
+    expect(warn.text.toLowerCase()).toContain('could not be read');
+    // Content still renders despite the unreadable state.
+    expect(await csPage.$('.patch-heading')).not.toBeNull();
+  });
+});
+
 // ── Approval persistence across reload — diff fingerprint ──────────────────
 // These tests exercise the core rule: approval survives a reload when the
 // diff content is unchanged (e.g. commit message amend, rebase), but is

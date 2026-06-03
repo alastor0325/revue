@@ -521,7 +521,10 @@ describe('server HTTP integration', () => {
     }
   });
 
-  test('GET /api/state returns empty fallback when state JSON is malformed', async () => {
+  // A state file that exists but can't be parsed must be flagged `unreadable`,
+  // NOT returned as an empty {} — otherwise the client treats it as a clean
+  // empty start and overwrites the (recoverable) file, destroying approvals.
+  test('GET /api/state flags an existing-but-corrupt state file as unreadable', async () => {
     const statePath = path.join(workRepoPath, 'REVIEW_STATE_work-repo.json');
     let existing = null;
     try { existing = fs.readFileSync(statePath, 'utf8'); } catch {}
@@ -529,10 +532,27 @@ describe('server HTTP integration', () => {
     try {
       const { status, body } = await httpRequest(`${baseUrl}/api/state`);
       expect(status).toBe(200);
-      expect(Object.keys(body)).toHaveLength(0);
+      expect(body.unreadable).toBe(true);
+      // Crucially it must NOT look like clean saved state.
+      expect(body.approved).toBeUndefined();
+      expect(body.revisions).toBeUndefined();
     } finally {
       if (existing !== null) fs.writeFileSync(statePath, existing, 'utf8');
       else try { fs.unlinkSync(statePath); } catch {}
+    }
+  });
+
+  test('GET /api/state does NOT flag unreadable when no state file exists', async () => {
+    const statePath = path.join(workRepoPath, 'REVIEW_STATE_work-repo.json');
+    let existing = null;
+    try { existing = fs.readFileSync(statePath, 'utf8'); } catch {}
+    try { fs.unlinkSync(statePath); } catch {}
+    try {
+      const { status, body } = await httpRequest(`${baseUrl}/api/state`);
+      expect(status).toBe(200);
+      expect(body.unreadable).toBeUndefined(); // clean empty start, safe to baseline
+    } finally {
+      if (existing !== null) fs.writeFileSync(statePath, existing, 'utf8');
     }
   });
 

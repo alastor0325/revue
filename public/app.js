@@ -251,10 +251,12 @@ async function loadAndRender() {
 
   const loading = $('#loading');
   const errorMsg = $('#error-msg');
+  const stateWarning = $('#state-warning');
   const filesChanged = $('#files-changed');
 
   loading.style.display = '';
   errorMsg.style.display = 'none';
+  if (stateWarning) stateWarning.style.display = 'none';
   filesChanged.style.display = 'none';
 
   try {
@@ -263,7 +265,20 @@ async function loadAndRender() {
     const data = await diffRes.json();
     if (!diffRes.ok) throw new Error(data.error || 'Failed to load diff');
 
-    if (stateRes.ok) applySavedState(await stateRes.json());
+    // Did we actually retrieve the prior review state? If the saved state file
+    // exists but couldn't be read (unreadable), we must NOT run revision
+    // detection — recording a fresh baseline would overwrite the file and
+    // permanently destroy the reviewer's saved approvals. Leave it untouched.
+    let stateUnavailable = !stateRes.ok;
+    if (stateRes.ok) {
+      const saved = await stateRes.json();
+      if (saved && saved.unreadable) {
+        stateUnavailable = true;
+        if (saved.prompt) setSavedPromptText(saved.prompt);
+      } else {
+        applySavedState(saved);
+      }
+    }
 
     state.patches = data.patches || [];
     state.currentPatchIdx = 0;
@@ -275,7 +290,14 @@ async function loadAndRender() {
     loading.style.display = 'none';
     filesChanged.style.display = '';
 
-    detectRevisionChanges();
+    if (stateUnavailable) {
+      if (stateWarning) {
+        stateWarning.textContent = 'Saved review state could not be read — your approvals and comments are not shown, and the saved file is left untouched so it can be recovered. Reloading will retry.';
+        stateWarning.style.display = '';
+      }
+    } else {
+      detectRevisionChanges();
+    }
     renderTabs();
     initPatchNodes();
     updateSubmitButton();
@@ -291,6 +313,9 @@ async function loadAndRender() {
 
 function applySavedState(saved) {
   if (!saved) return;
+  // Never apply a payload the server flagged as unreadable — it carries no real
+  // state, and treating it as such must never clobber what's in memory/on disk.
+  if (saved.unreadable) return;
   if (saved.comments) state.comments = saved.comments;
   if (saved.generalComments) state.generalComments = saved.generalComments;
   if (saved.approved) state.approved = new Set(saved.approved);

@@ -1328,6 +1328,17 @@ tr.comment-draft-row td {
 }
 #error-msg { color: var(--red); }
 
+/* Non-fatal: saved state couldn't be read — content still renders below. */
+#state-warning {
+  margin: 12px 24px 0;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: var(--amber-bg);
+  border: 1px solid var(--amber-line);
+  color: var(--amber);
+  font-size: 13px;
+}
+
 /* ─── Empty worktree ────────────────────────────────────────────────────── */
 .empty-worktree {
   display: flex;
