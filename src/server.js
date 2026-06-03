@@ -152,6 +152,9 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
     }
   }
 
+  // Loads (or reuses cached) patches for the current worktree and returns the
+  // HEAD hash they were computed at — the client uses it as the baseline for
+  // its update-detection poll so the baseline is scoped to the loaded worktree.
   function loadData() {
     const currentHead = getHeadHash(worktreePath);
     const cached = diffCache.get(worktreePath);
@@ -159,7 +162,7 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
       patchesCache = cached.patches;
       diffCache.delete(worktreePath);                 // re-insert as most-recently-used
       diffCache.set(worktreePath, cached);
-      return;
+      return currentHead;
     }
     console.log('Computing git diff...');
     try {
@@ -171,6 +174,7 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
       console.log(
         `Found ${patchesCache.length} patch(es), ${totalFiles} changed file(s) total.`
       );
+      return currentHead;
     } catch (err) {
       console.error('Error computing diff:', err.message);
       throw err;
@@ -180,11 +184,12 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
   // GET /api/diff — return patches (one per commit) and metadata
   app.get('/api/diff', (req, res) => {
     try {
-      loadData();
+      const headHash = loadData();
       res.json({
         repoName: path.basename(mainRepoPath),
         worktreeName,
         worktreePath,
+        headHash,
         patches: patchesCache,
       });
     } catch (err) {

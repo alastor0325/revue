@@ -283,6 +283,14 @@ async function loadAndRender() {
     state.patches = data.patches || [];
     state.currentPatchIdx = 0;
 
+    // Reset the update-detection baseline to the worktree we just loaded, and
+    // clear any stale banner.  Without this, switching worktrees would compare
+    // the new worktree's HEAD against the previous one's and falsely report
+    // "codebase updated".  The banner should fire only when the *currently
+    // viewed* worktree's HEAD changes.
+    if (data.headHash != null) lastKnownHead = data.headHash;
+    $('#update-banner').style.display = 'none';
+
     $('#bug-id-display').textContent = data.worktreeName;
     $('#worktree-path').textContent = data.worktreePath;
     if (data.repoName) document.title = `${data.repoName}-${data.worktreeName}`;
@@ -637,28 +645,25 @@ async function init() {
 }
 
 // ── Update detection ───────────────────────────────────────────────────────
-// Polls /api/headhash every 5 seconds; shows a reload banner when the
-// worktree HEAD changes (i.e. commits were amended or added).
-async function startUpdatePolling() {
-  let knownHash = null;
-  try {
-    const res = await fetch('/api/headhash');
-    if (!res.ok) return;
-    ({ hash: knownHash } = await res.json());
-  } catch {
-    return; // endpoint unavailable (e.g. demo mode) — silently skip
-  }
+// HEAD hash of the worktree currently loaded in this tab.  loadAndRender sets
+// it from /api/diff on every load/switch so the poll's baseline tracks the
+// viewed worktree — switching worktrees never looks like an "update".
+let lastKnownHead = null;
 
+// Polls /api/headhash every 5 seconds; shows a reload banner when the currently
+// viewed worktree's HEAD changes (i.e. commits were amended or added).
+function startUpdatePolling() {
   _pollTimer = setInterval(async () => {
     try {
       const res = await fetch('/api/headhash');
       if (!res.ok) return;
       const { hash } = await res.json();
-      if (hash !== knownHash) {
-        knownHash = hash;
+      if (lastKnownHead == null) { lastKnownHead = hash; return; } // not loaded yet
+      if (hash !== lastKnownHead) {
+        lastKnownHead = hash;
         $('#update-banner').style.display = '';
       }
-    } catch { /* ignore network errors */ }
+    } catch { /* ignore network errors (e.g. demo mode) */ }
   }, 5000);
 }
 

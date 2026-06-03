@@ -1226,18 +1226,18 @@ describe('generate review prompt button', () => {
 
 describe('update banner', () => {
   let bannerPage;
+  let pollHead;   // what the mocked /api/headhash returns (mutable per test)
+  let realHead;   // the worktree's actual HEAD, which /api/diff reports as the baseline
 
   beforeAll(async () => {
+    realHead = git(workRepoPath, 'rev-parse HEAD');
+    pollHead = 'aabbccdd00000000'; // a *changed* HEAD, simulating new commits
     bannerPage = await browser.newPage();
-    let firstCall = true;
-    await bannerPage.route('**/api/headhash', (route) => {
-      if (firstCall) {
-        firstCall = false;
-        route.continue();
-      } else {
-        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ hash: 'aabbccdd00000000' }) });
-      }
-    });
+    // The poll's baseline comes from /api/diff (real HEAD); the mocked
+    // /api/headhash drives whether the poll sees a change.
+    await bannerPage.route('**/api/headhash', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ hash: pollHead }) })
+    );
     await bannerPage.goto(baseUrl);
     await bannerPage.waitForSelector('.patch-heading', { state: 'visible' });
   }, 15000);
@@ -1248,7 +1248,7 @@ describe('update banner', () => {
     expect(await bannerPage.$eval('#update-banner', (el) => el.style.display)).toBe('none');
   });
 
-  test('banner appears when HEAD hash changes', async () => {
+  test('banner appears when the viewed worktree HEAD changes', async () => {
     await bannerPage.waitForFunction(
       () => document.getElementById('update-banner').style.display !== 'none',
       { timeout: 10000 }
@@ -1260,15 +1260,17 @@ describe('update banner', () => {
     expect(await bannerPage.textContent('#btn-reload-page')).toBe('Reload');
   });
 
-  test('clicking Reload button hides the banner and re-renders', async () => {
+  test('clicking Reload re-renders, clears the banner, and it stays cleared', async () => {
+    pollHead = realHead; // the reload pulls in the new HEAD; the poll now agrees
     await bannerPage.click('#btn-reload-page');
     await bannerPage.waitForFunction(
       () => document.getElementById('update-banner').style.display === 'none',
       { timeout: 5000 }
     );
-    expect(await bannerPage.$eval('#update-banner', (el) => el.style.display)).toBe('none');
-    // Content was re-rendered — patches are still visible
     expect(await bannerPage.$('.patch-heading')).not.toBeNull();
+    // A subsequent poll must NOT re-raise it now that the baseline matches HEAD.
+    await bannerPage.waitForTimeout(5200);
+    expect(await bannerPage.$eval('#update-banner', (el) => el.style.display)).toBe('none');
   });
 });
 
@@ -1703,6 +1705,26 @@ describe('worktree switcher bar', () => {
       { timeout: 5000 }
     );
     expect(wtBarPage.url()).toContain('#' + mainRepoName);
+  });
+
+  // Regression: switching to a worktree with a different HEAD must not be
+  // mistaken for "the codebase updated" — the poll baseline is reset on switch.
+  test('switching worktrees does not raise the update banner', async () => {
+    // Switch to whichever worktree is not currently active (it has a different
+    // HEAD than the one we're on — the condition that used to trigger the bug).
+    const inactive = await wtBarPage.$$eval('.worktree-pill', (els) => {
+      const e = els.find((p) => !p.classList.contains('active'));
+      return e ? e.dataset.name : null;
+    });
+    expect(inactive).not.toBeNull();
+    await wtBarPage.click(`.worktree-pill[data-name="${inactive}"]`);
+    await wtBarPage.waitForFunction(
+      (n) => document.querySelector(`.worktree-pill[data-name="${n}"]`)?.classList.contains('active'),
+      inactive, { timeout: 5000 }
+    );
+    // Let a full poll cycle elapse; the banner must stay hidden.
+    await wtBarPage.waitForTimeout(5500);
+    expect(await wtBarPage.$eval('#update-banner', (el) => el.style.display)).toBe('none');
   });
 });
 

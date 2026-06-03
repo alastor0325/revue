@@ -291,6 +291,15 @@ describe('server HTTP integration', () => {
     expect(r1.body.patches[0].hash).toBe(r2.body.patches[0].hash);
   });
 
+  // The client seeds its update-detection baseline from /api/diff's headHash,
+  // so it must equal the worktree's real HEAD (and what /api/headhash returns).
+  test('GET /api/diff reports the HEAD hash, matching /api/headhash', async () => {
+    const diff = await httpRequest(`${baseUrl}/api/diff`);
+    const head = await httpRequest(`${baseUrl}/api/headhash`);
+    expect(diff.body.headHash).toBe(commitHash);
+    expect(diff.body.headHash).toBe(head.body.hash);
+  });
+
   test('GET /api/state returns empty state initially', async () => {
     const { status, body } = await httpRequest(`${baseUrl}/api/state`);
     expect(status).toBe(200);
