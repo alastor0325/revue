@@ -64,7 +64,7 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
   let cachedHeadHash = null;
 
   // ── Per-worktree async mutex ─────────────────────────────────────────────
-  // Serialises read-modify-write on REVIEW_STATE_*.json so the bulk POST and
+  // Serialises read-modify-write on the state file so the bulk POST and
   // the delta endpoints cannot interleave within one process.  Keyed by the
   // resolved state-file path so /api/switch starts a fresh lock chain.
   const locks = new Map();
@@ -80,6 +80,7 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
   }
 
   function readStateFile(statePath) {
+    migrateLegacyState();
     if (!fs.existsSync(statePath)) return {};
     try { return JSON.parse(fs.readFileSync(statePath, 'utf8')); }
     catch { return {}; }
@@ -98,8 +99,51 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
     fs.renameSync(tmp, statePath);
   }
 
+  // Persisted review state lives in the worktree's own git directory
+  // (`.git/worktrees/<name>` for a linked worktree, `<repo>/.git` for the main
+  // repo) rather than in the working tree.  Inside .git it never shows up in
+  // `git status` — so it can't be mistaken for a stray artifact and deleted —
+  // and `git worktree remove` cleans it up automatically (no separate GC).
+  // Cached per worktree path to avoid a git spawn on every state access; a
+  // worktree switch uses a different path key, so the cache stays correct.
+  const gitDirCache = new Map();
+  function stateDir() {
+    let dir = gitDirCache.get(worktreePath);
+    if (dir) return dir;
+    try {
+      dir = execSync(`git -C "${worktreePath}" rev-parse --absolute-git-dir`, { encoding: 'utf8' }).trim();
+    } catch {
+      dir = worktreePath; // non-git path: fall back to keeping state alongside it
+    }
+    gitDirCache.set(worktreePath, dir);
+    return dir;
+  }
+
   function stateFilePath() {
+    return path.join(stateDir(), 'revue-state.json');
+  }
+
+  // The pre-git-dir location: an in-worktree REVIEW_STATE_<name>.json file.
+  function legacyStateFilePath() {
     return path.join(worktreePath, `REVIEW_STATE_${worktreeName}.json`);
+  }
+
+  // One-time relocation of a legacy in-worktree state file into the git dir.
+  // The file is moved as-is (even if corrupt) so the unreadable-file protection
+  // still applies at the new location and no saved approvals are dropped.
+  function migrateLegacyState() {
+    const newPath = stateFilePath();
+    if (fs.existsSync(newPath)) return;
+    const legacy = legacyStateFilePath();
+    if (!fs.existsSync(legacy)) return;
+    try {
+      fs.mkdirSync(path.dirname(newPath), { recursive: true });
+      fs.renameSync(legacy, newPath);
+    } catch {
+      // e.g. cross-device rename — fall back to copy + unlink.
+      try { fs.copyFileSync(legacy, newPath); fs.unlinkSync(legacy); }
+      catch { /* leave the legacy file in place; nothing is lost */ }
+    }
   }
 
   function loadData() {
@@ -141,6 +185,7 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
   // baseline — which would turn a recoverable corrupt file into permanent loss
   // of the reviewer's approvals.
   app.get('/api/state', (req, res) => {
+    migrateLegacyState();
     const statePath = stateFilePath();
     const mdPath = path.join(worktreePath, `REVIEW_FEEDBACK_${worktreeName}.md`);
 
@@ -168,7 +213,10 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
   app.post('/api/state', async (req, res) => {
     const statePath = stateFilePath();
     try {
-      await withStateLock(statePath, () => atomicWriteStateFile(statePath, req.body));
+      // Relocate any legacy in-worktree file first: this full-replace write
+      // doesn't go through readStateFile, so without this a bulk write landing
+      // before the first read would orphan the legacy file (and its approvals).
+      await withStateLock(statePath, () => { migrateLegacyState(); atomicWriteStateFile(statePath, req.body); });
       publishStateEvent({ kind: 'bulk' }, req);
       res.json({ ok: true });
     } catch (err) {

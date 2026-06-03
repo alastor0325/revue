@@ -80,7 +80,7 @@ The button is enabled as soon as any patch has any activity (a comment, approval
 
 ## Auto-save and state persistence
 
-Your review state (comments, general feedback, approved/denied/skipped status) is saved automatically to `REVIEW_STATE_<worktree-name>.json` in the worktree. When you reopen `revue` for the same worktree, all your work is restored automatically.
+Your review state (comments, general feedback, approved/denied status) is saved automatically inside the worktree's git directory (`.git/worktrees/<name>/revue-state.json`, or `<repo>/.git/revue-state.json` for the main repo). When you reopen `revue` for the same worktree, all your work is restored automatically. Keeping it in `.git` means it never appears in `git status` (so it won't be mistaken for a stray file and deleted) and it's removed automatically when you run `git worktree remove`. An older in-worktree `REVIEW_STATE_<name>.json` is migrated to the new location on first load.
 
 ### What triggers what
 

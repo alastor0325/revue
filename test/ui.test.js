@@ -19,7 +19,7 @@ const path = require('path');
 const { execSync } = require('child_process');
 const { chromium } = require('playwright');
 const { createApp, findAvailablePort } = require('../src/server');
-const { git } = require('./helpers');
+const { git, stateFilePathFor } = require('./helpers');
 
 // ── Shared fixtures ────────────────────────────────────────────────────────
 
@@ -2535,8 +2535,9 @@ describe('corrupt saved-state is not overwritten on load', () => {
     git(csWork, 'add .');
     git(csWork, 'commit -m "feat: a patch"');
 
-    // A corrupt state file is present before the page ever loads.
-    csStatePath = path.join(csWork, 'REVIEW_STATE_work.json');
+    // A corrupt state file is present (in the git dir, where revue stores it)
+    // before the page ever loads.
+    csStatePath = stateFilePathFor(csWork);
     fs.writeFileSync(csStatePath, CORRUPT, 'utf8');
 
     const app = createApp({ worktreeName: 'work', worktreePath: csWork, mainRepoPath: csMain });

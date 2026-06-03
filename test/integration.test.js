@@ -16,7 +16,7 @@ const {
   getDiffForCommit, getDiffBetweenCommits, discoverWorktrees, getMergeBase,
 } = require('../src/git');
 const { createApp, startServer, findAvailablePort } = require('../src/server');
-const { git } = require('./helpers');
+const { git, stateFilePathFor } = require('./helpers');
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -525,7 +525,7 @@ describe('server HTTP integration', () => {
   // NOT returned as an empty {} — otherwise the client treats it as a clean
   // empty start and overwrites the (recoverable) file, destroying approvals.
   test('GET /api/state flags an existing-but-corrupt state file as unreadable', async () => {
-    const statePath = path.join(workRepoPath, 'REVIEW_STATE_work-repo.json');
+    const statePath = stateFilePathFor(workRepoPath);
     let existing = null;
     try { existing = fs.readFileSync(statePath, 'utf8'); } catch {}
     fs.writeFileSync(statePath, 'not valid json!!!', 'utf8');
@@ -543,10 +543,12 @@ describe('server HTTP integration', () => {
   });
 
   test('GET /api/state does NOT flag unreadable when no state file exists', async () => {
-    const statePath = path.join(workRepoPath, 'REVIEW_STATE_work-repo.json');
+    const statePath = stateFilePathFor(workRepoPath);
+    const legacyPath = path.join(workRepoPath, 'REVIEW_STATE_work-repo.json');
     let existing = null;
     try { existing = fs.readFileSync(statePath, 'utf8'); } catch {}
     try { fs.unlinkSync(statePath); } catch {}
+    try { fs.unlinkSync(legacyPath); } catch {} // ensure migration can't resurrect
     try {
       const { status, body } = await httpRequest(`${baseUrl}/api/state`);
       expect(status).toBe(200);
@@ -554,6 +556,26 @@ describe('server HTTP integration', () => {
     } finally {
       if (existing !== null) fs.writeFileSync(statePath, existing, 'utf8');
     }
+  });
+
+  // State is persisted inside the worktree's git dir, NOT as a loose file in
+  // the working tree (where it showed up as untracked and got deleted as a
+  // mistaken stray artifact — the original data-loss bug).
+  test('a state write lands in the git dir, not the working tree', async () => {
+    await httpRequest(`${baseUrl}/api/state`, {
+      method: 'POST',
+      body: { comments: {}, generalComments: {}, approved: ['h1'], denied: [] },
+    });
+    const gitDirState = stateFilePathFor(workRepoPath);
+    expect(fs.existsSync(gitDirState)).toBe(true);
+    expect(gitDirState).toContain('.git');
+    // No loose REVIEW_STATE file left in the working tree.
+    const looseInWorktree = fs.readdirSync(workRepoPath).filter((f) => f.startsWith('REVIEW_STATE_'));
+    expect(looseInWorktree).toEqual([]);
+    const { body } = await httpRequest(`${baseUrl}/api/state`);
+    expect(body.approved).toEqual(['h1']);
+    // reset
+    await httpRequest(`${baseUrl}/api/state`, { method: 'POST', body: { approved: [], denied: [] } });
   });
 
   test('GET /api/reload sends SSE stream with server token', async () => {
@@ -844,8 +866,10 @@ describe('server HTTP integration', () => {
     expect(body.approved).toEqual(['h1']);
     expect(body.drafts['h1/c.js/n5']).toBe('draft from D');
 
-    // The atomic writer should clean up after itself: no .tmp leftover.
-    const leftovers = fs.readdirSync(workRepoPath).filter((f) => f.includes('.tmp'));
+    // The atomic writer should clean up after itself: no .tmp leftover in the
+    // git dir where the state file (and its temp files) now live.
+    const stateDir = path.dirname(stateFilePathFor(workRepoPath));
+    const leftovers = fs.readdirSync(stateDir).filter((f) => f.includes('.tmp'));
     expect(leftovers).toEqual([]);
   });
 
@@ -1521,5 +1545,106 @@ describe('keyboard navigation data contract', () => {
     const { body } = await httpRequest(`http://127.0.0.1:${kbPort}/api/diff`);
     const messages = body.patches.map((p) => p.message);
     expect(messages).toEqual(['feat: add alpha', 'feat: add beta and gamma']);
+  });
+});
+
+// ── Legacy state migration ─────────────────────────────────────────────────
+// State used to live in the working tree as REVIEW_STATE_<name>.json. On first
+// access it must be migrated into the git dir so existing approvals are not
+// lost, and the loose working-tree file is removed.
+
+describe('legacy state migration', () => {
+  let mgTmpDir, mgMain, mgWork, mgServer, mgPort;
+
+  beforeAll(async () => {
+    mgTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-migrate-'));
+    mgMain = path.join(mgTmpDir, 'main');
+    mgWork = path.join(mgTmpDir, 'work');
+    fs.mkdirSync(mgMain);
+    git(mgMain, 'init');
+    git(mgMain, 'config user.email "test@test.com"');
+    git(mgMain, 'config user.name "Test"');
+    fs.writeFileSync(path.join(mgMain, 'base.txt'), 'base\n');
+    git(mgMain, 'add .');
+    git(mgMain, 'commit -m "initial"');
+
+    execSync(`git clone "${mgMain}" "${mgWork}"`, { encoding: 'utf8' });
+    git(mgWork, 'config user.email "test@test.com"');
+    git(mgWork, 'config user.name "Test"');
+
+    // Seed a legacy in-worktree state file with real approvals.
+    fs.writeFileSync(
+      path.join(mgWork, 'REVIEW_STATE_work.json'),
+      JSON.stringify({ approved: ['keepme'], denied: [], revisions: [{ savedAt: '2026-06-02T00:00:00Z', patches: [] }] }),
+      'utf8',
+    );
+
+    const app = createApp({ worktreeName: 'work', worktreePath: mgWork, mainRepoPath: mgMain });
+    mgPort = await findAvailablePort(18960);
+    await new Promise((resolve) => { mgServer = app.listen(mgPort, '127.0.0.1', resolve); });
+  });
+
+  afterAll((done) => {
+    mgServer.close(() => { fs.rmSync(mgTmpDir, { recursive: true, force: true }); done(); });
+  });
+
+  test('GET /api/state migrates the legacy file: approvals preserved, loose file removed, state now in git dir', async () => {
+    const { status, body } = await httpRequest(`http://127.0.0.1:${mgPort}/api/state`);
+    expect(status).toBe(200);
+    expect(body.approved).toEqual(['keepme']); // not lost
+    expect(body.unreadable).toBeUndefined();
+
+    // The loose working-tree file is gone, and the state now lives in the git dir.
+    expect(fs.existsSync(path.join(mgWork, 'REVIEW_STATE_work.json'))).toBe(false);
+    const gitDirState = stateFilePathFor(mgWork);
+    expect(fs.existsSync(gitDirState)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(gitDirState, 'utf8')).approved).toEqual(['keepme']);
+  });
+});
+
+// ── Bulk write before first read still migrates legacy state ────────────────
+// POST /api/state does a full-replace write without readStateFile, so it must
+// migrate the legacy file itself — otherwise a bulk write landing before any
+// read would leave the legacy file orphaned in the working tree.
+
+describe('bulk write migrates legacy state', () => {
+  let bmTmpDir, bmMain, bmWork, bmServer, bmPort;
+
+  beforeAll(async () => {
+    bmTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-bulkmig-'));
+    bmMain = path.join(bmTmpDir, 'main');
+    bmWork = path.join(bmTmpDir, 'work');
+    fs.mkdirSync(bmMain);
+    git(bmMain, 'init');
+    git(bmMain, 'config user.email "test@test.com"');
+    git(bmMain, 'config user.name "Test"');
+    fs.writeFileSync(path.join(bmMain, 'base.txt'), 'base\n');
+    git(bmMain, 'add .');
+    git(bmMain, 'commit -m "initial"');
+    execSync(`git clone "${bmMain}" "${bmWork}"`, { encoding: 'utf8' });
+    git(bmWork, 'config user.email "test@test.com"');
+    git(bmWork, 'config user.name "Test"');
+    fs.writeFileSync(path.join(bmWork, 'REVIEW_STATE_work.json'), JSON.stringify({ approved: ['old'] }), 'utf8');
+
+    const app = createApp({ worktreeName: 'work', worktreePath: bmWork, mainRepoPath: bmMain });
+    bmPort = await findAvailablePort(18970);
+    await new Promise((resolve) => { bmServer = app.listen(bmPort, '127.0.0.1', resolve); });
+  });
+
+  afterAll((done) => {
+    bmServer.close(() => { fs.rmSync(bmTmpDir, { recursive: true, force: true }); done(); });
+  });
+
+  test('a bulk POST as the first request removes the loose legacy file', async () => {
+    // First request of the session is a bulk write (no GET beforehand).
+    const post = await httpRequest(`http://127.0.0.1:${bmPort}/api/state`, {
+      method: 'POST', body: { approved: ['new'], denied: [] },
+    });
+    expect(post.status).toBe(200);
+    // The legacy working-tree file must not be left orphaned.
+    expect(fs.existsSync(path.join(bmWork, 'REVIEW_STATE_work.json'))).toBe(false);
+    expect(fs.existsSync(stateFilePathFor(bmWork))).toBe(true);
+    const { body } = await httpRequest(`http://127.0.0.1:${bmPort}/api/state`);
+    expect(body.approved).toEqual(['new']);
   });
 });
