@@ -470,6 +470,16 @@ export function countStats(hunks) {
   return { added, removed };
 }
 
+// Wire a file-header so clicking it collapses/expands its body.
+function makeCollapsible(header, body) {
+  let collapsed = false;
+  header.addEventListener('click', () => {
+    collapsed = !collapsed;
+    body.style.display = collapsed ? 'none' : '';
+    header.querySelector('.file-toggle').classList.toggle('collapsed', collapsed);
+  });
+}
+
 export function renderFile(fileData, patchHash) {
   const filePath = fileData.newPath || fileData.oldPath || '(unknown)';
   const { added, removed } = countStats(fileData.hunks);
@@ -477,19 +487,34 @@ export function renderFile(fileData, patchHash) {
   const block = document.createElement('div');
   block.className = 'file-block';
 
+  // Binary files have no line-level diff; show a Binary badge instead of +/-.
+  const statsHtml = fileData.binary
+    ? '<span class="file-binary-badge">Binary</span>'
+    : `<span class="stat-add">+${added}</span><span class="stat-del">-${removed}</span>`;
+
   const header = document.createElement('div');
   header.className = 'file-header';
   header.innerHTML = `
     <span class="file-toggle">▼</span>
     <span class="file-path">${escapeHtml(filePath)}</span>
-    <span class="file-stats">
-      <span class="stat-add">+${added}</span>
-      <span class="stat-del">-${removed}</span>
-    </span>`;
+    <span class="file-stats">${statsHtml}</span>`;
   block.appendChild(header);
 
   const body = document.createElement('div');
   body.className = 'diff-body';
+
+  // Binary files carry no textual diff — list the file with a placeholder
+  // rather than dropping it from the changed-files list entirely.
+  if (fileData.binary) {
+    const note = document.createElement('div');
+    note.className = 'binary-file-note';
+    note.textContent = 'Binary file — content not shown';
+    body.appendChild(note);
+    block.appendChild(body);
+    makeCollapsible(header, body);
+    return block;
+  }
+
   const table = document.createElement('table');
   table.className = 'diff-table';
 
@@ -568,12 +593,7 @@ export function renderFile(fileData, patchHash) {
   body.appendChild(table);
   block.appendChild(body);
 
-  let collapsed = false;
-  header.addEventListener('click', () => {
-    collapsed = !collapsed;
-    body.style.display = collapsed ? 'none' : '';
-    header.querySelector('.file-toggle').classList.toggle('collapsed', collapsed);
-  });
+  makeCollapsible(header, body);
 
   return block;
 }

@@ -110,7 +110,7 @@ diff --git a/b.js b/b.js
     expect(files[1].newPath).toBe('b.js');
   });
 
-  test('filters out binary files', () => {
+  test('keeps binary files (flagged, with path) so the UI can list them', () => {
     const diff = `diff --git a/image.png b/image.png
 Binary files a/image.png and b/image.png differ
 diff --git a/real.js b/real.js
@@ -121,8 +121,24 @@ diff --git a/real.js b/real.js
 +new`;
 
     const files = parseDiff(diff);
+    expect(files).toHaveLength(2);
+    const bin = files.find((f) => f.newPath === 'image.png');
+    expect(bin).toBeTruthy();
+    expect(bin.binary).toBe(true);
+    expect(bin.hunks).toEqual([]); // no textual content
+    expect(files.find((f) => f.newPath === 'real.js').binary).toBe(false);
+  });
+
+  test('captures the path of an added binary file (no ---/+++ lines)', () => {
+    const diff = `diff --git a/video.mp4 b/video.mp4
+new file mode 100644
+index 0000000..27501de
+Binary files /dev/null and b/video.mp4 differ`;
+
+    const files = parseDiff(diff);
     expect(files).toHaveLength(1);
-    expect(files[0].newPath).toBe('real.js');
+    expect(files[0].binary).toBe(true);
+    expect(files[0].newPath || files[0].oldPath).toBe('video.mp4');
   });
 
   test('handles new file (no old path)', () => {

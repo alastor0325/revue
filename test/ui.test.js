@@ -1621,6 +1621,60 @@ describe('deleted file path', () => {
   });
 });
 
+// ── Binary file in the changed-files list ──────────────────────────────────
+// An added binary file must appear in files-changed (with a Binary marker and a
+// placeholder), not vanish — even though its content isn't rendered.
+
+describe('binary file listing', () => {
+  let binServer, binPage, binTmpDir;
+
+  beforeAll(async () => {
+    binTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-ui-bin-'));
+    const binMain = path.join(binTmpDir, 'main');
+    const binWork = path.join(binTmpDir, 'work');
+
+    fs.mkdirSync(binMain);
+    git(binMain, 'init');
+    git(binMain, 'config user.email "test@test.com"');
+    git(binMain, 'config user.name "Test"');
+    fs.writeFileSync(path.join(binMain, 'base.txt'), 'base\n');
+    git(binMain, 'add .');
+    git(binMain, 'commit -m "initial"');
+
+    execSync(`git clone "${binMain}" "${binWork}"`, { encoding: 'utf8' });
+    git(binWork, 'config user.email "test@test.com"');
+    git(binWork, 'config user.name "Test"');
+    fs.writeFileSync(path.join(binWork, 'video_colr_nclx_two_colr.mp4'), Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe, 0x00]));
+    git(binWork, 'add .');
+    git(binWork, 'commit -m "feat: add a video"');
+
+    const app = createApp({ worktreeName: 'work', worktreePath: binWork, mainRepoPath: binMain });
+    const port = await findAvailablePort(20800);
+    await new Promise((resolve) => { binServer = app.listen(port, '127.0.0.1', resolve); });
+
+    binPage = await browser.newPage();
+    await binPage.goto(`http://127.0.0.1:${port}`);
+    await binPage.waitForSelector('.file-nav-item', { state: 'visible' });
+  }, 30000);
+
+  afterAll(async () => {
+    await binPage?.close();
+    await new Promise((resolve) => binServer?.close(resolve));
+    fs.rmSync(binTmpDir, { recursive: true, force: true });
+  });
+
+  test('the binary file appears in the sidebar', async () => {
+    expect(await binPage.textContent('.file-nav-filename')).toBe('video_colr_nclx_two_colr.mp4');
+  });
+
+  test('the binary file appears in the diff with a Binary marker and a placeholder, no diff table', async () => {
+    expect(await binPage.textContent('.file-header .file-path')).toBe('video_colr_nclx_two_colr.mp4');
+    expect(await binPage.$('.file-binary-badge')).not.toBeNull();
+    expect(await binPage.$('.binary-file-note')).not.toBeNull();
+    expect(await binPage.$('.file-block .diff-table')).toBeNull(); // content not rendered
+  });
+});
+
 // ── Worktree switcher bar ──────────────────────────────────────────────────
 // A real git worktree (via `git worktree add`) means /api/worktrees returns
 // two entries, so initWorktreeBar shows #worktree-bar with one pill per entry.

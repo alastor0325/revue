@@ -242,6 +242,37 @@ describe('git integration', () => {
       fs.rmSync(md, { recursive: true, force: true });
     }
   });
+
+  test('a commit adding a binary file lists it (flagged binary, with path, no hunks)', () => {
+    const md = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-bin-'));
+    const main = path.join(md, 'main');
+    const work = path.join(md, 'work');
+    try {
+      fs.mkdirSync(main);
+      git(main, 'init');
+      git(main, 'config user.email "test@test.com"');
+      git(main, 'config user.name "Test"');
+      fs.writeFileSync(path.join(main, 'base.txt'), 'base\n');
+      git(main, 'add .');
+      git(main, 'commit -m "initial"');
+
+      execSync(`git clone "${main}" "${work}"`, { encoding: 'utf8' });
+      git(work, 'config user.email "test@test.com"');
+      git(work, 'config user.name "Test"');
+      fs.writeFileSync(path.join(work, 'video.mp4'), Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe, 0x00]));
+      git(work, 'add .');
+      git(work, 'commit -m "feat: add a video"');
+
+      const patches = getDiffPerCommit(work, main);
+      expect(patches).toHaveLength(1);
+      const file = patches[0].files.find((f) => (f.newPath || f.oldPath) === 'video.mp4');
+      expect(file).toBeTruthy();       // not dropped
+      expect(file.binary).toBe(true);
+      expect(file.hunks).toEqual([]);  // content not parsed
+    } finally {
+      fs.rmSync(md, { recursive: true, force: true });
+    }
+  });
 });
 
 // ── server integration (real Express, no git mocks) ───────────────────────

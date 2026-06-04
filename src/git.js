@@ -155,6 +155,14 @@ function parseDiff(diffText) {
         binary: false,
         hunks: [],
       };
+      // Seed paths from the `diff --git a/<old> b/<new>` line.  Entries without
+      // `---`/`+++` lines (binary files, pure renames) have no other source for
+      // their path; for text files the `---`/`+++` handlers refine it below.
+      const m = line.match(/^diff --git a\/(.+) b\/(.+)$/);
+      if (m) {
+        currentFile.oldPath = m[1];
+        currentFile.newPath = m[2];
+      }
       i++;
       continue;
     }
@@ -250,8 +258,9 @@ function parseDiff(diffText) {
     files.push(currentFile);
   }
 
-  // Filter out binary files
-  return files.filter((f) => !f.binary && (f.oldPath || f.newPath));
+  // Keep every file that has a path, including binary ones — the UI lists them
+  // (it just won't render their content). Only drop entries we couldn't name.
+  return files.filter((f) => f.oldPath || f.newPath);
 }
 
 /**
