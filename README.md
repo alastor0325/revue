@@ -27,16 +27,29 @@ You asked Claude to ship a 6‑patch series. The diffs look right at a glance �
 
 ## Quickstart
 
+Install globally straight from GitHub (no clone needed):
+
 ```bash
-git clone https://github.com/alastor0325/revue
-cd revue
-npm install
-npm link                          # makes `revue` available globally
+npm install -g github:alastor0325/revue
 revue init ~/path/to/your/repo    # tell it which repo is the default
 revue                             # opens the browser
 ```
 
 Requires **Node.js ≥ 18**.
+
+> The package name `revue` on the public npm registry is an unrelated project —
+> install from GitHub (above), not `npm install -g revue`.
+
+### Develop
+
+To hack on Revue itself, clone and link instead:
+
+```bash
+git clone https://github.com/alastor0325/revue
+cd revue
+npm install
+npm link                          # makes `revue` available globally
+```
 
 ---
 

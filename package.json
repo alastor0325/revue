@@ -2,6 +2,17 @@
   "name": "revue",
   "version": "0.1.0",
   "description": "Revue — a web UI for reviewing patches in git worktrees",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alastor0325/revue.git"
+  },
+  "homepage": "https://github.com/alastor0325/revue#readme",
+  "bugs": {
+    "url": "https://github.com/alastor0325/revue/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
   "bin": {
     "revue": "./bin/revue.js"
   },
