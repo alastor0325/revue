@@ -6,7 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const { spawn } = require('child_process');
 const { startServer } = require('../src/server');
-const { discoverWorktrees } = require('../src/git');
+const { discoverWorktrees, getMainWorktreeBasename } = require('../src/git');
 
 const CONFIG_DIR  = path.join(os.homedir(), '.revue');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
@@ -99,9 +99,13 @@ function readPid() {
 function buildEntries(mainRepoPath) {
   const entries = [];
   if (mainRepoPath && fs.existsSync(mainRepoPath)) {
+    // Strip the repo-name prefix so a --repo that points at a sibling worktree
+    // (e.g. firefox-2044124) is labelled "2044124", not "firefox-2044124".
+    const prefix = getMainWorktreeBasename(mainRepoPath) + '-';
+    const base = path.basename(mainRepoPath);
     entries.push({
       path: mainRepoPath,
-      worktreeName: path.basename(mainRepoPath),
+      worktreeName: base.startsWith(prefix) ? base.slice(prefix.length) : base,
       isMain: true,
     });
     try {

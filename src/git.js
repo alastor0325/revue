@@ -488,15 +488,17 @@ function getDiffPerCommit(worktreePath, mainRepoPath) {
  * starts with "<mainRepoBasename>-" (e.g. "firefox-bugABC" for a main repo
  * named "firefox"), that prefix is stripped to produce a shorter name.
  *
+ * The prefix is derived from the true main worktree, which `git worktree list
+ * --porcelain` always reports first — not from mainRepoPath, which may itself
+ * be a sibling worktree when Revue is pointed at one via --repo.
+ *
  * @param {string} output - stdout from `git worktree list --porcelain`
  * @param {string} mainRepoPath - path to exclude (the main repo itself)
  * @returns {Array<{ path: string, branch: string|null, worktreeName: string }>}
  */
 function parseWorktreeList(output, mainRepoPath) {
-  const mainBasename = path.basename(mainRepoPath.replace(/\\/g, '/'));
-  const prefix = mainBasename + '-';
   const blocks = output.trim().split(/\n\n+/);
-  return blocks
+  const parsed = blocks
     .map((block) => {
       const lines = block.split('\n');
       const pathLine = lines.find((l) => l.startsWith('worktree '));
@@ -508,7 +510,14 @@ function parseWorktreeList(output, mainRepoPath) {
         : null;
       return { path: wtPath, branch };
     })
-    .filter(Boolean)
+    .filter(Boolean);
+
+  const rootBasename = parsed.length > 0
+    ? path.basename(parsed[0].path.replace(/\\/g, '/'))
+    : '';
+  const prefix = rootBasename + '-';
+
+  return parsed
     .filter((wt) => normPath(wt.path) !== normPath(mainRepoPath))
     .map((wt) => {
       const basename = path.basename(wt.path);
@@ -536,6 +545,30 @@ function discoverWorktrees(mainRepoPath) {
 }
 
 /**
+ * Return the basename of the repository's true main worktree, regardless of
+ * which worktree `repoPath` points at. Used to strip the repo-name prefix from
+ * worktree display names (e.g. "firefox-2044124" -> "2044124") consistently,
+ * even when Revue is pointed at a sibling worktree via --repo.
+ *
+ * Falls back to the basename of repoPath if the common dir can't be resolved.
+ *
+ * @param {string} repoPath - any worktree of the repo
+ * @returns {string}
+ */
+function getMainWorktreeBasename(repoPath) {
+  try {
+    const commonDir = execSync(
+      `git -C "${repoPath}" rev-parse --path-format=absolute --git-common-dir`,
+      { encoding: 'utf8' }
+    ).trim();
+    // commonDir is the main repo's ".git"; its parent is the main worktree.
+    return path.basename(path.dirname(commonDir));
+  } catch {
+    return path.basename(repoPath.replace(/\\/g, '/'));
+  }
+}
+
+/**
  * Fetch a range of lines from a file at a specific commit.
  * Returns { lines: [{type, content, newLineNum, oldLineNum}], totalLines }.
  * Lines are 1-indexed; both start and end are inclusive.
@@ -555,4 +588,4 @@ function getFileLines(worktreePath, hash, filePath, start, end) {
   return { lines, totalLines };
 }
 
-module.exports = { getHeadHash, getCommits, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getMergeBase, parseDiff, parseCommitBody, parseWorktreeList, discoverWorktrees, getFileLines, getPatchLines, lcsCompare };
+module.exports = { getHeadHash, getCommits, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getMergeBase, parseDiff, parseCommitBody, parseWorktreeList, discoverWorktrees, getMainWorktreeBasename, getFileLines, getPatchLines, lcsCompare };

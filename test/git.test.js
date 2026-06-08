@@ -325,6 +325,21 @@ describe('parseWorktreeList', () => {
     expect(result[0].worktreeName).toBe('something');
   });
 
+  test('strips the true main-repo prefix even when pointed at a sibling worktree via --repo', () => {
+    // Revue launched with --repo /Users/user/firefox-2044124 (a worktree, not
+    // the main checkout). git still lists the true main worktree first, so the
+    // prefix must come from it, not from mainRepoPath.
+    const output = porcelainOutput([
+      { p: MAIN,                          branch: 'main' },
+      { p: '/Users/user/firefox-2044124', branch: 'bug-2044124' },
+      { p: '/Users/user/firefox-2045395', branch: 'bug-2045395' },
+    ]);
+    const result = parseWorktreeList(output, '/Users/user/firefox-2044124');
+    // The true main checkout keeps its bare basename; the numbered sibling has
+    // the repo prefix stripped (not the firefox-2044124 prefix).
+    expect(result.map(w => w.worktreeName)).toEqual(['firefox', '2045395']);
+  });
+
   test('filters main repo when git outputs forward slashes but mainRepoPath uses backslashes (Windows)', () => {
     // Simulate Windows: git outputs C:/Users/user/firefox but mainRepoPath uses backslashes
     const windowsMain = 'C:\\Users\\user\\firefox';
