@@ -1805,6 +1805,20 @@ describe('worktree switcher bar', () => {
     expect(await activePill.getAttribute('data-name')).toBe('feature');
   });
 
+  test('pills bar is drag-scrollable (grab cursor + grabbing while dragging)', async () => {
+    expect(await wtBarPage.$eval('#worktree-pills', (el) => getComputedStyle(el).cursor)).toBe('grab');
+    // Dispatch mousedown on the container itself (not a pill) so addDragScroll
+    // engages without triggering a worktree switch.
+    const grabbing = await wtBarPage.$eval('#worktree-pills', (el) => {
+      el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 5 }));
+      const cursor = el.style.cursor;
+      document.dispatchEvent(new MouseEvent('mouseup'));
+      return cursor;
+    });
+    expect(grabbing).toBe('grabbing');
+    expect(await wtBarPage.$eval('#worktree-pills', (el) => el.style.cursor)).toBe('');
+  });
+
   test('clicking an inactive pill fires POST /api/switch and makes it active', async () => {
     const switchReqPromise = wtBarPage.waitForRequest(
       (req) => req.url().includes('/api/switch') && req.method() === 'POST'

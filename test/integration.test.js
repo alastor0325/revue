@@ -1422,6 +1422,9 @@ describe('discoverWorktrees and worktree switching integration', () => {
     expect(body.current).toBe('feature');
     expect(body.worktrees.some((w) => w.isMain && w.worktreeName === 'repo')).toBe(true);
     expect(body.worktrees.some((w) => w.worktreeName === 'feature')).toBe(true);
+    // The drag-scrollable switcher bar only renders when more than one
+    // worktree exists, so the contract must return at least two entries.
+    expect(body.worktrees.length).toBeGreaterThanOrEqual(2);
   });
 
   test('POST /api/switch to main repo succeeds and updates the active worktree', async () => {

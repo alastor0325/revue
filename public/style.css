@@ -122,6 +122,8 @@ button { font-family: inherit; }
   padding: 8px 12px;
   overflow-x: auto;
   scrollbar-width: none;
+  cursor: grab;
+  user-select: none;
 }
 #worktree-pills::-webkit-scrollbar { display: none; }
 

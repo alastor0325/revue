@@ -145,6 +145,9 @@ async function initWorktreeBar() {
       `<button class="worktree-pill${wt.worktreeName === current ? ' active' : ''}" data-name="${escapeHtml(wt.worktreeName)}">${escapeHtml(wt.worktreeName)}</button>`
     ).join('');
 
+    // Drag to scroll the bar left/right, same as the patch-tabs bar.
+    addDragScroll(pills);
+
     // Scroll arrow logic
     function updateScrollBtns() {
       const atLeft = pills.scrollLeft <= 0;

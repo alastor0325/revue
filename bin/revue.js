@@ -278,6 +278,7 @@ Options:
   --port <port>                Use a specific port (default: 7777)
   --no-open                    Do not open the browser on start
   --help, -h                   Show this help message
+  --version, -v                Print the version and exit
 
 Examples:
   revue init ~/code/firefox
@@ -294,6 +295,11 @@ async function main() {
 
   if (flag === '--help' || flag === '-h') {
     printHelp();
+    return;
+  }
+
+  if (flag === '--version' || flag === '-v') {
+    console.log(require('../package.json').version);
     return;
   }
 

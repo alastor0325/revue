@@ -175,6 +175,23 @@ describe('#worktree-bar scroll buttons — shown/hidden based on overflow', () =
     expect(rendered).toHaveLength(WORKTREES.length);
     expect(rendered[1].classList.contains('active')).toBe(true); // bug-111 is current
   });
+
+  test('dragging the pills bar scrolls it horizontally', async () => {
+    const pills = document.getElementById('worktree-pills');
+    // jsdom ignores scrollLeft writes by default — back it with a real value.
+    let scroll = 0;
+    Object.defineProperty(pills, 'scrollLeft', {
+      configurable: true, get: () => scroll, set: (v) => { scroll = v; },
+    });
+
+    await initWorktreeBar();
+
+    pills.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 100, button: 0 }));
+    document.dispatchEvent(new MouseEvent('mousemove', { clientX: 40 }));
+    // addDragScroll: scrollLeft = startScroll(0) - (clientX(40) - startX(100)) = 60
+    expect(pills.scrollLeft).toBe(60);
+    document.dispatchEvent(new MouseEvent('mouseup'));
+  });
 });
 
 describe('#hash navigation — URL hash switches to matching worktree on load', () => {

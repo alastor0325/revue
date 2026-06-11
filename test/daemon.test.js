@@ -8,7 +8,7 @@ const path = require('path');
 // doesn't trigger real git or server code
 jest.mock('child_process', () => ({ spawn: jest.fn() }));
 jest.mock('../src/server', () => ({ startServer: jest.fn() }));
-jest.mock('../src/git', () => ({ discoverWorktrees: jest.fn() }));
+jest.mock('../src/git', () => ({ discoverWorktrees: jest.fn(), getMainWorktreeBasename: jest.fn() }));
 
 const { discoverWorktrees } = require('../src/git');
 const {
@@ -574,5 +574,29 @@ describe('printHelp', () => {
     expect(output).toMatch(/--repo/);
     expect(output).toMatch(/--port/);
     expect(output).toMatch(/--help/);
+    expect(output).toMatch(/--version/);
+  });
+});
+
+// child_process is mocked above (only `spawn`); use the real module to actually
+// run the binary in a subprocess and observe the CLI's --version behaviour.
+describe('CLI --version flag', () => {
+  const { execFileSync } = jest.requireActual('child_process');
+  const binPath = require.resolve('../bin/revue');
+  const pkgVersion = require('../package.json').version;
+
+  function run(arg) {
+    return execFileSync('node', [binPath, arg], { encoding: 'utf8' });
+  }
+
+  test('--version prints the package version and exits without starting a daemon', () => {
+    const out = run('--version');
+    expect(out.trim()).toBe(pkgVersion);
+    // Must NOT fall through to daemonize (which logs "running"/"started").
+    expect(out).not.toMatch(/running|started/i);
+  });
+
+  test('-v is an alias for --version', () => {
+    expect(run('-v').trim()).toBe(pkgVersion);
   });
 });

@@ -112,9 +112,10 @@ revue --port 8080                  # custom port (default: 7777, auto-bumps if b
 revue my-feature                   # open a specific worktree by name
 revue --repo ~/other/repo          # override default repo for this run
 revue --repo ~/other/repo feature  # override repo + worktree together
+revue --version                    # print the version and exit (alias: -v)
 ```
 
-`<worktree-name>` is the directory basename with the repo prefix stripped (`myrepo-feature` → `feature`). If omitted, the server starts on the first registered worktree; switch any time using the worktree tabs at the top.
+`<worktree-name>` is the directory basename with the repo prefix stripped (`myrepo-feature` → `feature`). If omitted, the server starts on the first registered worktree; switch any time using the worktree tabs at the top — drag the bar left/right to scroll through them when they overflow.
 
 ---
 
