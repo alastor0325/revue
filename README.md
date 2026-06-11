@@ -57,7 +57,7 @@ npm link                          # makes `revue` available globally
 
 | | |
 |---|---|
-| **Per-line comments** | Click any diff line or commit message to annotate. Drafts persist across reloads. |
+| **Per-line comments** | Click any diff line or commit message to annotate — including the surrounding context lines you reveal with the ↑/↓ expanders. Drafts persist across reloads. |
 | **Approve / Deny per patch** | Mark each commit. Denied patches always appear in the generated prompt — comment or no comment. |
 | **Approval persistence** | Approvals survive page reloads, rebases, and commit-message amends. *Same code = same approval.* Only actual code changes clear an approval. |
 | **Re-review alerts** | If you approved a patch and a later revision changes *its own* code, the approval is cleared and the patch is flagged (⚠ on its tab + a banner) so you re-review it. Unrelated changes elsewhere don't trigger it. |

@@ -892,6 +892,75 @@ describe('expand context — larger file', () => {
   });
 });
 
+// Expanded context lines must behave like any other diff line: clickable to
+// leave a comment, and that comment must persist as a display row.
+describe('expand context — commenting on expanded lines', () => {
+  let cmtServer, cmtPage, cmtTmpDir;
+
+  beforeAll(async () => {
+    cmtTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-ui-cmt-'));
+    const cmtMain = path.join(cmtTmpDir, 'main');
+    const cmtWork = path.join(cmtTmpDir, 'work');
+
+    fs.mkdirSync(cmtMain);
+    git(cmtMain, 'init');
+    git(cmtMain, 'config user.email "test@test.com"');
+    git(cmtMain, 'config user.name "Test"');
+
+    const lines = Array.from({ length: 50 }, (_, i) => `const L${i + 1} = ${i + 1};`);
+    fs.writeFileSync(path.join(cmtMain, 'large.js'), lines.join('\n') + '\n');
+    git(cmtMain, 'add .');
+    git(cmtMain, 'commit -m "initial"');
+
+    execSync(`git clone "${cmtMain}" "${cmtWork}"`, { encoding: 'utf8' });
+    git(cmtWork, 'config user.email "test@test.com"');
+    git(cmtWork, 'config user.name "Test"');
+
+    lines[24] = `const L25 = 'modified';`;
+    fs.writeFileSync(path.join(cmtWork, 'large.js'), lines.join('\n') + '\n');
+    git(cmtWork, 'add .');
+    git(cmtWork, 'commit -m "feat: modify line 25"');
+
+    const app = createApp({ worktreeName: 'work', worktreePath: cmtWork, mainRepoPath: cmtMain });
+    const port = await findAvailablePort(19550);
+    await new Promise((resolve) => { cmtServer = app.listen(port, '127.0.0.1', resolve); });
+
+    cmtPage = await browser.newPage();
+    await cmtPage.goto(`http://127.0.0.1:${port}`);
+    await cmtPage.waitForSelector('.patch-heading', { state: 'visible' });
+
+    // Expand the top gap so real context lines (1–20) are pulled in.
+    const responsePromise = cmtPage.waitForResponse((r) => r.url().includes('/api/filecontext'));
+    await (await cmtPage.$$('.expand-context-row'))[0].$eval('.btn-exp', (el) => el.click());
+    await responsePromise;
+    await cmtPage.waitForSelector('.line-context-expanded');
+  }, 30000);
+
+  afterAll(async () => {
+    await cmtPage?.close();
+    await new Promise((resolve) => cmtServer?.close(resolve));
+    fs.rmSync(cmtTmpDir, { recursive: true, force: true });
+  });
+
+  test('an expanded context line carries a line-key dataset', async () => {
+    const key = await cmtPage.$eval('.line-context-expanded', (el) => el.dataset.lineKey);
+    expect(key).toMatch(/^n\d+$/);
+  });
+
+  test('clicking an expanded context line opens a comment form', async () => {
+    await cmtPage.$eval('.line-context-expanded .ln-content', (el) => el.click());
+    await cmtPage.waitForSelector('.comment-form-row');
+    expect(await cmtPage.$('.comment-form-row')).not.toBeNull();
+  });
+
+  test('saving a comment on an expanded line shows the comment display', async () => {
+    await cmtPage.fill('.comment-form-row textarea', 'Comment on expanded context line.');
+    await cmtPage.click('.comment-form-row .btn-save');
+    await cmtPage.waitForSelector('.comment-display-row');
+    expect(await cmtPage.textContent('.comment-body')).toBe('Comment on expanded context line.');
+  });
+});
+
 // ── Sidebar file highlight ─────────────────────────────────────────────────
 // A single patch that touches two files gives a sidebar with two nav items.
 // Clicking the second item must immediately update the active highlight even

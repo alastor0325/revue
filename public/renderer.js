@@ -140,6 +140,30 @@ export function showCommentForm(tr, patchHash, filePath, line, key) {
   });
 }
 
+// Wire a diff line <tr> so clicking its content opens/toggles a comment form,
+// and restore any existing draft/saved-comment indicator. Shared by hunk lines
+// and dynamically-expanded context lines so a comment can be left on any line.
+export function wireLineComment(tr, patchHash, filePath, line) {
+  const key = lineKey(line);
+  tr.dataset.filePath = filePath;
+  tr.dataset.lineKey = key;
+  tr.querySelector('.ln-content').addEventListener('click', () => {
+    if (window.getSelection().toString().length > 0) return;
+    const next = tr.nextElementSibling;
+    if (next && next.classList.contains('comment-form-row')) {
+      const ctx = next._draftContext;
+      next.remove();
+      if (ctx) restoreLineDisplay(ctx.tr, ctx.patchHash, ctx.filePath, ctx.line, ctx.key);
+      return;
+    }
+    removeExistingForm();
+    showCommentForm(tr, patchHash, filePath, line, key);
+  });
+  // Draft wins so reloading the page never hides a pending edit behind the
+  // older saved-comment row.
+  restoreLineDisplay(tr, patchHash, filePath, line, key);
+}
+
 export function renderCommentDisplay(trLine, patchHash, filePath, line, key) {
   const next = trLine.nextElementSibling;
   if (next && next.classList.contains('comment-display-row') && next.dataset.lineKey === key) {
@@ -439,8 +463,11 @@ export function renderExpandRow(table, patchHash, filePath, hiddenStart, hiddenE
         row.innerHTML = `
           <td class="ln-old">${line.oldLineNum != null ? line.oldLineNum : ''}</td>
           <td class="ln-new">${line.newLineNum != null ? line.newLineNum : ''}</td>
-          <td class="ln-content">${escapeHtml(' ' + line.content)}</td>`;
+          <td class="ln-content"><span class="line-icon">＋</span>${escapeHtml(' ' + line.content)}</td>`;
         parent.insertBefore(row, anchor);
+        // Treat expanded context lines like any other line so comments can be
+        // left on them too.
+        wireLineComment(row, patchHash, filePath, line);
       }
 
       if (fromTop) curStart = fetchEnd + 1;
@@ -561,27 +588,8 @@ export function renderFile(fileData, patchHash) {
         <td class="ln-new">${escapeHtml(String(newNum))}</td>
         <td class="ln-content"><span class="line-icon">＋</span>${escapeHtml(prefix + line.content)}</td>`;
 
-      const key = lineKey(line);
-      tr.dataset.filePath = filePath;
-      tr.dataset.lineKey = key;
-      tr.querySelector('.ln-content').addEventListener('click', () => {
-        if (window.getSelection().toString().length > 0) return;
-        const next = tr.nextElementSibling;
-        if (next && next.classList.contains('comment-form-row')) {
-          const ctx = next._draftContext;
-          next.remove();
-          if (ctx) restoreLineDisplay(ctx.tr, ctx.patchHash, ctx.filePath, ctx.line, ctx.key);
-          return;
-        }
-        removeExistingForm();
-        showCommentForm(tr, patchHash, filePath, line, key);
-      });
-
       table.appendChild(tr);
-
-      // Initial render — draft wins so reloading the page never hides a
-      // pending edit behind the older saved-comment row.
-      restoreLineDisplay(tr, patchHash, filePath, line, key);
+      wireLineComment(tr, patchHash, filePath, line);
     }
 
     // After the last hunk: expand row for remaining lines to end of file

@@ -415,3 +415,71 @@ describe('renderFile — expand context button fetch ranges', () => {
     expect(parseInt(startMatch[1], 10)).toBeGreaterThan(20); // advanced past first batch
   });
 });
+
+describe('renderFile — comments on expanded context lines', () => {
+  async function flushAsync() {
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+
+  // File whose only hunk starts at line 21, leaving a gap [1, 20] above it so
+  // the top expand row pulls in real context lines when clicked.
+  function makeFileWithTopGap() {
+    const hunk = makeHunk({
+      header: '@@ -21,2 +21,2 @@',
+      oldStart: 21, oldCount: 2,
+      newStart: 21, newCount: 2,
+      lines: [
+        makeLine('context', 'a', 21, 21),
+        makeLine('added',   'b', null, 22),
+      ],
+    });
+    return renderFile(makeFile({ hunks: [hunk] }), 'hash1');
+  }
+
+  // The top gap [1,20] is exactly 20 lines (<= CHUNK), so its button is the
+  // single "↕ 20 Lines" (data-action="small") expander, not an "up" arrow.
+  function expandTopRow(el) {
+    return el.querySelector('tr.expand-context-row .btn-exp');
+  }
+
+  test('expanded context lines carry line-key/file-path datasets so they are commentable', async () => {
+    const fakeLines = Array.from({ length: 20 }, (_, i) => ({
+      oldLineNum: 1 + i, newLineNum: 1 + i, content: `line ${1 + i}`,
+    }));
+    global.fetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ lines: fakeLines, totalLines: 2000 }),
+    });
+
+    const el = makeFileWithTopGap();
+    expandTopRow(el).click();
+    await flushAsync();
+
+    const expanded = el.querySelector('tr.line-context-expanded');
+    expect(expanded).not.toBeNull();
+    expect(expanded.dataset.filePath).toBe('src/foo.cpp');
+    expect(expanded.dataset.lineKey).toBe('n1'); // newLineNum 1 → key "n1"
+  });
+
+  test('clicking an expanded context line opens a comment form', async () => {
+    const fakeLines = Array.from({ length: 20 }, (_, i) => ({
+      oldLineNum: 1 + i, newLineNum: 1 + i, content: `line ${1 + i}`,
+    }));
+    global.fetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ lines: fakeLines, totalLines: 2000 }),
+    });
+
+    const el = makeFileWithTopGap();
+    expandTopRow(el).click();
+    await flushAsync();
+
+    const expanded = el.querySelector('tr.line-context-expanded');
+    expanded.querySelector('.ln-content').click();
+
+    const form = el.querySelector('tr.comment-form-row');
+    expect(form).not.toBeNull();
+    expect(expanded.nextElementSibling).toBe(form);
+  });
+});

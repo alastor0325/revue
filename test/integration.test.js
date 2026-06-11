@@ -396,6 +396,10 @@ describe('server HTTP integration', () => {
     expect(status).toBe(200);
     expect(body.lines[0].content).toBe('function hello() {');
     expect(body.totalLines).toBe(3);
+    // The UI derives a per-line comment key from newLineNum, so expanded
+    // context lines must carry the line numbers for the requested range.
+    expect(body.lines[0].newLineNum).toBe(1);
+    expect(body.lines[1].newLineNum).toBe(2);
   });
 
   test('GET /api/filecontext with bad params returns 400', async () => {
