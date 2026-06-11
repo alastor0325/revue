@@ -1819,6 +1819,29 @@ describe('worktree switcher bar', () => {
     expect(await wtBarPage.$eval('#worktree-pills', (el) => el.style.cursor)).toBe('');
   });
 
+  test('drag-release over an inactive pill does NOT switch worktree', async () => {
+    const inactive = await wtBarPage.$('.worktree-pill:not(.active)');
+    const box = await inactive.boundingBox();
+    const cx = box.x + box.width / 2;
+    const cy = box.y + box.height / 2;
+
+    let switchFired = false;
+    const onReq = (req) => { if (req.url().includes('/api/switch')) switchFired = true; };
+    wtBarPage.on('request', onReq);
+
+    // Press on the pill and drag past the threshold (staying over it), then
+    // release — without the fix this release would be read as a click.
+    await wtBarPage.mouse.move(cx, cy);
+    await wtBarPage.mouse.down();
+    await wtBarPage.mouse.move(cx + 8, cy, { steps: 4 });
+    await wtBarPage.mouse.up();
+    await wtBarPage.waitForTimeout(300);
+
+    wtBarPage.off('request', onReq);
+    expect(switchFired).toBe(false);
+    expect(await wtBarPage.$eval('.worktree-pill.active', (el) => el.dataset.name)).toBe('feature');
+  });
+
   test('clicking an inactive pill fires POST /api/switch and makes it active', async () => {
     const switchReqPromise = wtBarPage.waitForRequest(
       (req) => req.url().includes('/api/switch') && req.method() === 'POST'

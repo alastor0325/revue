@@ -1387,13 +1387,18 @@ export function initPatchNodes() {
 
 // ── Drag-to-scroll (shared) ─────────────────────────────────────────────────
 export function addDragScroll(el) {
+  // Drags larger than this (px) count as scrolling, not a click — so the
+  // mouseup that ends a drag won't be read as selecting the tab under it.
+  const DRAG_THRESHOLD = 4;
   let dragging = false;
+  let moved = false;
   let startX = 0;
   let startScroll = 0;
 
   el.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
     dragging = true;
+    moved = false;
     startX = e.clientX;
     startScroll = el.scrollLeft;
     el.style.cursor = 'grabbing';
@@ -1402,6 +1407,7 @@ export function addDragScroll(el) {
 
   document.addEventListener('mousemove', (e) => {
     if (!dragging || !el.isConnected) { dragging = false; return; }
+    if (Math.abs(e.clientX - startX) > DRAG_THRESHOLD) moved = true;
     el.scrollLeft = startScroll - (e.clientX - startX);
   });
 
@@ -1409,6 +1415,13 @@ export function addDragScroll(el) {
     if (!dragging || !el.isConnected) { dragging = false; return; }
     dragging = false;
     el.style.cursor = '';
+    if (!moved) return;
+    // The browser fires a click after the drag's mouseup; swallow it so the
+    // tab under the cursor isn't selected. Remove the guard on the next tick
+    // in case no click follows (e.g. released off the element).
+    const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+    el.addEventListener('click', swallow, { capture: true });
+    setTimeout(() => el.removeEventListener('click', swallow, { capture: true }), 0);
   });
 }
 

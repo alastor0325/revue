@@ -264,4 +264,34 @@ describe('addDragScroll', () => {
     document.dispatchEvent(new MouseEvent('mousemove', { clientX: 50 }));
     expect(el.scrollLeft).toBe(prevScroll);
   });
+
+  test('swallows the click that ends a drag, but lets a plain click through', () => {
+    const el = document.createElement('div');
+    let scroll = 0;
+    Object.defineProperty(el, 'scrollLeft', { configurable: true, get: () => scroll, set: (v) => { scroll = v; } });
+    // Delegated click handler on the container, like #worktree-pills / #patch-tabs-bar:
+    // the real click target is a child element that bubbles up.
+    const child = document.createElement('button');
+    el.appendChild(child);
+    document.body.appendChild(el);
+    addDragScroll(el);
+
+    let clicks = 0;
+    el.addEventListener('click', () => { clicks++; });
+
+    // Plain click (no movement) → the delegated handler fires.
+    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 50 }));
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    child.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(clicks).toBe(1);
+
+    // Drag past the threshold → the click that follows is swallowed.
+    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 50 }));
+    document.dispatchEvent(new MouseEvent('mousemove', { clientX: 120 }));
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    child.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(clicks).toBe(1); // unchanged — the post-drag click was suppressed
+
+    el.remove();
+  });
 });
