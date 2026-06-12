@@ -103,7 +103,15 @@ function getMergeBase(worktreePath, mainRepoPath) {
     }
   }
 
-  return bestBase !== null ? bestBase : fallbackBase;
+  const base = bestBase !== null ? bestBase : fallbackBase;
+  if (base === null) {
+    // A ref resolved but no merge-base could be computed (e.g. a broken or
+    // empty worktree whose HEAD is not a valid commit). Throw rather than
+    // return null so getCommits treats it as "no patches" instead of running
+    // `git log null..HEAD`.
+    throw new Error('Cannot determine base commit: merge-base failed for all candidate tips');
+  }
+  return base;
 }
 
 /**

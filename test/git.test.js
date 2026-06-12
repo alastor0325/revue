@@ -564,6 +564,17 @@ describe('getMergeBase', () => {
     expect(() => getMergeBase(REPO, REPO)).toThrow('Cannot determine base commit');
   });
 
+  test('throws when a ref resolves but merge-base fails (broken/empty worktree)', () => {
+    // origin/main resolves, but the worktree HEAD is not a valid commit, so
+    // merge-base throws for every tip. getMergeBase must throw (not return null)
+    // so getCommits returns [] instead of running `git log null..HEAD`.
+    execSync.mockImplementation(fakeGit({
+      refs: { 'origin/main': 'origin-main-hash' },
+      mergeBases: {}, // merge-base fails for every tip
+    }, MAIN_REPO));
+    expect(() => getMergeBase(WORKTREE, MAIN_REPO)).toThrow('Cannot determine base commit');
+  });
+
   test('finds patches when main repo HEAD equals worktree HEAD (jj detached scenario)', () => {
     // Simulate the jj scenario: main repo detached at same commit as worktree,
     // but origin/main correctly points to the integration branch.
