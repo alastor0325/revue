@@ -23,42 +23,87 @@ function getHeadHash(worktreePath) {
 }
 
 /**
- * Find the merge-base between the worktree HEAD and the upstream main branch.
+ * Find the merge-base between the worktree HEAD and the branch it forked from.
  *
- * Tries remote refs in order: origin/main, origin/master, origin/HEAD.
- * Falls back to the main repo's HEAD only when it is a different path from the
+ * Resolves several candidate "main" tips and, for each, computes the merge-base
+ * with HEAD. The chosen base is the one *nearest* to HEAD (fewest commits in
+ * base..HEAD) that still yields at least one commit — i.e. the integration
+ * point this worktree actually diverged from.
+ *
+ * The branch's own tracking upstream (@{u}) is a candidate so that an esr/beta
+ * worktree forked from e.g. origin/esr115 is compared against that branch, not
+ * origin/main: origin/main resolves to mozilla-central, putting the merge-base
+ * tens of thousands of commits back and producing a huge, wrong patch list
+ * (which also overflows git's output buffer → spawnSync ENOBUFS).
+ *
+ * A candidate that yields zero commits (e.g. a branch whose upstream is its own
+ * fully-pushed copy) is skipped so it cannot mask the real base; such a base is
+ * kept only as a last resort when no candidate yields any commits.
+ *
+ * The main repo's HEAD is a candidate only when it is a different path from the
  * worktree — using the same path would yield merge-base HEAD HEAD = HEAD,
  * producing zero commits (the bug that manifests with --repo on a standalone repo).
  */
 function getMergeBase(worktreePath, mainRepoPath) {
-  const candidates = [
+  const tipCommands = [
+    `git -C "${worktreePath}" rev-parse @{u}`,
     `git -C "${worktreePath}" rev-parse origin/main`,
     `git -C "${worktreePath}" rev-parse origin/master`,
     `git -C "${worktreePath}" rev-parse origin/HEAD`,
   ];
 
   if (normPath(mainRepoPath) !== normPath(worktreePath)) {
-    candidates.push(`git -C "${mainRepoPath}" rev-parse HEAD`);
+    tipCommands.push(`git -C "${mainRepoPath}" rev-parse HEAD`);
   }
 
-  let mainTip;
-  for (const cmd of candidates) {
+  const tips = [];
+  for (const cmd of tipCommands) {
     try {
-      mainTip = execSync(cmd, { encoding: 'utf8' }).trim();
-      break;
+      // Ignore stderr: a missing ref is expected (we probe every candidate),
+      // and git's "unknown revision" noise would otherwise pollute the log.
+      const tip = execSync(cmd, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      if (tip && !tips.includes(tip)) tips.push(tip);
     } catch {
-      // continue
+      // ref doesn't exist in this repo — skip it
     }
   }
 
-  if (!mainTip) {
-    throw new Error('Cannot determine base commit: no origin/main, origin/master, or origin/HEAD found');
+  if (tips.length === 0) {
+    throw new Error('Cannot determine base commit: no upstream, origin/main, origin/master, or origin/HEAD found');
   }
 
-  return execSync(
-    `git -C "${worktreePath}" merge-base HEAD ${mainTip}`,
-    { encoding: 'utf8' }
-  ).trim();
+  let bestBase = null; // nearest base that yields at least one commit
+  let bestCount = Infinity;
+  let fallbackBase = null; // any valid base, used only if every candidate is empty
+  for (const tip of tips) {
+    let base;
+    try {
+      base = execSync(
+        `git -C "${worktreePath}" merge-base HEAD ${tip}`,
+        { encoding: 'utf8' }
+      ).trim();
+    } catch {
+      continue;
+    }
+    if (!base) continue;
+    if (fallbackBase === null) fallbackBase = base;
+
+    let count;
+    try {
+      count = parseInt(execSync(
+        `git -C "${worktreePath}" rev-list --count ${base}..HEAD`,
+        { encoding: 'utf8' }
+      ).trim(), 10);
+    } catch {
+      continue;
+    }
+    if (count > 0 && count < bestCount) {
+      bestBase = base;
+      bestCount = count;
+    }
+  }
+
+  return bestBase !== null ? bestBase : fallbackBase;
 }
 
 /**
@@ -69,9 +114,12 @@ function getMergeBase(worktreePath, mainRepoPath) {
 function getCommitsFromBase(worktreePath, base) {
   // Unit-separator (\x1f) delimited fields so subjects with spaces parse cleanly.
   // %h matches the abbreviated hash the rest of the app keys on.
+  // maxBuffer guards against a large range overflowing the 1 MB default: a wide
+  // base..HEAD (e.g. a misresolved esr base) produces megabytes of log output,
+  // which would otherwise throw spawnSync ENOBUFS instead of returning commits.
   const output = execSync(
     `git -C "${worktreePath}" log --reverse --format="%h%x1f%cI%x1f%s" ${base}..HEAD`,
-    { encoding: 'utf8' }
+    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }
   ).trim();
 
   if (!output) return [];

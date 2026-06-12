@@ -13,6 +13,39 @@ function makeDiff(files) {
   return files.join('\n');
 }
 
+// Declarative execSync mock for the commands getMergeBase / getCommits run.
+//   refs:       { '@{u}': 'sha', 'origin/main': 'sha', ... } keyed by ref token;
+//               an omitted ref makes that rev-parse throw (unknown revision).
+//   mainHead:   resolves `git -C <mainRepoPath> rev-parse HEAD` (the main-repo
+//               fallback candidate, distinct from any ref of the same name).
+//   mergeBases: { '<tip-sha>': '<base-sha>' } for `merge-base HEAD <tip>`.
+//   counts:     { '<base-sha>': <n> } commits in base..HEAD.
+//   log:        string returned by `git log ... base..HEAD`.
+// Any command not covered throws, mirroring git failing on an unknown ref.
+function fakeGit({ refs = {}, mainHead, mergeBases = {}, counts = {}, log = '' }, mainRepoPath) {
+  return (cmd) => {
+    let m;
+    if ((m = cmd.match(/^git -C "([^"]+)" rev-parse (.+)$/))) {
+      const [, dir, ref] = m;
+      if (ref === 'HEAD' && dir === mainRepoPath && mainHead !== undefined) {
+        return mainHead + '\n';
+      }
+      if (refs[ref] === undefined) throw new Error(`unknown revision: ${ref}`);
+      return refs[ref] + '\n';
+    }
+    if ((m = cmd.match(/merge-base HEAD (\S+)/))) {
+      if (mergeBases[m[1]] === undefined) throw new Error('merge-base failed');
+      return mergeBases[m[1]] + '\n';
+    }
+    if ((m = cmd.match(/rev-list --count (\S+)\.\.HEAD/))) {
+      if (counts[m[1]] === undefined) throw new Error('rev-list failed');
+      return String(counts[m[1]]) + '\n';
+    }
+    if (/ log --reverse /.test(cmd)) return log;
+    throw new Error(`unexpected command: ${cmd}`);
+  };
+}
+
 // ── parseDiff ─────────────────────────────────────────────────────────────
 
 describe('parseDiff', () => {
@@ -378,15 +411,14 @@ describe('getCommits', () => {
   const US = '\x1f';
 
   test('parses hash, committer date, and subject (with spaces) from each line', () => {
-    // getMergeBase needs 2 calls (rev-parse origin/main, then merge-base HEAD <tip>)
-    // getCommits then needs 1 more (git log)
-    execSync
-      .mockReturnValueOnce('deadbeef\n')  // rev-parse origin/main → mainTip
-      .mockReturnValueOnce('baseabc\n')   // merge-base HEAD deadbeef → base
-      .mockReturnValueOnce(
+    execSync.mockImplementation(fakeGit({
+      refs: { 'origin/main': 'deadbeef' },
+      mergeBases: { deadbeef: 'baseabc' },
+      counts: { baseabc: 2 },
+      log:
         `abc1234${US}2026-06-01T10:00:00+00:00${US}feat: do a thing\n` +
-        `def5678${US}2026-06-02T11:30:00+00:00${US}chore: tidy up\n`
-      );
+        `def5678${US}2026-06-02T11:30:00+00:00${US}chore: tidy up\n`,
+    }, '/fake/main'));
     const result = getCommits('/fake/worktree', '/fake/main');
     expect(result).toEqual([
       { hash: 'abc1234', date: '2026-06-01T10:00:00+00:00', message: 'feat: do a thing' },
@@ -394,27 +426,30 @@ describe('getCommits', () => {
     ]);
   });
 
-  test('requests the committer date via the %cI format field', () => {
-    execSync
-      .mockReturnValueOnce('deadbeef\n')
-      .mockReturnValueOnce('baseabc\n')
-      .mockReturnValueOnce('');
+  test('requests the committer date via %cI and a raised maxBuffer', () => {
+    execSync.mockImplementation(fakeGit({
+      refs: { 'origin/main': 'deadbeef' },
+      mergeBases: { deadbeef: 'baseabc' },
+      counts: { baseabc: 1 },
+      log: '',
+    }, '/fake/main'));
     getCommits('/fake/worktree', '/fake/main');
     expect(execSync).toHaveBeenLastCalledWith(
       'git -C "/fake/worktree" log --reverse --format="%h%x1f%cI%x1f%s" baseabc..HEAD',
-      { encoding: 'utf8' }
+      { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }
     );
   });
 
   test('silently skips malformed lines that have no hash field', () => {
-    execSync
-      .mockReturnValueOnce('deadbeef\n')
-      .mockReturnValueOnce('baseabc\n')
-      .mockReturnValueOnce(
+    execSync.mockImplementation(fakeGit({
+      refs: { 'origin/main': 'deadbeef' },
+      mergeBases: { deadbeef: 'baseabc' },
+      counts: { baseabc: 2 },
+      log:
         `abc1234${US}2026-06-01T10:00:00+00:00${US}first\n` +
         `\n` + // blank/malformed line → no hash → skipped
-        `def5678${US}2026-06-02T10:00:00+00:00${US}second\n`
-      );
+        `def5678${US}2026-06-02T10:00:00+00:00${US}second\n`,
+    }, '/fake/main'));
     const result = getCommits('/fake/worktree', '/fake/main');
     expect(result.map((c) => c.hash)).toEqual(['abc1234', 'def5678']);
   });
@@ -438,73 +473,94 @@ describe('getMergeBase', () => {
 
   beforeEach(() => execSync.mockReset());
 
-  test('uses origin/main when available', () => {
-    execSync
-      .mockReturnValueOnce('origin-main-hash\n') // rev-parse origin/main
-      .mockReturnValueOnce('merge-base-hash\n');  // merge-base HEAD origin/main
+  test('uses origin/main when there is no upstream', () => {
+    execSync.mockImplementation(fakeGit({
+      refs: { 'origin/main': 'origin-main-hash' },
+      mergeBases: { 'origin-main-hash': 'merge-base-hash' },
+      counts: { 'merge-base-hash': 3 },
+    }, MAIN_REPO));
     const result = getMergeBase(WORKTREE, MAIN_REPO);
     expect(result).toBe('merge-base-hash');
-    expect(execSync).toHaveBeenNthCalledWith(
-      1,
-      `git -C "${WORKTREE}" rev-parse origin/main`,
-      { encoding: 'utf8' }
-    );
-    expect(execSync).toHaveBeenNthCalledWith(
-      2,
+    expect(execSync).toHaveBeenCalledWith(
       `git -C "${WORKTREE}" merge-base HEAD origin-main-hash`,
       { encoding: 'utf8' }
     );
   });
 
-  test('falls back to origin/master when origin/main is not available', () => {
-    execSync
-      .mockImplementationOnce(() => { throw new Error('unknown revision'); }) // origin/main fails
-      .mockReturnValueOnce('origin-master-hash\n')                            // origin/master succeeds
-      .mockReturnValueOnce('merge-base-hash\n');                              // merge-base
-    const result = getMergeBase(WORKTREE, MAIN_REPO);
-    expect(result).toBe('merge-base-hash');
-    expect(execSync).toHaveBeenNthCalledWith(
-      2,
-      `git -C "${WORKTREE}" rev-parse origin/master`,
-      { encoding: 'utf8' }
-    );
+  test('prefers the branch upstream over origin/main when it gives a nearer base', () => {
+    // The esr scenario: @{u} (origin/esr115) forks one commit back, while
+    // origin/main (mozilla-central) forks tens of thousands of commits back.
+    execSync.mockImplementation(fakeGit({
+      refs: { '@{u}': 'esr-tip', 'origin/main': 'central-tip' },
+      mergeBases: { 'esr-tip': 'esr-base', 'central-tip': 'ancient-base' },
+      counts: { 'esr-base': 1, 'ancient-base': 65887 },
+    }, MAIN_REPO));
+    expect(getMergeBase(WORKTREE, MAIN_REPO)).toBe('esr-base');
   });
 
-  test('falls back to main repo HEAD when origin/main and origin/master are not available', () => {
-    execSync
-      .mockImplementationOnce(() => { throw new Error('unknown revision'); }) // origin/main fails
-      .mockImplementationOnce(() => { throw new Error('unknown revision'); }) // origin/master fails
-      .mockImplementationOnce(() => { throw new Error('unknown revision'); }) // origin/HEAD fails
-      .mockReturnValueOnce('main-repo-head\n')                                // mainRepoPath HEAD
-      .mockReturnValueOnce('merge-base-hash\n');                              // merge-base
+  test('skips a zero-commit upstream and falls back to origin/main', () => {
+    // A branch tracking its own fully-pushed copy: merge-base with @{u} is HEAD
+    // (zero commits), so it must not mask the real base from origin/main.
+    execSync.mockImplementation(fakeGit({
+      refs: { '@{u}': 'pushed-tip', 'origin/main': 'main-tip' },
+      mergeBases: { 'pushed-tip': 'head-sha', 'main-tip': 'real-base' },
+      counts: { 'head-sha': 0, 'real-base': 4 },
+    }, MAIN_REPO));
+    expect(getMergeBase(WORKTREE, MAIN_REPO)).toBe('real-base');
+  });
+
+  test('returns a zero-commit base only when every candidate is empty', () => {
+    execSync.mockImplementation(fakeGit({
+      refs: { 'origin/main': 'main-tip' },
+      mergeBases: { 'main-tip': 'head-sha' },
+      counts: { 'head-sha': 0 },
+    }, MAIN_REPO));
+    expect(getMergeBase(WORKTREE, MAIN_REPO)).toBe('head-sha');
+  });
+
+  test('falls back to origin/master when origin/main is not available', () => {
+    execSync.mockImplementation(fakeGit({
+      refs: { 'origin/master': 'origin-master-hash' },
+      mergeBases: { 'origin-master-hash': 'merge-base-hash' },
+      counts: { 'merge-base-hash': 2 },
+    }, MAIN_REPO));
+    expect(getMergeBase(WORKTREE, MAIN_REPO)).toBe('merge-base-hash');
+  });
+
+  test('falls back to main repo HEAD when no remote refs are available', () => {
+    execSync.mockImplementation(fakeGit({
+      refs: {},
+      mainHead: 'main-repo-head',
+      mergeBases: { 'main-repo-head': 'merge-base-hash' },
+      counts: { 'merge-base-hash': 1 },
+    }, MAIN_REPO));
     const result = getMergeBase(WORKTREE, MAIN_REPO);
     expect(result).toBe('merge-base-hash');
-    expect(execSync).toHaveBeenNthCalledWith(
-      4,
+    expect(execSync).toHaveBeenCalledWith(
       `git -C "${MAIN_REPO}" rev-parse HEAD`,
-      { encoding: 'utf8' }
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
     );
   });
 
   test('uses origin/master for standalone repo (worktreePath === mainRepoPath)', () => {
     const REPO = '/fake/mp4parse';
-    execSync
-      .mockImplementationOnce(() => { throw new Error('unknown revision'); }) // origin/main fails
-      .mockReturnValueOnce('origin-master-hash\n')                            // origin/master succeeds
-      .mockReturnValueOnce('merge-base-hash\n');                              // merge-base
-    const result = getMergeBase(REPO, REPO);
-    expect(result).toBe('merge-base-hash');
+    execSync.mockImplementation(fakeGit({
+      refs: { 'origin/master': 'origin-master-hash' },
+      mergeBases: { 'origin-master-hash': 'merge-base-hash' },
+      counts: { 'merge-base-hash': 2 },
+    }, REPO));
+    expect(getMergeBase(REPO, REPO)).toBe('merge-base-hash');
     // mainRepoPath HEAD must NOT be tried when paths are equal
-    expect(execSync).toHaveBeenCalledTimes(3);
+    expect(execSync).not.toHaveBeenCalledWith(
+      `git -C "${REPO}" rev-parse HEAD`,
+      expect.anything()
+    );
   });
 
   test('throws when no base commit can be determined for standalone repo', () => {
     const REPO = '/fake/mp4parse';
-    execSync
-      .mockImplementationOnce(() => { throw new Error('unknown revision'); }) // origin/main
-      .mockImplementationOnce(() => { throw new Error('unknown revision'); }) // origin/master
-      .mockImplementationOnce(() => { throw new Error('unknown revision'); }) // origin/HEAD
-      // mainRepoPath HEAD is NOT tried because paths are equal
+    // No upstream, no origin refs; mainRepoPath HEAD is NOT tried (paths equal).
+    execSync.mockImplementation(fakeGit({ refs: {} }, REPO));
     expect(() => getMergeBase(REPO, REPO)).toThrow('Cannot determine base commit');
   });
 
@@ -515,9 +571,11 @@ describe('getMergeBase', () => {
     const WORKTREE_HEAD = 'eef8f9698f21';
     const MERGE_BASE = ORIGIN_MAIN; // worktree diverged from origin/main
 
-    execSync
-      .mockReturnValueOnce(`${ORIGIN_MAIN}\n`)   // rev-parse origin/main
-      .mockReturnValueOnce(`${MERGE_BASE}\n`);    // merge-base HEAD origin/main
+    execSync.mockImplementation(fakeGit({
+      refs: { 'origin/main': ORIGIN_MAIN },
+      mergeBases: { [ORIGIN_MAIN]: MERGE_BASE },
+      counts: { [MERGE_BASE]: 5 },
+    }, MAIN_REPO));
 
     const result = getMergeBase(WORKTREE, MAIN_REPO);
     expect(result).toBe(MERGE_BASE);

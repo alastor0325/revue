@@ -1522,6 +1522,69 @@ describe('getMergeBase — fallback without origin/main', () => {
   });
 });
 
+// ── getMergeBase — prefers the branch upstream over origin/main ────────────
+// The esr scenario: a worktree forked from an integration branch (origin/esr)
+// that itself diverged from origin/main long ago. Comparing against origin/main
+// would include the whole esr divergence (and, for a real esr, tens of
+// thousands of commits → spawnSync ENOBUFS). The branch's tracking upstream
+// gives the correct, nearby base so only the worktree's own patches show.
+
+describe('getMergeBase — prefers the branch upstream', () => {
+  let upTmpDir, upOrigin, upWork;
+
+  beforeAll(() => {
+    upTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-up-'));
+    upOrigin = path.join(upTmpDir, 'origin');
+    upWork = path.join(upTmpDir, 'work');
+
+    fs.mkdirSync(upOrigin);
+    git(upOrigin, 'init -b main');
+    git(upOrigin, 'config user.email "test@test.com"');
+    git(upOrigin, 'config user.name "Test"');
+    fs.writeFileSync(path.join(upOrigin, 'base.txt'), 'base\n');
+    git(upOrigin, 'add .');
+    git(upOrigin, 'commit -m "A: shared root"');
+
+    // esr forks at the shared root and adds its own commit.
+    git(upOrigin, 'checkout -b esr');
+    fs.writeFileSync(path.join(upOrigin, 'esr.txt'), 'esr\n');
+    git(upOrigin, 'add .');
+    git(upOrigin, 'commit -m "E1: esr-only commit"');
+
+    // main moves far ahead of the fork point.
+    git(upOrigin, 'checkout main');
+    for (const n of [1, 2, 3]) {
+      fs.writeFileSync(path.join(upOrigin, `m${n}.txt`), `m${n}\n`);
+      git(upOrigin, 'add .');
+      git(upOrigin, `commit -m "M${n}: main advances"`);
+    }
+
+    execSync(`git clone "${upOrigin}" "${upWork}"`, { encoding: 'utf8' });
+    git(upWork, 'config user.email "test@test.com"');
+    git(upWork, 'config user.name "Test"');
+    // Branch off the esr integration branch, tracking it as upstream.
+    git(upWork, 'checkout -b patch --track origin/esr');
+    fs.writeFileSync(path.join(upWork, 'patch.txt'), 'patch\n');
+    git(upWork, 'add .');
+    git(upWork, 'commit -m "P: the patch under review"');
+  });
+
+  afterAll(() => {
+    fs.rmSync(upTmpDir, { recursive: true, force: true });
+  });
+
+  test('merge-base is the esr tip, not the older origin/main fork point', () => {
+    const base = getMergeBase(upWork, upWork);
+    const esrTip = git(upWork, 'rev-parse origin/esr');
+    expect(base).toBe(esrTip);
+  });
+
+  test('getCommits returns only the worktree patch, not the esr divergence', () => {
+    const commits = getCommits(upWork, upWork);
+    expect(commits.map((c) => c.message)).toEqual(['P: the patch under review']);
+  });
+});
+
 // ── Keyboard navigation data contract ──────────────────────────────────────
 // The arrow-key shortcuts rely on the shape of /api/diff: Left/Right switch
 // between patches (so there must be more than one patch entry) and Up/Down
