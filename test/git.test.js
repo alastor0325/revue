@@ -5,6 +5,9 @@ jest.mock('child_process', () => ({
 }));
 
 const { execSync } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { getHeadHash, getCommits, parseDiff, parseWorktreeList, getDiffForCommit, parseCommitBody, getMergeBase, getDiffPerCommit, getPatchLines, lcsCompare } = require('../src/git');
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -388,19 +391,89 @@ describe('parseWorktreeList', () => {
 
 // ── getHeadHash ────────────────────────────────────────────────────────────
 
+// getHeadHash reads git's on-disk files directly so the polled /api/headhash
+// never spawns git (which can stall behind a concurrent repack). These tests
+// build real .git layouts on disk and assert resolution happens without any
+// execSync call — execSync is mocked to throw, so any spawn would fail the test.
 describe('getHeadHash', () => {
-  test('returns null when repo has no commits (rev-parse HEAD fails)', () => {
-    execSync.mockImplementation(() => { throw new Error('fatal: ambiguous argument HEAD'); });
-    expect(getHeadHash('/fake/empty-repo')).toBeNull();
+  let tmp;
+  beforeEach(() => {
+    execSync.mockImplementation(() => { throw new Error('git must not be spawned'); });
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-headhash-'));
+  });
+  afterEach(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
+
+  // Build a `.git` directory with a HEAD symref and either a loose or packed ref.
+  function makeRepo({ ref = 'refs/heads/main', loose, packed, head } = {}) {
+    const gitDir = path.join(tmp, '.git');
+    fs.mkdirSync(gitDir, { recursive: true });
+    fs.writeFileSync(path.join(gitDir, 'HEAD'), head !== undefined ? head : `ref: ${ref}\n`);
+    if (loose) {
+      fs.mkdirSync(path.join(gitDir, path.dirname(ref)), { recursive: true });
+      fs.writeFileSync(path.join(gitDir, ref), loose + '\n');
+    }
+    if (packed) fs.writeFileSync(path.join(gitDir, 'packed-refs'), packed);
+    return gitDir;
+  }
+
+  test('returns null when there is no .git', () => {
+    expect(getHeadHash(tmp)).toBeNull();
+    expect(execSync).not.toHaveBeenCalled();
   });
 
-  test('returns trimmed HEAD hash and calls correct git command', () => {
-    execSync.mockReturnValue('abc1234def5678\n');
-    expect(getHeadHash('/path/to/repo')).toBe('abc1234def5678');
-    expect(execSync).toHaveBeenCalledWith(
-      'git -C "/path/to/repo" rev-parse HEAD',
-      { encoding: 'utf8' }
-    );
+  test('resolves a symref HEAD from a loose ref without spawning git', () => {
+    makeRepo({ ref: 'refs/heads/main', loose: 'abc1234def5678' });
+    expect(getHeadHash(tmp)).toBe('abc1234def5678');
+    expect(execSync).not.toHaveBeenCalled();
+  });
+
+  test('resolves a symref HEAD from packed-refs', () => {
+    makeRepo({
+      ref: 'refs/heads/feature',
+      packed: '# pack-refs with: peeled fully-peeled sorted\n' +
+              'deadbeefcafe1234 refs/heads/feature\n' +
+              '00000000feedface refs/tags/v1\n^aaaa1111bbbb2222\n',
+    });
+    expect(getHeadHash(tmp)).toBe('deadbeefcafe1234');
+    expect(execSync).not.toHaveBeenCalled();
+  });
+
+  test('returns a detached HEAD hash directly', () => {
+    makeRepo({ head: '7600708b5386b643a775a4127d8fbb8b797edaa8\n' });
+    expect(getHeadHash(tmp)).toBe('7600708b5386b643a775a4127d8fbb8b797edaa8');
+    expect(execSync).not.toHaveBeenCalled();
+  });
+
+  test('returns null for an unborn branch (symref with no ref)', () => {
+    makeRepo({ ref: 'refs/heads/main' }); // HEAD points at a branch that doesn't exist yet
+    expect(getHeadHash(tmp)).toBeNull();
+    expect(execSync).not.toHaveBeenCalled();
+  });
+
+  test('resolves through a linked-worktree .git file and commondir', () => {
+    // Common repo holds the branch ref; the linked worktree's gitdir has its own
+    // HEAD and a commondir pointing back at the common .git.
+    const commonGit = path.join(tmp, 'main', '.git');
+    fs.mkdirSync(path.join(commonGit, 'refs', 'heads'), { recursive: true });
+    fs.writeFileSync(path.join(commonGit, 'refs', 'heads', 'wt'), 'fe0123456789abcd\n');
+
+    const wtGitDir = path.join(commonGit, 'worktrees', 'wt');
+    fs.mkdirSync(wtGitDir, { recursive: true });
+    fs.writeFileSync(path.join(wtGitDir, 'HEAD'), 'ref: refs/heads/wt\n');
+    fs.writeFileSync(path.join(wtGitDir, 'commondir'), '../..\n');
+
+    const wtPath = path.join(tmp, 'wt');
+    fs.mkdirSync(wtPath, { recursive: true });
+    fs.writeFileSync(path.join(wtPath, '.git'), `gitdir: ${wtGitDir}\n`);
+
+    expect(getHeadHash(wtPath)).toBe('fe0123456789abcd');
+    expect(execSync).not.toHaveBeenCalled();
+  });
+
+  test('does not read outside refs/ for a malformed HEAD symref', () => {
+    makeRepo({ head: 'ref: ../../../etc/hostname\n' });
+    expect(getHeadHash(tmp)).toBeNull();
+    expect(execSync).not.toHaveBeenCalled();
   });
 });
 

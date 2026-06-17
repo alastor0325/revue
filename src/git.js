@@ -9,14 +9,101 @@ function normPath(p) {
 }
 
 /**
+ * Resolve a worktree's git directory without spawning git. The main worktree
+ * has a `.git` directory; a linked worktree has a `.git` file whose contents are
+ * `gitdir: <path>`. Returns null if neither is present.
+ */
+function resolveGitDir(worktreePath) {
+  const dotGit = path.join(worktreePath, '.git');
+  let stat;
+  try { stat = fs.statSync(dotGit); } catch { return null; }
+  if (stat.isDirectory()) return dotGit;
+  const m = fs.readFileSync(dotGit, 'utf8').match(/^gitdir:\s*(.+)$/m);
+  return m ? m[1].trim() : null;
+}
+
+/**
+ * Resolve the common git dir shared by all worktrees. A linked worktree's gitdir
+ * holds a `commondir` file pointing at it (relative to the gitdir, or absolute);
+ * the main gitdir is its own common dir.
+ */
+function resolveCommonDir(gitDir) {
+  try {
+    const raw = fs.readFileSync(path.join(gitDir, 'commondir'), 'utf8').trim();
+    return path.isAbsolute(raw) ? raw : path.resolve(gitDir, raw);
+  } catch {
+    return gitDir;
+  }
+}
+
+/**
+ * Resolve a ref name (e.g. refs/heads/x) to a commit hash by reading loose ref
+ * files then packed-refs, mirroring git's own lookup order. Branch refs live in
+ * the common dir; a per-worktree ref would live in the worktree gitdir, so both
+ * are tried. The `refs/` prefix is required to keep the ref from escaping into a
+ * path-traversal read. Returns null if the ref cannot be resolved.
+ */
+function resolveRef(gitDir, ref) {
+  if (!ref.startsWith('refs/')) return null;
+  const commonDir = resolveCommonDir(gitDir);
+  // A Set so a main worktree (commonDir === gitDir) doesn't read the same loose
+  // ref path twice before falling through to packed-refs.
+  for (const base of new Set([commonDir, gitDir])) {
+    try {
+      const loose = fs.readFileSync(path.join(base, ref), 'utf8').trim();
+      if (loose) return loose;
+    } catch { /* not a loose ref under this base */ }
+  }
+  // packed-refs lines are "<sha> <refname>"; comments start with '#' and peeled
+  // tag lines with '^' — neither names a ref, so both are skipped.
+  try {
+    const packed = fs.readFileSync(path.join(commonDir, 'packed-refs'), 'utf8');
+    for (const line of packed.split('\n')) {
+      if (!line || line[0] === '#' || line[0] === '^') continue;
+      const sp = line.indexOf(' ');
+      if (sp > 0 && line.slice(sp + 1).trim() === ref) return line.slice(0, sp);
+    }
+  } catch { /* no packed-refs file */ }
+  return null;
+}
+
+/**
  * Return the current HEAD commit hash of the given repo/worktree.
- * Returns null if the repo has no commits yet.
+ * Returns null if the repo has no commits yet, or HEAD points at a branch that
+ * doesn't resolve to a commit (matching the old `git rev-parse HEAD` failure).
+ *
+ * Resolves HEAD by reading git's on-disk files directly rather than spawning
+ * `git rev-parse HEAD`. This value backs the `/api/headhash` endpoint that every
+ * open client polls every few seconds; a spawned git read can stall for seconds
+ * when another process is repacking objects or rewriting packed-refs in the same
+ * repo (e.g. concurrent jj/git activity across many worktrees), and because the
+ * server runs git via execSync — which blocks the event loop — a stalled poll
+ * would block every request queued behind it. A plain file read can't be blocked
+ * by a repack, so the poll stays responsive.
+ *
+ * Resolution mirrors git's: read the worktree's gitdir, then HEAD. A detached
+ * HEAD holds the hash directly; a symref (`ref: refs/heads/x`) is resolved from
+ * loose ref files then packed-refs. Any unreadable/unresolvable state returns
+ * null.
+ *
+ * Only git's `files` ref backend is read directly. Other backends (e.g.
+ * reftable, where refs live in binary tables rather than loose/packed files)
+ * intentionally resolve to null and fall back to the callers' graceful paths —
+ * loadData recomputes the diff (null is still a valid cache key), and the
+ * staleness poll simply shows no reload banner. Do not "fix" this by adding a
+ * backend-specific reader; the fallback is the intended boundary.
  */
 function getHeadHash(worktreePath) {
   try {
-    return execSync(`git -C "${worktreePath}" rev-parse HEAD`, {
-      encoding: 'utf8',
-    }).trim();
+    const gitDir = resolveGitDir(worktreePath);
+    if (!gitDir) return null;
+    const head = fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim();
+    const m = head.match(/^ref:\s*(.+)$/);
+    if (!m) {
+      // Detached HEAD: the file holds the commit hash itself.
+      return /^[0-9a-f]{4,40}$/i.test(head) ? head : null;
+    }
+    return resolveRef(gitDir, m[1].trim());
   } catch {
     return null;
   }

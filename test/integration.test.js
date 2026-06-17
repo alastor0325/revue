@@ -98,6 +98,36 @@ describe('git integration', () => {
     }
   });
 
+  test('getHeadHash matches git after refs are packed', () => {
+    // pack-refs removes the loose ref file, forcing the packed-refs lookup path.
+    git(workRepoPath, 'pack-refs --all');
+    expect(fs.existsSync(path.join(workRepoPath, '.git', 'refs', 'heads', git(workRepoPath, 'rev-parse --abbrev-ref HEAD')))).toBe(false);
+    expect(getHeadHash(workRepoPath)).toBe(git(workRepoPath, 'rev-parse HEAD'));
+  });
+
+  test('getHeadHash matches git for a detached HEAD', () => {
+    const det = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-detach-'));
+    try {
+      execSync(`git clone "${mainRepoPath}" "${det}"`, { encoding: 'utf8' });
+      git(det, `checkout --detach ${git(det, 'rev-parse HEAD')}`);
+      expect(getHeadHash(det)).toBe(git(det, 'rev-parse HEAD'));
+    } finally {
+      fs.rmSync(det, { recursive: true, force: true });
+    }
+  });
+
+  test('getHeadHash matches git for a linked worktree', () => {
+    const linkParent = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-link-'));
+    const linked = path.join(linkParent, 'wt');
+    try {
+      git(workRepoPath, `worktree add -b wt-branch "${linked}"`);
+      expect(getHeadHash(linked)).toBe(git(linked, 'rev-parse HEAD'));
+    } finally {
+      git(workRepoPath, `worktree remove --force "${linked}"`);
+      fs.rmSync(linkParent, { recursive: true, force: true });
+    }
+  });
+
   test('getCommits returns commits ahead of the main repo', () => {
     const commits = getCommits(workRepoPath, mainRepoPath);
     expect(commits).toHaveLength(1);
