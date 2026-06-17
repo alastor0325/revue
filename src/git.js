@@ -8,6 +8,14 @@ function normPath(p) {
   return path.normalize(p).replace(/\\/g, '/');
 }
 
+// A reviewable patch series is at most a few dozen commits. When the nearest
+// resolvable base is this far behind HEAD, the base is almost certainly wrong
+// (e.g. an esr/beta worktree with no upstream set, whose only candidate base is
+// origin/main — tens of thousands of commits back). Diffing such a range hangs
+// the UI, so getMergeBase refuses it. Generous enough to never block a real
+// series.
+const MAX_REVIEW_COMMITS = 1000;
+
 /**
  * Resolve a worktree's git directory without spawning git. The main worktree
  * has a `.git` directory; a linked worktree has a `.git` file whose contents are
@@ -130,26 +138,35 @@ function getHeadHash(worktreePath) {
  * The main repo's HEAD is a candidate only when it is a different path from the
  * worktree — using the same path would yield merge-base HEAD HEAD = HEAD,
  * producing zero commits (the bug that manifests with --repo on a standalone repo).
+ *
+ * If even the nearest base is more than `maxCommits` behind HEAD, the intended
+ * base couldn't be resolved (e.g. an esr/beta worktree with no upstream set, so
+ * only origin/main matched, tens of thousands of commits back). Rather than hang
+ * the UI diffing that range, throw an Error tagged `baseTooFar = true` with an
+ * actionable message; callers re-throw it so the message reaches the user.
  */
-function getMergeBase(worktreePath, mainRepoPath) {
-  const tipCommands = [
-    `git -C "${worktreePath}" rev-parse @{u}`,
-    `git -C "${worktreePath}" rev-parse origin/main`,
-    `git -C "${worktreePath}" rev-parse origin/master`,
-    `git -C "${worktreePath}" rev-parse origin/HEAD`,
+function getMergeBase(worktreePath, mainRepoPath, maxCommits = MAX_REVIEW_COMMITS) {
+  // {name, cmd}: name is the human ref label kept for the error message below;
+  // tips are deduped by resolved hash, so the label reported is the first ref
+  // that resolved to that commit.
+  const tipSpecs = [
+    { name: '@{u}', cmd: `git -C "${worktreePath}" rev-parse @{u}` },
+    { name: 'origin/main', cmd: `git -C "${worktreePath}" rev-parse origin/main` },
+    { name: 'origin/master', cmd: `git -C "${worktreePath}" rev-parse origin/master` },
+    { name: 'origin/HEAD', cmd: `git -C "${worktreePath}" rev-parse origin/HEAD` },
   ];
 
   if (normPath(mainRepoPath) !== normPath(worktreePath)) {
-    tipCommands.push(`git -C "${mainRepoPath}" rev-parse HEAD`);
+    tipSpecs.push({ name: 'the main repo HEAD', cmd: `git -C "${mainRepoPath}" rev-parse HEAD` });
   }
 
   const tips = [];
-  for (const cmd of tipCommands) {
+  for (const { name, cmd } of tipSpecs) {
     try {
       // Ignore stderr: a missing ref is expected (we probe every candidate),
       // and git's "unknown revision" noise would otherwise pollute the log.
-      const tip = execSync(cmd, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-      if (tip && !tips.includes(tip)) tips.push(tip);
+      const hash = execSync(cmd, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      if (hash && !tips.some((t) => t.hash === hash)) tips.push({ name, hash });
     } catch {
       // ref doesn't exist in this repo — skip it
     }
@@ -161,12 +178,13 @@ function getMergeBase(worktreePath, mainRepoPath) {
 
   let bestBase = null; // nearest base that yields at least one commit
   let bestCount = Infinity;
+  let bestTip = null;  // ref label that produced bestBase, for the error message
   let fallbackBase = null; // any valid base, used only if every candidate is empty
-  for (const tip of tips) {
+  for (const { name, hash } of tips) {
     let base;
     try {
       base = execSync(
-        `git -C "${worktreePath}" merge-base HEAD ${tip}`,
+        `git -C "${worktreePath}" merge-base HEAD ${hash}`,
         { encoding: 'utf8' }
       ).trim();
     } catch {
@@ -187,7 +205,24 @@ function getMergeBase(worktreePath, mainRepoPath) {
     if (count > 0 && count < bestCount) {
       bestBase = base;
       bestCount = count;
+      bestTip = name;
     }
+  }
+
+  // Even the nearest base is implausibly far from HEAD — the worktree's intended
+  // base couldn't be resolved (typically no upstream set, so only origin/main
+  // matched). Diffing this range would hang; fail with an actionable message.
+  // Tagged baseTooFar so callers re-throw it (surfacing the message) instead of
+  // swallowing it as an empty series.
+  if (bestBase !== null && bestCount > maxCommits) {
+    const err = new Error(
+      `Refusing to diff ${bestCount} commits: the nearest resolvable base is ${bestTip}, ` +
+      `${bestCount} commits behind HEAD — almost certainly not this worktree's intended base. ` +
+      `Set the branch's upstream to its real base branch, e.g. ` +
+      `git -C "${worktreePath}" branch --set-upstream-to=origin/<base-branch>`
+    );
+    err.baseTooFar = true;
+    throw err;
   }
 
   const base = bestBase !== null ? bestBase : fallbackBase;
@@ -237,11 +272,12 @@ function getCommitsFromBase(worktreePath, base) {
  * the last time the commit was written — it advances on amend/rebase.
  * Returns [] if the worktree has no commits or the merge-base cannot be determined.
  */
-function getCommits(worktreePath, mainRepoPath) {
+function getCommits(worktreePath, mainRepoPath, maxCommits) {
   let base;
   try {
-    base = getMergeBase(worktreePath, mainRepoPath);
-  } catch {
+    base = getMergeBase(worktreePath, mainRepoPath, maxCommits);
+  } catch (err) {
+    if (err.baseTooFar) throw err; // surface the actionable message, don't hide it
     return [];
   }
   return getCommitsFromBase(worktreePath, base);
@@ -582,11 +618,12 @@ function splitCommitChunks(raw) {
  * read fails (e.g. output exceeds the buffer) or a commit's block is missing,
  * it falls back to a per-commit `git show` for correctness.
  */
-function getDiffPerCommit(worktreePath, mainRepoPath) {
+function getDiffPerCommit(worktreePath, mainRepoPath, maxCommits) {
   let base;
   try {
-    base = getMergeBase(worktreePath, mainRepoPath);
-  } catch {
+    base = getMergeBase(worktreePath, mainRepoPath, maxCommits);
+  } catch (err) {
+    if (err.baseTooFar) throw err; // surface the actionable message, don't hide it
     return []; // no commits / base cannot be determined
   }
   const commits = getCommitsFromBase(worktreePath, base);

@@ -128,6 +128,18 @@ describe('git integration', () => {
     }
   });
 
+  test('getDiffPerCommit throws baseTooFar when the series exceeds maxCommits', () => {
+    // Real git: workRepoPath is 1 commit ahead of its base. A cap of 0 makes the
+    // nearest base "too far", so it must throw the actionable error rather than
+    // attempt the diff — the mechanism that prevents the esr infinite-load.
+    let thrown;
+    try { getDiffPerCommit(workRepoPath, mainRepoPath, 0); } catch (e) { thrown = e; }
+    expect(thrown && thrown.baseTooFar).toBe(true);
+    expect(thrown.message).toMatch(/Refusing to diff/);
+    // With the default cap the same worktree still yields its real series.
+    expect(getDiffPerCommit(workRepoPath, mainRepoPath).length).toBeGreaterThan(0);
+  });
+
   test('getCommits returns commits ahead of the main repo', () => {
     const commits = getCommits(workRepoPath, mainRepoPath);
     expect(commits).toHaveLength(1);

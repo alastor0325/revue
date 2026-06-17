@@ -117,6 +117,8 @@ revue --version                    # print the version and exit (alias: -v)
 
 `<worktree-name>` is the directory basename with the repo prefix stripped (`myrepo-feature` → `feature`). If omitted, the server starts on the first registered worktree; switch any time using the worktree tabs at the top — drag the bar left/right to scroll through them when they overflow.
 
+Revue shows the patches between a worktree's HEAD and the branch it forked from. It infers that base from the branch's upstream (`@{u}`), falling back to `origin/main`/`origin/master`. For a branch off a non-main base (e.g. an esr/beta branch off `origin/esr115`) **set its upstream** — `git branch --set-upstream-to=origin/esr115` — otherwise the base resolves to `origin/main`, tens of thousands of commits back. Rather than hang on such a range, Revue shows an actionable error telling you to set the upstream.
+
 ---
 
 ## Development

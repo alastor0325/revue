@@ -526,6 +526,15 @@ describe('getCommits', () => {
     const result = getCommits('/fake/worktree', '/fake/main');
     expect(result.map((c) => c.hash)).toEqual(['abc1234', 'def5678']);
   });
+
+  test('re-throws baseTooFar instead of returning [] (so the message surfaces)', () => {
+    execSync.mockImplementation(fakeGit({
+      refs: { 'origin/main': 'central-tip' },
+      mergeBases: { 'central-tip': 'ancient-base' },
+      counts: { 'ancient-base': 65895 },
+    }, '/fake/main'));
+    expect(() => getCommits('/fake/worktree', '/fake/main')).toThrow(/Refusing to diff/);
+  });
 });
 
 // ── getDiffPerCommit — empty repo ──────────────────────────────────────────
@@ -535,6 +544,15 @@ describe('getDiffPerCommit empty repo', () => {
     // All git commands fail — simulates a worktree with no commits
     execSync.mockImplementation(() => { throw new Error('fatal: ambiguous argument HEAD'); });
     expect(getDiffPerCommit('/fake/empty', '/fake/main')).toEqual([]);
+  });
+
+  test('re-throws baseTooFar instead of returning [] (so the message surfaces)', () => {
+    execSync.mockImplementation(fakeGit({
+      refs: { 'origin/main': 'central-tip' },
+      mergeBases: { 'central-tip': 'ancient-base' },
+      counts: { 'ancient-base': 65895 },
+    }, '/fake/main'));
+    expect(() => getDiffPerCommit('/fake/worktree', '/fake/main')).toThrow(/Refusing to diff/);
   });
 });
 
@@ -569,6 +587,36 @@ describe('getMergeBase', () => {
       counts: { 'esr-base': 1, 'ancient-base': 65887 },
     }, MAIN_REPO));
     expect(getMergeBase(WORKTREE, MAIN_REPO)).toBe('esr-base');
+  });
+
+  test('throws baseTooFar when the nearest base exceeds the commit cap', () => {
+    // The reported esr hang: no upstream set, so only origin/main resolves, and
+    // its merge-base is tens of thousands of commits back. Diffing that range
+    // hangs the UI, so getMergeBase must refuse it with an actionable message.
+    execSync.mockImplementation(fakeGit({
+      refs: { 'origin/main': 'central-tip' },
+      mergeBases: { 'central-tip': 'ancient-base' },
+      counts: { 'ancient-base': 65895 },
+    }, MAIN_REPO));
+    let thrown;
+    try { getMergeBase(WORKTREE, MAIN_REPO); } catch (e) { thrown = e; }
+    expect(thrown).toBeDefined();
+    expect(thrown.baseTooFar).toBe(true);
+    expect(thrown.message).toMatch(/65895 commits/);
+    expect(thrown.message).toMatch(/origin\/main/);
+    expect(thrown.message).toMatch(/--set-upstream-to/);
+  });
+
+  test('maxCommits is configurable and applies at the boundary (> cap, not >=)', () => {
+    const cfg = {
+      refs: { 'origin/main': 'main-tip' },
+      mergeBases: { 'main-tip': 'base-sha' },
+    };
+    // count === cap is allowed; count > cap throws.
+    execSync.mockImplementation(fakeGit({ ...cfg, counts: { 'base-sha': 5 } }, MAIN_REPO));
+    expect(getMergeBase(WORKTREE, MAIN_REPO, 5)).toBe('base-sha');
+    execSync.mockImplementation(fakeGit({ ...cfg, counts: { 'base-sha': 6 } }, MAIN_REPO));
+    expect(() => getMergeBase(WORKTREE, MAIN_REPO, 5)).toThrow(/Refusing to diff 6 commits/);
   });
 
   test('skips a zero-commit upstream and falls back to origin/main', () => {

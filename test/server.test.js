@@ -113,6 +113,19 @@ describe('GET /api/diff', () => {
     expect(res.body.error).toContain('git failed');
   });
 
+  test('surfaces the baseTooFar message instead of hanging', async () => {
+    // getDiffPerCommit re-throws baseTooFar (the misresolved-base guard); the
+    // endpoint must return it as a 500 so the client shows the actionable
+    // message rather than an endless spinner.
+    const err = new Error('Refusing to diff 65895 commits: ... --set-upstream-to=origin/<base-branch>');
+    err.baseTooFar = true;
+    getDiffPerCommit.mockImplementation(() => { throw err; });
+    const app = makeApp();
+    const res = await request(app).get('/api/diff');
+    expect(res.status).toBe(500);
+    expect(res.body.error).toMatch(/Refusing to diff 65895 commits/);
+  });
+
   test('caches result — getDiffPerCommit called only once when HEAD does not change', async () => {
     getDiffPerCommit.mockReturnValue(PATCHES);
     const app = makeApp();
