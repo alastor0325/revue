@@ -8,7 +8,7 @@ const net = require('net');
 const os = require('os');
 const fs = require('fs');
 const { execSync } = require('child_process');
-const { getHeadHash, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getFileLines, discoverWorktrees } = require('./git');
+const { getHeadHash, getMergeBase, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getFileLines, discoverWorktrees } = require('./git');
 const { submitReview } = require('./claude');
 
 /**
@@ -157,8 +157,16 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
   // its update-detection poll so the baseline is scoped to the loaded worktree.
   function loadData() {
     const currentHead = getHeadHash(worktreePath);
+    // The patch series is base..HEAD, so the cache must track the resolved base
+    // too: origin/main or @{u} can move (a fetch, a rebase) while HEAD is
+    // unchanged, which shifts the merge-base and changes the series. Keying only
+    // on HEAD would then keep serving a stale, truncated patch list. getMergeBase
+    // can throw (no base / base too far); treat that as a null base here and let
+    // getDiffPerCommit below handle or propagate it as it already does.
+    let currentBase = null;
+    try { currentBase = getMergeBase(worktreePath, mainRepoPath); } catch { /* unresolved base */ }
     const cached = diffCache.get(worktreePath);
-    if (cached && cached.headHash === currentHead) {
+    if (cached && cached.headHash === currentHead && cached.baseHash === currentBase) {
       patchesCache = cached.patches;
       diffCache.delete(worktreePath);                 // re-insert as most-recently-used
       diffCache.set(worktreePath, cached);
@@ -167,7 +175,7 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
     console.log('Computing git diff...');
     try {
       patchesCache = getDiffPerCommit(worktreePath, mainRepoPath);
-      diffCache.set(worktreePath, { headHash: currentHead, patches: patchesCache });
+      diffCache.set(worktreePath, { headHash: currentHead, baseHash: currentBase, patches: patchesCache });
       // Evict the least-recently-used worktree once over the cap.
       while (diffCache.size > DIFF_CACHE_MAX) diffCache.delete(diffCache.keys().next().value);
       const totalFiles = patchesCache.reduce((n, p) => n + p.files.length, 0);

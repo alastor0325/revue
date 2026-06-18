@@ -11,6 +11,7 @@ const net = require('net');
 
 jest.mock('../src/git', () => ({
   getHeadHash: jest.fn(),
+  getMergeBase: jest.fn(),
   getDiffPerCommit: jest.fn(),
   getDiffForCommit: jest.fn(),
   getDiffBetweenCommits: jest.fn(),
@@ -22,7 +23,7 @@ jest.mock('../src/claude', () => ({
   submitReview: jest.fn(),
 }));
 
-const { getHeadHash, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getFileLines, discoverWorktrees } = require('../src/git');
+const { getHeadHash, getMergeBase, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getFileLines, discoverWorktrees } = require('../src/git');
 const { submitReview }     = require('../src/claude');
 const { createApp, findAvailablePort, startServer } = require('../src/server');
 
@@ -79,6 +80,8 @@ function makeApp() {
 describe('GET /api/diff', () => {
   beforeEach(() => {
     getHeadHash.mockReturnValue('abc123');
+    getMergeBase.mockReset();
+    getMergeBase.mockReturnValue('base-abc'); // stable base unless a test overrides
     getDiffPerCommit.mockReset();
   });
 
@@ -132,6 +135,20 @@ describe('GET /api/diff', () => {
     await request(app).get('/api/diff');
     await request(app).get('/api/diff');
     expect(getDiffPerCommit).toHaveBeenCalledTimes(1);
+  });
+
+  test('recomputes when the base moves even though HEAD is unchanged', async () => {
+    // origin/main is fetched forward while HEAD stays put: the merge-base shifts
+    // and the patch series changes. Keying the cache on HEAD alone would serve a
+    // stale, truncated list — so a base change must invalidate the cache.
+    getDiffPerCommit.mockReturnValue(PATCHES);
+    getMergeBase
+      .mockReturnValueOnce('base-old')
+      .mockReturnValueOnce('base-new');
+    const app = makeApp();
+    await request(app).get('/api/diff');
+    await request(app).get('/api/diff');
+    expect(getDiffPerCommit).toHaveBeenCalledTimes(2);
   });
 
   test('recomputes when HEAD hash changes between requests', async () => {

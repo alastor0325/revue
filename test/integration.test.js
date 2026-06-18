@@ -1212,6 +1212,61 @@ describe('server HTTP integration', () => {
   });
 });
 
+// ── diff cache invalidates on base movement ───────────────────────────────
+
+describe('GET /api/diff recomputes when the base moves under a stable HEAD', () => {
+  let cbTmp, cbServer, cbUrl, cbWork;
+
+  beforeAll(async () => {
+    cbTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-cachebase-'));
+    const main = path.join(cbTmp, 'main');
+    cbWork = path.join(cbTmp, 'work');
+    fs.mkdirSync(main);
+    git(main, 'init');
+    git(main, 'config user.email "t@t.com"');
+    git(main, 'config user.name "T"');
+    fs.writeFileSync(path.join(main, 'base.txt'), 'base\n');
+    git(main, 'add .');
+    git(main, 'commit -m "initial"');
+
+    execSync(`git clone "${main}" "${cbWork}"`, { encoding: 'utf8' });
+    git(cbWork, 'config user.email "t@t.com"');
+    git(cbWork, 'config user.name "T"');
+    // Three commits ahead of origin/main.
+    for (const n of [1, 2, 3]) {
+      fs.writeFileSync(path.join(cbWork, `f${n}.txt`), `change ${n}\n`);
+      git(cbWork, 'add .');
+      git(cbWork, `commit -m "feat: part ${n}"`);
+    }
+
+    const app = createApp({ worktreeName: 'work', worktreePath: cbWork, mainRepoPath: main });
+    const port = await findAvailablePort(19400);
+    await new Promise((resolve) => { cbServer = app.listen(port, '127.0.0.1', resolve); });
+    cbUrl = `http://127.0.0.1:${port}`;
+  });
+
+  afterAll((done) => {
+    fs.rmSync(cbTmp, { recursive: true, force: true });
+    cbServer.close(done);
+  });
+
+  test('a fetch that advances origin/main shrinks the series without a HEAD change', async () => {
+    const before = await httpRequest(`${cbUrl}/api/diff`);
+    expect(before.body.patches).toHaveLength(3); // base..HEAD = all 3
+    const head = before.body.headHash;
+
+    // Simulate a fetch fast-forwarding origin/main onto the 2nd commit (an
+    // ancestor of HEAD). HEAD is unchanged; only the merge-base moves.
+    const secondCommit = git(cbWork, 'rev-parse HEAD~1');
+    git(cbWork, `update-ref refs/remotes/origin/main ${secondCommit}`);
+
+    const after = await httpRequest(`${cbUrl}/api/diff`);
+    expect(after.body.headHash).toBe(head);     // HEAD really did not change
+    expect(after.body.patches).toHaveLength(1); // only the commit past the new base — not the stale 3
+    expect(after.body.patches[0].message).toBe('feat: part 3');
+  });
+});
+
 // ── startServer lifecycle ─────────────────────────────────────────────────
 
 describe('startServer lifecycle', () => {
