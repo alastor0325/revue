@@ -1,0 +1,18 @@
+# fx-dev-hub module manifest. Lets the Hub frame revue and (when the user grants
+# it) drive Claude with the generated review prompt. revue still runs standalone
+# exactly as before — the Claude integration is feature-detected in the browser.
+name: Revue
+type: web
+provides: review
+start: "revue --port {port} --no-open"
+stop: "revue --stop"
+health: "/"
+port: arg
+# augment: the Hub proxies revue and injects window.createFxHub so its page can
+# drive Claude. capabilities are confirmed by the user at install:
+#   agent         — run Claude on the review prompt
+#   agent-write   — let Claude address the feedback (edit files)
+#   agent-results — show Claude's answer back in the page
+augment: true
+capabilities: [agent, agent-write, agent-results]
+context: [revision]
