@@ -329,6 +329,72 @@ describe('submitReview — state after submit', () => {
   });
 });
 
+// ── submitReview — integration hooks (fx-dev-hub) ──────────────────────────
+
+describe('submitReview integration hooks', () => {
+  let elements, dispatched;
+
+  function makeElement(overrides = {}) {
+    return { textContent: '', value: '', classList: { add: jest.fn() }, dataset: {}, ...overrides };
+  }
+
+  beforeEach(() => {
+    elements = {
+      '#result-feedback-path': makeElement(),
+      '#result-prompt':        makeElement(),
+      '#result-overlay':       makeElement(),
+      '#btn-submit':           makeElement({ disabled: false }),
+      '#btn-copy-prompt':      makeElement(),
+      '#submit-warning':       makeElement(),
+    };
+    dispatched = [];
+    global.document = {
+      addEventListener: () => {},
+      querySelector: (sel) => elements[sel] || null,
+      dispatchEvent: (ev) => { dispatched.push(ev); return true; },
+    };
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ feedbackPath: '/fake/REVIEW_FEEDBACK.md', prompt: 'the review prompt' }),
+    });
+    global.navigator = { clipboard: { writeText: jest.fn().mockResolvedValue(undefined) } };
+
+    state.patches = [{ hash: 'abc123', message: 'fix: thing', files: [] }];
+    state.approved = new Set(['abc123']);
+    state.denied = new Set();
+    state.comments = {};
+    state.generalComments = { abc123: 'ok' };
+  });
+
+  afterEach(() => {
+    global.document = { addEventListener: () => {} };
+    delete global.navigator;
+    state.patches = [];
+    state.approved = new Set();
+    state.denied = new Set();
+    state.comments = {};
+    state.generalComments = {};
+  });
+
+  test('restores the button label from data-idle-label when an integration set it', async () => {
+    elements['#btn-submit'].dataset.idleLabel = 'Generate & Run in Claude';
+    await submitReview();
+    expect(elements['#btn-submit'].textContent).toBe('Generate & Run in Claude');
+  });
+
+  test('defaults the button label to "Generate Review Prompt" when no idle label is set', async () => {
+    await submitReview();
+    expect(elements['#btn-submit'].textContent).toBe('Generate Review Prompt');
+  });
+
+  test('dispatches revue:prompt-generated carrying the generated prompt', async () => {
+    await submitReview();
+    const ev = dispatched.find((e) => e.type === 'revue:prompt-generated');
+    expect(ev).toBeDefined();
+    expect(ev.detail.prompt).toBe('the review prompt');
+  });
+});
+
 // ── submitReview — auto-copy to clipboard ──────────────────────────────────
 
 describe('submitReview clipboard auto-copy', () => {

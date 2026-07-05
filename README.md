@@ -86,6 +86,24 @@ npm link                          # makes `revue` available globally
 
 ---
 
+## fx-dev-hub integration
+
+revue ships an optional [fx-dev-hub](https://github.com/alastor0325/fx-dev-hub)
+module manifest (`fx-module.yaml`). When revue is framed by the Hub, the Hub
+injects `window.createFxHub` and revue's own **Generate Review Prompt** button is
+repurposed to **Generate & Run in Claude**: it generates the prompt as usual,
+then runs it through Claude and shows the answer in the result dialog — skipping
+the copy-paste in steps 4–5 above. With the *Receive Claude's results* grant the
+answer streams back into the page.
+
+It's entirely feature-detected: opened directly in a browser,
+`window.createFxHub` is absent and revue behaves exactly as documented here — the
+button keeps its normal label and copy-prompt flow. To use it, link revue's
+folder in the Hub's *Modules & Permissions* screen and grant the capabilities its
+manifest requests.
+
+---
+
 ## Configuration
 
 `revue init <path>` writes `~/.revue/config.json` with a default repo. Run it again any time to change.

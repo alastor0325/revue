@@ -1,70 +1,55 @@
 // fx-dev-hub integration (optional). When revue is framed by the Hub, the Hub
-// injects `window.createFxHub`; this script then adds a "Run in Claude" button
-// that runs the generated review prompt through Claude and shows the result.
+// injects `window.createFxHub`; this script repurposes revue's own "Generate
+// Review Prompt" button so it also runs the generated prompt through Claude and
+// shows the answer in revue's existing result dialog — no extra UI.
 //
 // Standalone (revue opened directly in a browser), `window.createFxHub` is
-// absent and this file does nothing — the normal "Copy prompt" flow is unchanged.
+// absent and this file does nothing — the normal Copy-prompt flow is unchanged.
 (function () {
   if (!window.createFxHub) return; // not inside the Hub → keep standalone behavior
 
   window.createFxHub()
     .then(function (hub) {
-      function currentPrompt() {
-        var bar = document.querySelector("#current-prompt-bar");
-        var fromBar = bar && bar.dataset.prompt;
-        var modal = document.querySelector("#result-prompt");
-        return fromBar || (modal && modal.value) || "";
-      }
+      var btn = document.querySelector("#btn-submit");
+      if (!btn) return;
 
-      function panel() {
-        var p = document.querySelector("#fxhub-panel");
-        if (!p) {
-          p = document.createElement("div");
-          p.id = "fxhub-panel";
-          p.style.cssText =
-            "position:fixed;right:16px;bottom:16px;width:440px;max-height:60vh;" +
-            "overflow:auto;background:#fff;color:#15141a;border:1px solid #d7d7db;" +
-            "border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.18);padding:12px 14px;" +
-            "font:13px/1.5 system-ui;white-space:pre-wrap;z-index:9999;";
-          document.body.appendChild(p);
-        }
-        return p;
-      }
+      // Repurpose revue's own button (same element + styling, new label).
+      // submitReview restores the label from data-idle-label after generating,
+      // so the Claude label persists across generations.
+      var LABEL = "Generate & Run in Claude";
+      btn.dataset.idleLabel = LABEL;
+      // Don't clobber the in-progress label if the handshake resolves mid-run
+      // ("Generating…" is set by submitReview in app.js).
+      if (btn.textContent !== "Generating…") btn.textContent = LABEL;
 
-      function run() {
-        var prompt = currentPrompt();
+      // revue generates the prompt (its existing flow) and announces it; we run
+      // that prompt through Claude and stream the answer into the result
+      // dialog's textarea, which revue already opened and styled.
+      document.addEventListener("revue:prompt-generated", function (e) {
+        var prompt = e.detail && e.detail.prompt;
         if (!prompt) return;
-        var p = panel();
-        p.textContent = "Running the review prompt in Claude…";
+        var out = document.querySelector("#result-prompt");
+        if (out) out.value = "Running the review in Claude…";
+
         var job = hub.runAgent(prompt);
         var gotResult = false;
-        job.addEventListener("result", function (e) {
+        job.addEventListener("result", function (ev) {
           gotResult = true;
-          p.textContent = e.detail; // needs the agent-results grant
+          if (out) out.value = ev.detail; // needs the agent-results grant
         });
-        job.addEventListener("error", function (e) {
-          p.textContent = "Claude run failed: " + (e.error ? e.error.message : "unknown");
-        });
-        job.addEventListener("status", function () {
-          if (job.status === "done" && !gotResult) {
-            p.textContent = "Done. (Grant “Receive Claude's results” to see the answer here.)";
+        job.addEventListener("error", function (ev) {
+          if (out) {
+            out.value =
+              "Claude run failed: " + (ev.error ? ev.error.message : "unknown");
           }
         });
-      }
-
-      function addButton(container, label) {
-        if (!container || container.querySelector(".fxhub-run")) return;
-        var b = document.createElement("button");
-        b.className = "fxhub-run";
-        b.textContent = label;
-        b.addEventListener("click", run);
-        container.appendChild(b);
-      }
-
-      // The "Review prompt ready" bar, and the result modal's button row.
-      addButton(document.querySelector("#current-prompt-bar"), "Run in Claude");
-      var modalRow = document.querySelector("#result-modal div");
-      addButton(modalRow, "Run in Claude");
+        job.addEventListener("status", function () {
+          if (job.status === "done" && !gotResult && out) {
+            out.value =
+              "Claude finished. Grant “Receive Claude's results” to show the answer here.";
+          }
+        });
+      });
     })
     .catch(function () {
       /* handshake failed — behave as standalone */

@@ -3457,3 +3457,100 @@ describe('docs/index.html interactive demo', () => {
     await demoPage.evaluate(() => { document.querySelector('#autosave-status').textContent = ''; });
   }, 30000);
 });
+
+// ── fx-dev-hub integration ──────────────────────────────────────────────────
+// When the Hub frames revue it injects window.createFxHub; the integration then
+// repurposes revue's own "Generate Review Prompt" button to also run the prompt
+// through Claude and show the answer in the result dialog. We stub createFxHub
+// to verify that wiring end-to-end in a real page.
+
+describe('fx-dev-hub integration', () => {
+  let hubPage;
+
+  beforeAll(async () => {
+    hubPage = await browser.newPage();
+    // Inject a fake Hub bridge before any page script runs, mimicking what the
+    // real Hub proxy injects. The outcome is chosen per-test via
+    // window.__fxhubMode, mirroring the event shapes the Hub SDK emits.
+    await hubPage.addInitScript(() => {
+      window.createFxHub = function () {
+        return Promise.resolve({
+          runAgent: function (prompt) {
+            window.__fxhubPrompt = prompt;
+            const job = new EventTarget();
+            job.status = 'running';
+            const mode = window.__fxhubMode || 'result';
+            setTimeout(() => {
+              if (mode === 'error') {
+                const ev = new Event('error');
+                ev.error = new Error('boom');
+                job.dispatchEvent(ev);
+              } else if (mode === 'noresult') {
+                job.status = 'done';
+                job.dispatchEvent(new Event('status')); // done, but no result event
+              } else {
+                job.status = 'done';
+                job.dispatchEvent(new CustomEvent('result', { detail: 'CLAUDE REVIEW: looks good' }));
+                job.dispatchEvent(new Event('status'));
+              }
+            }, 20);
+            return job;
+          },
+        });
+      };
+    });
+    await hubPage.goto(baseUrl);
+    await hubPage.waitForSelector('.patch-heading', { state: 'visible' });
+    await resetSharedState(hubPage);
+  }, 20000);
+
+  afterAll(async () => { await hubPage?.close(); });
+
+  test('relabels revue\'s own button — no foreign button is added', async () => {
+    await hubPage.waitForFunction(
+      () => document.querySelector('#btn-submit')?.textContent === 'Generate & Run in Claude',
+    );
+    // Same styled #btn-submit element — the integration must not inject its own.
+    expect(await hubPage.$$eval('.fxhub-run', (els) => els.length)).toBe(0);
+  });
+
+  test('generating runs the prompt through Claude and shows the answer in the dialog', async () => {
+    await hubPage.click('.btn-approve');
+    await hubPage.waitForSelector('.btn-unapprove');
+    await hubPage.click('#btn-submit');
+
+    // revue generated a prompt and handed it to Claude…
+    await hubPage.waitForFunction(
+      () => typeof window.__fxhubPrompt === 'string' && window.__fxhubPrompt.length > 0,
+    );
+    // …and Claude's answer appears in revue's own result textarea.
+    await hubPage.waitForFunction(
+      () => document.querySelector('#result-prompt')?.value.includes('CLAUDE REVIEW'),
+      { timeout: 5000 },
+    );
+    // The Claude label persists (restored from data-idle-label after generating).
+    await hubPage.waitForFunction(
+      () => document.querySelector('#btn-submit')?.textContent === 'Generate & Run in Claude',
+    );
+  });
+
+  test('a Claude error is surfaced in the result dialog', async () => {
+    await hubPage.click('#btn-close-modal'); // dismiss the prior test's open dialog (its overlay blocks the button)
+    await hubPage.evaluate(() => { window.__fxhubMode = 'error'; });
+    await hubPage.click('#btn-submit'); // patch is still approved → button enabled
+    await hubPage.waitForFunction(
+      () => document.querySelector('#result-prompt')?.value.startsWith('Claude run failed'),
+      { timeout: 5000 },
+    );
+  });
+
+  test('finishing without a result prompts for the results grant', async () => {
+    await hubPage.click('#btn-close-modal');
+    await hubPage.evaluate(() => { window.__fxhubMode = 'noresult'; });
+    await hubPage.click('#btn-submit');
+    await hubPage.waitForFunction(
+      () => document.querySelector('#result-prompt')?.value.includes('Receive Claude'),
+      { timeout: 5000 },
+    );
+  });
+});

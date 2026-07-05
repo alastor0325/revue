@@ -70,6 +70,14 @@ async function submitReview() {
     $('#result-overlay').classList.add('visible');
     updateCurrentPrompt(json.prompt);
 
+    // Announce that a prompt was generated so integrations (e.g. fx-dev-hub's
+    // "run it in Claude") can act without revue depending on them.
+    if (typeof document.dispatchEvent === 'function') {
+      document.dispatchEvent(
+        new CustomEvent('revue:prompt-generated', { detail: { prompt: json.prompt } }),
+      );
+    }
+
     navigator.clipboard.writeText(json.prompt).then(() => {
       const copyBtn = $('#btn-copy-prompt');
       copyBtn.textContent = 'Copied!';
@@ -101,7 +109,9 @@ async function submitReview() {
   } catch (err) {
     submitError = err.message;
   } finally {
-    btn.textContent = 'Generate Review Prompt';
+    // Restore the idle label. An integration may repurpose this button (e.g.
+    // fx-dev-hub sets data-idle-label to "Generate & Run in Claude"); honor it.
+    btn.textContent = btn.dataset.idleLabel || 'Generate Review Prompt';
     updateSubmitButton();
     // Set error AFTER updateSubmitButton so it is not cleared when hasActivity is true
     if (submitError) {
