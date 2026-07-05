@@ -111,6 +111,27 @@ describe('parseArgs', () => {
     const { noOpen } = parseArgs(['my-feature']);
     expect(noOpen).toBe(false);
   });
+
+  test('parses --foreground flag (not mistaken for a worktree name)', () => {
+    const { foreground, rest } = parseArgs(['--foreground']);
+    expect(foreground).toBe(true);
+    expect(rest).toEqual([]);
+  });
+
+  test('parses --foreground alongside worktree, --port and --no-open', () => {
+    const { foreground, port, noOpen, rest } = parseArgs([
+      'my-feature', '--port', '9000', '--no-open', '--foreground',
+    ]);
+    expect(foreground).toBe(true);
+    expect(port).toBe(9000);
+    expect(noOpen).toBe(true);
+    expect(rest).toEqual(['my-feature']);
+  });
+
+  test('foreground defaults to false when --foreground is absent', () => {
+    const { foreground } = parseArgs(['my-feature']);
+    expect(foreground).toBe(false);
+  });
 });
 
 // ── pickDefaultEntry ───────────────────────────────────────────────────────

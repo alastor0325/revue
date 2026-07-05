@@ -247,6 +247,7 @@ function parseArgs(args) {
   let port = null;
   let repo = null;
   let noOpen = false;
+  let foreground = false;
   const rest = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--port' && i + 1 < args.length) {
@@ -255,11 +256,13 @@ function parseArgs(args) {
       repo = args[++i];
     } else if (args[i] === '--no-open') {
       noOpen = true;
+    } else if (args[i] === '--foreground') {
+      foreground = true;
     } else {
       rest.push(args[i]);
     }
   }
-  return { port, repo, noOpen, rest };
+  return { port, repo, noOpen, foreground, rest };
 }
 
 function printHelp() {
@@ -321,9 +324,13 @@ async function main() {
     return;
   }
 
-  // Validate config/repo before forking so errors are visible to the user.
+  // Validate config/repo before forking so errors are visible to the user, then
+  // either fork a detached daemon or — with --foreground — fall through and run
+  // the server attached, so a parent process (e.g. fx-dev-hub) owns its lifecycle
+  // directly and can stop it by killing the process. The re-exec'd daemon child
+  // (REVUE_DAEMON set) skips this block; it was already validated by its launcher.
   if (!process.env.REVUE_DAEMON) {
-    const { repo } = parseArgs(rawArgs);
+    const { repo, foreground } = parseArgs(rawArgs);
     const config = readConfig();
     const repoPath = repo ? resolvePath(repo) : config.defaultRepo;
     if (!repoPath) {
@@ -335,11 +342,13 @@ async function main() {
       console.error(`Error: repo path does not exist: ${repoPath}`);
       process.exit(1);
     }
-    daemonize(rawArgs);
-    return;
+    if (!foreground) {
+      daemonize(rawArgs);
+      return;
+    }
   }
 
-  // --- Running as daemon from here ---
+  // --- Running the server inline: the re-exec'd daemon child, or --foreground ---
 
   // Clean up this instance's PID file on exit
   const myPidFile = pidFilePath(process.pid);

@@ -4,8 +4,11 @@
 name: Revue
 type: web
 provides: review
-start: "revue --port {port} --no-open"
-stop: "revue --stop"
+# --foreground keeps the server attached so the Hub owns its lifecycle directly
+# and stops it by killing the child — no detached daemon to chase, no orphans,
+# no single-instance conflicts. So no `stop` command is needed here (revue's
+# `--stop` still works standalone for anyone running it as a daemon).
+start: "revue --port {port} --no-open --foreground"
 health: "/"
 port: arg
 # augment: the Hub proxies revue and injects window.createFxHub so its page can
