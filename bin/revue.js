@@ -265,6 +265,15 @@ function parseArgs(args) {
   return { port, repo, noOpen, foreground, rest };
 }
 
+/**
+ * Whether a foreground server has been orphaned: its recorded launcher pid no
+ * longer matches its current parent (the launcher died and the OS reparented
+ * it, e.g. to launchd/pid 1). Pure, so the exit-on-orphan behavior is testable.
+ */
+function orphaned(launcherPid, currentPpid) {
+  return currentPpid !== launcherPid;
+}
+
 function printHelp() {
   console.log(`
 Usage: revue [worktree] [options]
@@ -355,7 +364,20 @@ async function main() {
   process.on('exit', () => { try { fs.unlinkSync(myPidFile); } catch {} });
   process.on('SIGTERM', () => process.exit(0));
 
-  const { port, repo, noOpen, rest: positional } = parseArgs(rawArgs);
+  const { port, repo, noOpen, foreground, rest: positional } = parseArgs(rawArgs);
+
+  // Foreground mode ties the server's life to its launcher (e.g. fx-dev-hub). A
+  // hard kill of the launcher sends no clean shutdown signal, so watch for
+  // reparenting (ppid changes once the launcher dies) and exit — otherwise the
+  // server orphans and duplicate instances pile up and conflict. (Not for the
+  // daemon, which is detached from its launcher by design.)
+  if (foreground) {
+    const launcherPid = process.ppid;
+    setInterval(() => {
+      if (orphaned(launcherPid, process.ppid)) process.exit(0);
+    }, 2000).unref();
+  }
+
   const config = readConfig();
   const mainRepoPath = repo ? resolvePath(repo) : config.defaultRepo;
 
@@ -398,7 +420,7 @@ if (require.main === module) {
 
 module.exports = {
   readPid, readAllInstances, isRunning, stopDaemon, waitForExit, waitForPort,
-  buildEntries, pickDefaultEntry, parseArgs, pidFilePath, ensurePidsDir,
+  buildEntries, pickDefaultEntry, parseArgs, orphaned, pidFilePath, ensurePidsDir,
   readConfig, writeConfig, runInit, printHelp,
   LEGACY_PID_FILE, CONFIG_FILE,
 };

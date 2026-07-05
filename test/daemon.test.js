@@ -13,7 +13,7 @@ jest.mock('../src/git', () => ({ discoverWorktrees: jest.fn(), getMainWorktreeBa
 const { discoverWorktrees } = require('../src/git');
 const {
   readPid, readAllInstances, isRunning, stopDaemon, waitForExit,
-  waitForPort, buildEntries, pickDefaultEntry, parseArgs,
+  waitForPort, buildEntries, pickDefaultEntry, parseArgs, orphaned,
   pidFilePath, ensurePidsDir, LEGACY_PID_FILE,
   readConfig, writeConfig, runInit, printHelp, CONFIG_FILE,
 } = require('../bin/revue');
@@ -131,6 +131,19 @@ describe('parseArgs', () => {
   test('foreground defaults to false when --foreground is absent', () => {
     const { foreground } = parseArgs(['my-feature']);
     expect(foreground).toBe(false);
+  });
+});
+
+// ── orphaned (foreground exits when its launcher dies) ─────────────────────
+
+describe('orphaned', () => {
+  test('false while the parent pid is unchanged (launcher alive)', () => {
+    expect(orphaned(4321, 4321)).toBe(false);
+  });
+
+  test('true once reparented (launcher died → new ppid, e.g. launchd/1)', () => {
+    expect(orphaned(4321, 1)).toBe(true);
+    expect(orphaned(4321, 9999)).toBe(true);
   });
 });
 

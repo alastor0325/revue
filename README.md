@@ -128,8 +128,9 @@ revue                              # default repo (from init)
 revue --stop                       # stop the running daemon
 revue --restart                    # restart (picks up server code changes)
 revue --port 8080                  # custom port (default: 7777, auto-bumps if busy)
-revue --foreground                 # run attached (no daemon); a parent process
-                                   #   owns the lifecycle — used by fx-dev-hub
+revue --foreground                 # run attached (no daemon); the launcher owns
+                                   #   its lifecycle and it exits if the launcher
+                                   #   dies — used by fx-dev-hub
 revue my-feature                   # open a specific worktree by name
 revue --repo ~/other/repo          # override default repo for this run
 revue --repo ~/other/repo feature  # override repo + worktree together
