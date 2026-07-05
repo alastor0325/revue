@@ -92,9 +92,10 @@ revue ships an optional [fx-dev-hub](https://github.com/alastor0325/fx-dev-hub)
 module manifest (`fx-module.yaml`). When revue is framed by the Hub, the Hub
 injects `window.createFxHub` and revue's own **Generate Review Prompt** button is
 repurposed to **Generate & Run in Claude**: it generates the prompt as usual,
-then runs it through Claude and shows the answer in the result dialog — skipping
-the copy-paste in steps 4–5 above. With the *Receive Claude's results* grant the
-answer streams back into the page.
+then runs it through Claude — skipping the copy-paste in steps 4–5 above.
+Claude's progress and answer appear in the Hub's own results panel; revue just
+shows a light status line in the result dialog and leaves the generated prompt
+intact.
 
 It's entirely feature-detected: opened directly in a browser,
 `window.createFxHub` is absent and revue behaves exactly as documented here — the

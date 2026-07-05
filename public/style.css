@@ -1281,6 +1281,13 @@ tr.comment-draft-row td {
 }
 #result-modal p { color: var(--ink-2); margin-bottom: 8px; font-size: 13px; }
 
+/* fx-dev-hub: light "running in Claude…" status inside the result dialog. */
+#fxhub-status {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
 #result-feedback-path {
   font-family: var(--font-mono);
   color: var(--ink);

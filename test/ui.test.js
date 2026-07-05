@@ -3485,11 +3485,10 @@ describe('fx-dev-hub integration', () => {
                 const ev = new Event('error');
                 ev.error = new Error('boom');
                 job.dispatchEvent(ev);
-              } else if (mode === 'noresult') {
-                job.status = 'done';
-                job.dispatchEvent(new Event('status')); // done, but no result event
               } else {
                 job.status = 'done';
+                // result is still fired (SDK shape) though the split ignores it —
+                // the "prompt left intact" assertion checks it isn't shown.
                 job.dispatchEvent(new CustomEvent('result', { detail: 'CLAUDE REVIEW: looks good' }));
                 job.dispatchEvent(new Event('status'));
               }
@@ -3514,7 +3513,7 @@ describe('fx-dev-hub integration', () => {
     expect(await hubPage.$$eval('.fxhub-run', (els) => els.length)).toBe(0);
   });
 
-  test('generating runs the prompt through Claude and shows the answer in the dialog', async () => {
+  test('generating runs the prompt in Claude, shows a status, and leaves the prompt intact', async () => {
     await hubPage.click('.btn-approve');
     await hubPage.waitForSelector('.btn-unapprove');
     await hubPage.click('#btn-submit');
@@ -3523,33 +3522,25 @@ describe('fx-dev-hub integration', () => {
     await hubPage.waitForFunction(
       () => typeof window.__fxhubPrompt === 'string' && window.__fxhubPrompt.length > 0,
     );
-    // …and Claude's answer appears in revue's own result textarea.
+    // …a light status appears (the answer itself lives in the Hub's panel)…
     await hubPage.waitForFunction(
-      () => document.querySelector('#result-prompt')?.value.includes('CLAUDE REVIEW'),
+      () => document.querySelector('#fxhub-status')?.textContent.includes('Claude finished'),
       { timeout: 5000 },
     );
+    // …and the generated prompt is NOT overwritten with the answer.
+    expect(await hubPage.$eval('#result-prompt', (el) => el.value)).not.toContain('CLAUDE REVIEW');
     // The Claude label persists (restored from data-idle-label after generating).
     await hubPage.waitForFunction(
       () => document.querySelector('#btn-submit')?.textContent === 'Generate & Run in Claude',
     );
   });
 
-  test('a Claude error is surfaced in the result dialog', async () => {
+  test('a Claude error is surfaced as a status', async () => {
     await hubPage.click('#btn-close-modal'); // dismiss the prior test's open dialog (its overlay blocks the button)
     await hubPage.evaluate(() => { window.__fxhubMode = 'error'; });
     await hubPage.click('#btn-submit'); // patch is still approved → button enabled
     await hubPage.waitForFunction(
-      () => document.querySelector('#result-prompt')?.value.startsWith('Claude run failed'),
-      { timeout: 5000 },
-    );
-  });
-
-  test('finishing without a result prompts for the results grant', async () => {
-    await hubPage.click('#btn-close-modal');
-    await hubPage.evaluate(() => { window.__fxhubMode = 'noresult'; });
-    await hubPage.click('#btn-submit');
-    await hubPage.waitForFunction(
-      () => document.querySelector('#result-prompt')?.value.includes('Receive Claude'),
+      () => document.querySelector('#fxhub-status')?.textContent.startsWith('Claude run failed'),
       { timeout: 5000 },
     );
   });

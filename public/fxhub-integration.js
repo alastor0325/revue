@@ -1,7 +1,8 @@
 // fx-dev-hub integration (optional). When revue is framed by the Hub, the Hub
 // injects `window.createFxHub`; this script repurposes revue's own "Generate
-// Review Prompt" button so it also runs the generated prompt through Claude and
-// shows the answer in revue's existing result dialog — no extra UI.
+// Review Prompt" button to also run the generated prompt through Claude. The
+// answer + progress appear in the Hub's own results panel; here we only show a
+// light status line so the prompt dialog is left intact.
 //
 // Standalone (revue opened directly in a browser), `window.createFxHub` is
 // absent and this file does nothing — the normal Copy-prompt flow is unchanged.
@@ -22,32 +23,38 @@
       // ("Generating…" is set by submitReview in app.js).
       if (btn.textContent !== "Generating…") btn.textContent = LABEL;
 
+      // A light status line inside the result dialog — the answer + activity
+      // live in the Hub's results panel, so we don't touch #result-prompt.
+      function say(msg) {
+        var modal = document.querySelector("#result-modal");
+        if (!modal) return;
+        var el = modal.querySelector("#fxhub-status");
+        if (!el) {
+          el = document.createElement("div");
+          el.id = "fxhub-status";
+          var h3 = modal.querySelector("h3");
+          if (h3) h3.insertAdjacentElement("afterend", el);
+          else modal.appendChild(el);
+        }
+        el.textContent = msg;
+      }
+
       // revue generates the prompt (its existing flow) and announces it; we run
-      // that prompt through Claude and stream the answer into the result
-      // dialog's textarea, which revue already opened and styled.
+      // it through Claude and reflect status. `done`/`error` arrive without the
+      // agent-results grant, so this works regardless of it.
       document.addEventListener("revue:prompt-generated", function (e) {
         var prompt = e.detail && e.detail.prompt;
         if (!prompt) return;
-        var out = document.querySelector("#result-prompt");
-        if (out) out.value = "Running the review in Claude…";
+        say("Running in Claude… see the results panel below.");
 
         var job = hub.runAgent(prompt);
-        var gotResult = false;
-        job.addEventListener("result", function (ev) {
-          gotResult = true;
-          if (out) out.value = ev.detail; // needs the agent-results grant
+        job.addEventListener("status", function () {
+          if (job.status === "done") {
+            say("Claude finished — see the results panel below.");
+          }
         });
         job.addEventListener("error", function (ev) {
-          if (out) {
-            out.value =
-              "Claude run failed: " + (ev.error ? ev.error.message : "unknown");
-          }
-        });
-        job.addEventListener("status", function () {
-          if (job.status === "done" && !gotResult && out) {
-            out.value =
-              "Claude finished. Grant “Receive Claude's results” to show the answer here.";
-          }
+          say("Claude run failed: " + (ev.error ? ev.error.message : "unknown"));
         });
       });
     })
