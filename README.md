@@ -58,6 +58,7 @@ npm link                          # makes `revue` available globally
 | | |
 |---|---|
 | **Per-line comments** | Click any diff line or commit message to annotate — including the surrounding context lines you reveal with the ↑/↓ expanders. Drafts persist across reloads. |
+| **Feedback persistence** | Line comments and patch-level feedback survive page reloads, rebases, and amends — when a patch's hash changes, its undrained feedback is carried forward onto the new revision. Feedback is cleared *only* by submitting (draining) the review, never by the code changing underneath it. |
 | **Approve / Deny per patch** | Mark each commit. Denied patches always appear in the generated prompt — comment or no comment. |
 | **Approval persistence** | Approvals survive page reloads, rebases, and commit-message amends. *Same code = same approval.* Only actual code changes clear an approval. |
 | **Re-review alerts** | If you approved a patch and a later revision changes *its own* code, the approval is cleared and the patch is flagged (⚠ on its tab + a banner) so you re-review it. Unrelated changes elsewhere don't trigger it. |
@@ -102,6 +103,11 @@ It's entirely feature-detected: opened directly in a browser,
 button keeps its normal label and copy-prompt flow. To use it, link revue's
 folder in the Hub's *Modules & Permissions* screen and grant the capabilities its
 manifest requests.
+
+The manifest also declares `remote: true`, so the Hub offers local/remote **host
+tabs** — you can launch revue over ssh on a configured host (from `~/.ssh/config`)
+as well as locally. Run outside the Hub, revue is unaffected and serves on
+localhost as usual.
 
 ---
 

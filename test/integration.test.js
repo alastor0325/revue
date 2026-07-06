@@ -1011,6 +1011,44 @@ describe('server HTTP integration', () => {
     });
   });
 
+  // When an amend changes a patch's hash, the revision-detection write also
+  // carries the re-keyed feedback so undrained comments survive the hash change.
+  test('POST /api/state/revisions round-trips migrated comments and generalComments', async () => {
+    await resetState();
+    const comments = { new1: { 'a.js': { n5: { text: 'carried forward' } } } };
+    const generalComments = { new1: 'still here' };
+    const post = await httpRequest(`${baseUrl}/api/state/revisions`, {
+      method: 'POST',
+      body: { revisions: [], approved: [], denied: [], comments, generalComments },
+    });
+    expect(post.status).toBe(200);
+    const { body } = await httpRequest(`${baseUrl}/api/state`);
+    expect(body.comments).toEqual(comments);
+    expect(body.generalComments).toEqual(generalComments);
+    await resetState();
+  });
+
+  test('POST /api/state/revisions leaves existing comments untouched when omitted', async () => {
+    await resetState();
+    await httpRequest(`${baseUrl}/api/state/comment`, {
+      method: 'POST', body: { patchHash: 'h1', file: 'a.js', key: 'n1', comment: { text: 'keep' } },
+    });
+    const post = await httpRequest(`${baseUrl}/api/state/revisions`, {
+      method: 'POST', body: { revisions: [], approved: [], denied: [] },
+    });
+    expect(post.status).toBe(200);
+    const { body } = await httpRequest(`${baseUrl}/api/state`);
+    expect(body.comments.h1['a.js'].n1).toEqual({ text: 'keep' });
+    await resetState();
+  });
+
+  test('POST /api/state/revisions rejects a non-object comments with 400', async () => {
+    const { status } = await httpRequest(`${baseUrl}/api/state/revisions`, {
+      method: 'POST', body: { revisions: [], approved: [], denied: [], comments: ['nope'] },
+    });
+    expect(status).toBe(400);
+  });
+
   test('POST /api/state/revisions rejects a non-array reapprovalNeeded with 400', async () => {
     const { status } = await httpRequest(`${baseUrl}/api/state/revisions`, {
       method: 'POST', body: { revisions: [], approved: [], denied: [], reapprovalNeeded: 'nope' },
@@ -1853,5 +1891,22 @@ describe('bulk write migrates legacy state', () => {
     expect(fs.existsSync(stateFilePathFor(bmWork))).toBe(true);
     const { body } = await httpRequest(`http://127.0.0.1:${bmPort}/api/state`);
     expect(body.approved).toEqual(['new']);
+  });
+});
+
+// The fx-dev-hub manifest must opt into remote (ssh) launch, or the Hub hides
+// revue's local/remote host tabs. This guards a regression where `remote: true`
+// was dropped from fx-module.yaml. (No yaml dep in this repo → line check.)
+describe('fx-dev-hub manifest', () => {
+  test('declares remote: true so the Hub shows host tabs', () => {
+    const manifest = fs.readFileSync(
+      path.join(__dirname, '..', 'fx-module.yaml'),
+      'utf8',
+    );
+    const declaresRemote = manifest
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('#'))
+      .some((line) => /^\s*remote:\s*true\s*$/.test(line));
+    expect(declaresRemote).toBe(true);
   });
 });

@@ -11,6 +11,9 @@ provides: review
 start: "revue --port {port} --no-open --foreground"
 health: "/"
 port: arg
+# remote: revue can be launched on an ssh host, so the Hub shows local/remote
+# host tabs. Runs standalone on localhost exactly as before.
+remote: true
 # augment: the Hub proxies revue and injects window.createFxHub so its page can
 # drive Claude. capabilities are confirmed by the user at install:
 #   agent         — run Claude on the review prompt
