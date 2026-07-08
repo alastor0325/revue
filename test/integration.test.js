@@ -540,6 +540,44 @@ describe('server HTTP integration', () => {
     fs.unlinkSync(body.feedbackPath);
   });
 
+  test('POST /api/submit builds the file from client-provided patches, not the server HEAD', async () => {
+    // The reviewer's feedback is keyed to the series their browser is showing.
+    // Even when that hash no longer matches the server's HEAD (e.g. the commit
+    // was amended concurrently), the feedback must still land in the file rather
+    // than be silently dropped by a hash-mismatch lookup.
+    const staleHash = 'deadbeef0000';
+    const allFeedback = [{
+      hash: staleHash,
+      comments: [{ file: 'feature.js', line: 1, lineContent: 'function hello() {', text: 'CLIENT_HASH_FEEDBACK' }],
+      generalComment: '',
+    }];
+    const { status, body } = await httpRequest(`${baseUrl}/api/submit`, {
+      method: 'POST',
+      body: {
+        allFeedback,
+        patches: [{ hash: staleHash, message: 'client-side message' }],
+        approvedHashes: [],
+        deniedHashes: [],
+      },
+    });
+    expect(status).toBe(200);
+    const content = fs.readFileSync(body.feedbackPath, 'utf8');
+    expect(content).toContain('CLIENT_HASH_FEEDBACK');
+    expect(content).toContain(staleHash);
+    expect(content).toContain('client-side message');
+    fs.unlinkSync(body.feedbackPath);
+  });
+
+  test('POST /api/submit with malformed patches returns 400', async () => {
+    const allFeedback = [{ hash: commitHash, comments: [], generalComment: 'LGTM' }];
+    const { status, body } = await httpRequest(`${baseUrl}/api/submit`, {
+      method: 'POST',
+      body: { allFeedback, patches: [{ message: 'no hash' }], approvedHashes: [], deniedHashes: [] },
+    });
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/patches/i);
+  });
+
   test('after submit, approved is preserved but denied/comments are cleared on disk', async () => {
     // Simulate having comments and both approved and denied saved before submit
     const priorState = { comments: { abc: { 'file.js': { L1: { text: 'nit' } } } }, generalComments: { abc: 'Overall ok' }, approved: [commitHash], denied: ['other'] };

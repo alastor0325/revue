@@ -13,7 +13,7 @@ import {
   initStateChannel, hasPendingSave, maybeCatchupOnVisible,
 } from './persistence.js';
 // Revisions: detect changes on load
-import { diffFingerprint, migrateApprovals, detectRevisionChanges } from './revisions.js';
+import { diffFingerprint, migrateApprovals, remapFeedbackHashes, detectRevisionChanges } from './revisions.js';
 // Renderer: all DOM functions + re-exportable items for tests
 import {
   patchEls, updateSubmitButton, removeExistingForm, showCommentForm,
@@ -41,11 +41,28 @@ let _pollTimer = null;
 
 // ── Submit review ──────────────────────────────────────────────────────────
 async function submitReview() {
+  const deniedHashes = [...state.denied];
   const allFeedback = state.patches.map((p) => ({
     hash: p.hash,
     comments: commentsForPatch(p.hash),
     generalComment: getGeneralComment(p.hash).trim(),
   }));
+
+  // Snapshot exactly which feedback this submit drains — the [hash, file, key]
+  // triples and general-comment hashes present right now. The post-submit clear
+  // removes only these, so a comment the reviewer adds while the request is in
+  // flight (e.g. reviewing a new version while Claude amends the series) is not
+  // silently wiped by a blanket reset. (The keys can't be recovered from
+  // allFeedback, which stores a bare line number rather than the lineKey.)
+  const submittedComments = [];
+  for (const hash of Object.keys(state.comments)) {
+    for (const file of Object.keys(state.comments[hash])) {
+      for (const key of Object.keys(state.comments[hash][file])) {
+        submittedComments.push([hash, file, key]);
+      }
+    }
+  }
+  const submittedGeneral = allFeedback.filter((f) => f.generalComment).map((f) => f.hash);
 
   const btn = $('#btn-submit');
   btn.disabled = true;
@@ -58,8 +75,11 @@ async function submitReview() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         allFeedback,
+        // Send the series we are reviewing so the server builds the file against
+        // these hashes, not a recomputed diff that may have moved under us.
+        patches: state.patches.map((p) => ({ hash: p.hash, message: p.message })),
         approvedHashes: [...state.approved],
-        deniedHashes:   [...state.denied],
+        deniedHashes,
       }),
     });
     const json = await res.json();
@@ -84,10 +104,17 @@ async function submitReview() {
       setTimeout(() => { copyBtn.textContent = 'Copy prompt'; }, 2000);
     }).catch(() => {});  // silently ignore if clipboard access is denied
 
-    // Refresh must preserve drafts; only "Generate Review Prompt" clears them.
-    state.comments = {};
-    state.generalComments = {};
-    state.denied = new Set();
+    // Drain only the feedback we submitted; anything added while the request was
+    // in flight survives. Refresh must preserve drafts; only submit clears them.
+    for (const [hash, file, key] of submittedComments) deleteComment(hash, file, key);
+    for (const hash of submittedGeneral) delete state.generalComments[hash];
+    for (const hash of deniedHashes) undenyPatch(hash);
+    // deleteComment prunes empty per-file maps; drop any now-empty hash entries.
+    for (const [hash] of submittedComments) {
+      if (state.comments[hash] && Object.keys(state.comments[hash]).length === 0) {
+        delete state.comments[hash];
+      }
+    }
     replaceDrafts(null);
     // Cancel any in-flight debounced saves first — otherwise a pending draft
     // POST would land after the bulk reset and re-create the cleared value.
@@ -691,7 +718,7 @@ if (typeof module !== 'undefined') {
     // state.js re-exports (for test backward compat)
     state, drafts, draftKey,
     // revisions.js re-exports (for test backward compat)
-    diffFingerprint, migrateApprovals,
+    diffFingerprint, migrateApprovals, remapFeedbackHashes,
     // renderer.js re-exports (for test backward compat)
     renderDraftDisplay, removeExistingForm, showCommentForm,
     renderFileNav, renderFile,

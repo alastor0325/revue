@@ -260,6 +260,76 @@ describe('migrateApprovals — fingerprint-aware', () => {
   });
 });
 
+// ── remapFeedbackHashes — feedback survives an amend ───────────────────────
+
+describe('remapFeedbackHashes', () => {
+  const { remapFeedbackHashes } = require('../public/app');
+
+  function comment(text) { return { text }; }
+
+  test('re-keys line comments from the old hash to the new hash', () => {
+    const comments = { old1: { 'a.js': { n5: comment('fix this') } } };
+    const result = remapFeedbackHashes(comments, {}, [['old1', 'new1']]);
+    expect(result.comments.old1).toBeUndefined();
+    expect(result.comments.new1['a.js'].n5).toEqual(comment('fix this'));
+  });
+
+  test('re-keys the general comment from the old hash to the new hash', () => {
+    const general = { old1: 'needs work' };
+    const result = remapFeedbackHashes({}, general, [['old1', 'new1']]);
+    expect(result.generalComments.old1).toBeUndefined();
+    expect(result.generalComments.new1).toBe('needs work');
+  });
+
+  test('carries feedback forward unconditionally (never dropped by a diff change)', () => {
+    // remap has no notion of whether the diff changed — every changed hash
+    // carries its feedback forward. This is the whole point: feedback is only
+    // drained by submit, never invalidated by the code changing.
+    const comments = { old1: { 'a.js': { n1: comment('keep me') } } };
+    const result = remapFeedbackHashes(comments, {}, [['old1', 'new1']]);
+    expect(result.comments.new1['a.js'].n1).toEqual(comment('keep me'));
+  });
+
+  test('a fresh comment already on the new hash wins over the carried-forward one', () => {
+    const comments = {
+      old1: { 'a.js': { n5: comment('stale') } },
+      new1: { 'a.js': { n5: comment('fresh') } },
+    };
+    const result = remapFeedbackHashes(comments, {}, [['old1', 'new1']]);
+    expect(result.comments.new1['a.js'].n5).toEqual(comment('fresh'));
+  });
+
+  test('merges non-colliding files/lines from old and new hashes', () => {
+    const comments = {
+      old1: { 'a.js': { n5: comment('old-a') } },
+      new1: { 'b.js': { n2: comment('new-b') } },
+    };
+    const result = remapFeedbackHashes(comments, {}, [['old1', 'new1']]);
+    expect(result.comments.new1['a.js'].n5).toEqual(comment('old-a'));
+    expect(result.comments.new1['b.js'].n2).toEqual(comment('new-b'));
+  });
+
+  test('keeps an existing general comment on the new hash over the old one', () => {
+    const general = { old1: 'old text', new1: 'new text' };
+    const result = remapFeedbackHashes({}, general, [['old1', 'new1']]);
+    expect(result.generalComments.new1).toBe('new text');
+  });
+
+  test('leaves unrelated hashes and no-op remaps untouched', () => {
+    const comments = { other: { 'x.js': { n1: comment('unrelated') } } };
+    const result = remapFeedbackHashes(comments, {}, [['same', 'same']]);
+    expect(result.comments.other['x.js'].n1).toEqual(comment('unrelated'));
+  });
+
+  test('does not mutate the input objects', () => {
+    const comments = { old1: { 'a.js': { n5: comment('x') } } };
+    const general = { old1: 'y' };
+    remapFeedbackHashes(comments, general, [['old1', 'new1']]);
+    expect(comments.old1).toBeDefined();
+    expect(general.old1).toBe('y');
+  });
+});
+
 // ── submitReview — approved preserved, denied/comments cleared ─────────────
 
 describe('submitReview — state after submit', () => {
@@ -326,6 +396,33 @@ describe('submitReview — state after submit', () => {
     drafts['abc123/__commit__/msg'] = 'WIP commit draft';
     await submitReview();
     expect(Object.keys(drafts)).toHaveLength(0);
+  });
+
+  test('sends the reviewed patch series so the server builds the file from client hashes', async () => {
+    await submitReview();
+    const submitCall = global.fetch.mock.calls.find((c) => c[0] === '/api/submit');
+    const body = JSON.parse(submitCall[1].body);
+    expect(body.patches).toEqual([{ hash: 'abc123', message: 'fix: thing' }]);
+  });
+
+  test('a comment added while the submit request is in flight is not drained', async () => {
+    // Model the reported race: the reviewer adds feedback on a new line while
+    // the submit request is still in flight (e.g. reviewing a new version while
+    // Claude amends). The blanket reset used to wipe it; now it must survive.
+    global.fetch = jest.fn().mockImplementation((url) => ({
+      ok: true,
+      json: () => {
+        if (url === '/api/submit') {
+          state.comments.abc123['file.js'].L2 = { text: 'added mid-flight' };
+        }
+        return Promise.resolve({ feedbackPath: '/fake/REVIEW_FEEDBACK.md', prompt: 'prompt text' });
+      },
+    }));
+    await submitReview();
+    // The pre-existing comment was submitted and drained...
+    expect(state.comments.abc123?.['file.js']?.L1).toBeUndefined();
+    // ...but the one added mid-flight survives.
+    expect(state.comments.abc123['file.js'].L2).toEqual({ text: 'added mid-flight' });
   });
 });
 

@@ -383,18 +383,28 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
     }
   });
 
-  // POST /api/state/revisions — { revisions, approved, denied, reapprovalNeeded? }
+  // POST /api/state/revisions — { revisions, approved, denied, reapprovalNeeded?, comments?, generalComments? }
   // Used by the load-time revision-detection path which records a new revision
   // snapshot AND migrates approved/denied hashes for amended commits.  These
   // fields belong together so they go in one lock-protected write.
   // reapprovalNeeded is optional (older clients omit it) and stored verbatim.
+  // comments/generalComments are optional too: they carry the feedback re-keyed
+  // from an amended patch's old hash to its new hash so undrained review
+  // feedback survives the hash change (persisted atomically with the migration).
   app.post('/api/state/revisions', async (req, res) => {
-    const { revisions, approved, denied, reapprovalNeeded } = req.body || {};
+    const { revisions, approved, denied, reapprovalNeeded, comments, generalComments } = req.body || {};
     if (!Array.isArray(revisions) || !Array.isArray(approved) || !Array.isArray(denied)) {
       return res.status(400).json({ error: 'revisions, approved, denied must all be arrays.' });
     }
     if (reapprovalNeeded !== undefined && !Array.isArray(reapprovalNeeded)) {
       return res.status(400).json({ error: 'reapprovalNeeded must be an array when provided.' });
+    }
+    const isPlainObject = (v) => typeof v === 'object' && v !== null && !Array.isArray(v);
+    if (comments !== undefined && !isPlainObject(comments)) {
+      return res.status(400).json({ error: 'comments must be an object when provided.' });
+    }
+    if (generalComments !== undefined && !isPlainObject(generalComments)) {
+      return res.status(400).json({ error: 'generalComments must be an object when provided.' });
     }
     const statePath = stateFilePath();
     try {
@@ -404,6 +414,8 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
         state.approved = approved;
         state.denied = denied;
         if (reapprovalNeeded !== undefined) state.reapprovalNeeded = reapprovalNeeded;
+        if (comments !== undefined) state.comments = comments;
+        if (generalComments !== undefined) state.generalComments = generalComments;
         atomicWriteStateFile(statePath, state);
       });
       publishStateEvent({ kind: 'revisions' }, req);
@@ -442,7 +454,8 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
     }
   });
 
-  // POST /api/submit — write REVIEW_FEEDBACK_<worktreeName>.md and return the prompt
+  // POST /api/submit — { allFeedback, patches?, approvedHashes?, deniedHashes? }
+  // Write REVIEW_FEEDBACK_<worktreeName>.md and return the prompt.
   app.post('/api/submit', (req, res) => {
     const { allFeedback } = req.body;
 
@@ -452,6 +465,19 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
 
     const approvedHashes = Array.isArray(req.body.approvedHashes) ? req.body.approvedHashes : [];
     const deniedHashes   = Array.isArray(req.body.deniedHashes)   ? req.body.deniedHashes   : [];
+
+    // The client sends the patch series it is actually reviewing. We format the
+    // file against THESE hashes rather than a freshly-recomputed patchesCache:
+    // if the codebase moved between load and submit (e.g. Claude amended a
+    // commit concurrently), the server's HEAD hashes would no longer match the
+    // feedback's hashes and every feedback lookup would miss, silently writing
+    // an empty file. Trusting the client's list keeps the file self-consistent
+    // with the feedback and never depends on volatile git state.
+    const { patches } = req.body;
+    if (patches !== undefined &&
+        (!Array.isArray(patches) || !patches.every((p) => p && typeof p.hash === 'string' && p.hash))) {
+      return res.status(400).json({ error: 'patches must be an array of { hash, message } when provided.' });
+    }
 
     const hasActivity =
       approvedHashes.length > 0 ||
@@ -466,11 +492,22 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
     }
 
     try {
-      loadData();
+      let allPatches;
+      if (Array.isArray(patches) && patches.length > 0) {
+        allPatches = patches.map((p) => ({
+          hash: p.hash,
+          message: typeof p.message === 'string' ? p.message : '',
+        }));
+      } else {
+        // Backward-compat path (client didn't send its series): fall back to the
+        // server-computed diff.
+        loadData();
+        allPatches = patchesCache;
+      }
       const { feedbackPath, prompt } = submitReview(
         worktreePath,
         worktreeName,
-        patchesCache,
+        allPatches,
         allFeedback,
         approvedHashes,
         deniedHashes

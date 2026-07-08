@@ -1285,7 +1285,13 @@ describe('generate review prompt button', () => {
     );
     await promptPage.click('#btn-submit');
     const req = await requestPromise;
-    expect(Array.isArray(JSON.parse(req.postData()).allFeedback)).toBe(true);
+    const posted = JSON.parse(req.postData());
+    expect(Array.isArray(posted.allFeedback)).toBe(true);
+    // The reviewed series is sent so the server builds the file against the
+    // hashes the browser is showing, not a possibly-moved server HEAD.
+    expect(Array.isArray(posted.patches)).toBe(true);
+    expect(posted.patches.length).toBeGreaterThan(0);
+    expect(typeof posted.patches[0].hash).toBe('string');
   });
 });
 

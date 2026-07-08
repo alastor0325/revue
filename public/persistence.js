@@ -124,8 +124,15 @@ export function saveDecisionNow(patchHash, kind) {
   return postJson('/api/state/decision', { patchHash, kind });
 }
 
-export function saveRevisionsNow(revisions, approved, denied, reapprovalNeeded = []) {
-  return postJson('/api/state/revisions', { revisions, approved, denied, reapprovalNeeded });
+// comments/generalComments are optional: the revision-detection path passes
+// them when a hash change re-keyed feedback (see remapFeedbackHashes) so the
+// migration is persisted atomically alongside approved/denied. When omitted
+// (e.g. the first-load baseline) the server leaves existing feedback untouched.
+export function saveRevisionsNow(revisions, approved, denied, reapprovalNeeded = [], comments, generalComments) {
+  const body = { revisions, approved, denied, reapprovalNeeded };
+  if (comments !== undefined) body.comments = comments;
+  if (generalComments !== undefined) body.generalComments = generalComments;
+  return postJson('/api/state/revisions', body);
 }
 
 // ── Debounced saves for typed text ─────────────────────────────────────────

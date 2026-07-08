@@ -95,6 +95,53 @@ export function migrateApprovals(prevPatches, currPatches, approved, denied) {
   return { approved: newApproved, denied: newDenied, reapprovalNeeded };
 }
 
+// Merge two comment trees ({ filePath: { lineKey: commentObj } }) for the same
+// patch.  `newer` wins on collisions: a comment freshly made on the new
+// revision must not be overwritten by one carried forward from the old hash.
+function mergeCommentTrees(newer, older) {
+  if (!newer) return older;
+  if (!older) return newer;
+  const out = {};
+  const files = new Set([...Object.keys(older), ...Object.keys(newer)]);
+  for (const file of files) {
+    out[file] = { ...(older[file] || {}), ...(newer[file] || {}) };
+  }
+  return out;
+}
+
+/**
+ * Re-key review feedback (line comments and the patch-level general comment)
+ * from each patch's previous hash to its new hash when an amend/rebase changed
+ * the hash at the same position.  Feedback is keyed by patch hash; without this
+ * remap it would be orphaned under the old hash and silently vanish from the UI
+ * even though the reviewer never drained it.
+ *
+ * Unlike approvals (which a diff change invalidates), feedback is carried
+ * forward UNCONDITIONALLY — it is cleared only by submitting/draining the
+ * review, never by the code changing underneath it.
+ *
+ * Pure function — returns new objects, does not mutate the inputs.  `remap` is
+ * an iterable of [oldHash, newHash] pairs.
+ */
+export function remapFeedbackHashes(comments, generalComments, remap) {
+  const nextComments = { ...(comments || {}) };
+  const nextGeneral  = { ...(generalComments || {}) };
+  for (const [oldHash, newHash] of remap) {
+    if (oldHash === newHash) continue;
+    if (nextComments[oldHash] !== undefined) {
+      nextComments[newHash] = mergeCommentTrees(nextComments[newHash], nextComments[oldHash]);
+      delete nextComments[oldHash];
+    }
+    if (nextGeneral[oldHash] !== undefined) {
+      // Keep any general comment already written on the new revision; otherwise
+      // carry the old one forward.
+      if (!nextGeneral[newHash]) nextGeneral[newHash] = nextGeneral[oldHash];
+      delete nextGeneral[oldHash];
+    }
+  }
+  return { comments: nextComments, generalComments: nextGeneral };
+}
+
 export function detectRevisionChanges() {
   if (state.patches.length === 0) return;
 
@@ -118,12 +165,16 @@ export function detectRevisionChanges() {
 
   let hasChanges = false;
   const prevPatches = lastRevision.patches;
+  // [oldHash, newHash] pairs for positions whose commit hash changed — used to
+  // carry review feedback forward onto the amended patch (see remapFeedbackHashes).
+  const feedbackRemap = [];
   for (let i = 0; i < Math.max(state.patches.length, prevPatches.length); i++) {
     const curr = state.patches[i];
     const prev = prevPatches[i];
     if (!curr || !prev || curr.hash !== prev.hash) {
       if (curr && prev) {
         state.updatedPatches[i] = { oldHash: prev.hash, oldMessage: prev.message };
+        feedbackRemap.push([prev.hash, curr.hash]);
       }
       hasChanges = true;
     }
@@ -138,9 +189,17 @@ export function detectRevisionChanges() {
     for (const h of migrated.reapprovalNeeded) state.reapprovalNeeded.add(h);
     const currentHashes = new Set(state.patches.map((p) => p.hash));
     state.reapprovalNeeded = new Set([...state.reapprovalNeeded].filter((h) => currentHashes.has(h)));
+    // Carry undrained review feedback onto the amended patches so it survives
+    // the hash change instead of being orphaned under the old hash.
+    const remapped = remapFeedbackHashes(state.comments, state.generalComments, feedbackRemap);
+    state.comments        = remapped.comments;
+    state.generalComments = remapped.generalComments;
     state.revisions.push({ savedAt: new Date().toISOString(), patches: currentSnapshot });
     if (state.revisions.length > 10) state.revisions = state.revisions.slice(-10);
-    saveRevisionsNow(state.revisions, [...state.approved], [...state.denied], [...state.reapprovalNeeded]);
+    saveRevisionsNow(
+      state.revisions, [...state.approved], [...state.denied], [...state.reapprovalNeeded],
+      state.comments, state.generalComments,
+    );
   }
 }
 
@@ -163,5 +222,5 @@ export function getRevisionList(patchIdx) {
 
 // Allow unit tests to import without a full browser environment.
 if (typeof module !== 'undefined') {
-  module.exports = { diffFingerprint, normalizeFingerprint, migrateApprovals, detectRevisionChanges, getRevisionList };
+  module.exports = { diffFingerprint, normalizeFingerprint, migrateApprovals, remapFeedbackHashes, detectRevisionChanges, getRevisionList };
 }
