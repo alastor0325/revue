@@ -207,6 +207,19 @@ function getMergeBase(worktreePath, mainRepoPath, maxCommits = MAX_REVIEW_COMMIT
       bestCount = count;
       bestTip = name;
     }
+
+    // The branch's own upstream (@{u}) is its declared base branch, so once it
+    // yields a plausible series (non-empty and within the review cap) it is
+    // authoritative — take it and skip the remaining fallback candidates. Those
+    // fallbacks (origin/main, origin/master, the main repo HEAD) exist only for
+    // worktrees with no upstream; probing them when @{u} already answered is
+    // pure waste. On a large repo an esr/beta worktree forks from origin/main
+    // tens of thousands of commits back, so its merge-base and rev-list --count
+    // each walk that whole divergence (seconds per candidate) and block the
+    // server's event loop on every diff load. A zero-commit or over-cap @{u}
+    // does not short-circuit, so the existing fallback/baseTooFar paths are
+    // unchanged.
+    if (name === '@{u}' && count > 0 && count <= maxCommits) break;
   }
 
   // Even the nearest base is implausibly far from HEAD — the worktree's intended

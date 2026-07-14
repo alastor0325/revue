@@ -589,6 +589,26 @@ describe('getMergeBase', () => {
     expect(getMergeBase(WORKTREE, MAIN_REPO)).toBe('esr-base');
   });
 
+  test('short-circuits on a plausible @{u} and never probes the far fallbacks', () => {
+    // Perf guard: when @{u} already yields a valid series, the costly
+    // origin/main merge-base + rev-list (which on a real beta/esr worktree walk
+    // the full divergence and block the event loop) must not run at all.
+    execSync.mockImplementation(fakeGit({
+      refs: { '@{u}': 'beta-tip', 'origin/main': 'central-tip' },
+      mergeBases: { 'beta-tip': 'beta-base', 'central-tip': 'ancient-base' },
+      counts: { 'beta-base': 3, 'ancient-base': 71656 },
+    }, MAIN_REPO));
+    expect(getMergeBase(WORKTREE, MAIN_REPO)).toBe('beta-base');
+    expect(execSync).not.toHaveBeenCalledWith(
+      `git -C "${WORKTREE}" merge-base HEAD central-tip`,
+      expect.anything()
+    );
+    expect(execSync).not.toHaveBeenCalledWith(
+      `git -C "${WORKTREE}" rev-list --count ancient-base..HEAD`,
+      expect.anything()
+    );
+  });
+
   test('throws baseTooFar when the nearest base exceeds the commit cap', () => {
     // The reported esr hang: no upstream set, so only origin/main resolves, and
     // its merge-base is tens of thousands of commits back. Diffing that range
