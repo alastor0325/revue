@@ -2016,7 +2016,16 @@ describe('hub — one port, one /r/<slug>/ per project', () => {
 
 describe('CLI hub client — revue --repo X joins the running hub', () => {
   const { createHub } = require('../src/hub');
-  const { registerWithHub, collectHubProjects, runningHubPorts, pidFilePath, ensurePidsDir } = require('../bin/revue');
+  // bin/revue.js fixes its ~/.revue.pids path from os.homedir() at require
+  // time; load it with homedir pointed at a scratch dir so this block never
+  // sees or touches real running daemons.
+  const scratchHome = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-cli-home-'));
+  let registerWithHub, collectHubProjects, runningHubPorts, pidFilePath, ensurePidsDir;
+  jest.isolateModules(() => {
+    jest.doMock('os', () => ({ ...jest.requireActual('os'), homedir: () => scratchHome }));
+    ({ registerWithHub, collectHubProjects, runningHubPorts, pidFilePath, ensurePidsDir } = require('../bin/revue'));
+    jest.dontMock('os');
+  });
   let server, port;
 
   beforeAll(async () => {
@@ -2030,8 +2039,12 @@ describe('CLI hub client — revue --repo X joins the running hub', () => {
   });
 
   afterAll((done) => {
-    try { fs.unlinkSync(pidFilePath(process.pid)); } catch {}
+    fs.rmSync(scratchHome, { recursive: true, force: true });
     server.close(done);
+  });
+
+  test('uses the scratch home, not the real ~/.revue.pids', () => {
+    expect(pidFilePath(process.pid).startsWith(scratchHome)).toBe(true);
   });
 
   test('runningHubPorts finds the advertised port', () => {

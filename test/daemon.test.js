@@ -4,6 +4,17 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+// bin/revue.js derives ~/.revue.pids and ~/.revue/config.json from
+// os.homedir() at require time, and stopDaemon() SIGTERMs every daemon tracked
+// there.  Mock homedir to a scratch dir for this whole file so a test run never
+// kills (or unregisters) the developer's real revue daemons.  (Setting
+// process.env.HOME doesn't work: Jest sandboxes process.env, while
+// os.homedir() reads the real environment.)
+const REAL_HOME = jest.requireActual('os').homedir();
+const mockScratchHome = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-daemon-home-'));
+jest.mock('os', () => ({ ...jest.requireActual('os'), homedir: () => mockScratchHome }));
+afterAll(() => fs.rmSync(mockScratchHome, { recursive: true, force: true }));
+
 // Mock child_process.spawn and src/server + src/git so requiring the bin
 // doesn't trigger real git or server code
 jest.mock('child_process', () => ({ spawn: jest.fn() }));
@@ -248,6 +259,11 @@ describe('isRunning', () => {
 // ── stopDaemon ─────────────────────────────────────────────────────────────
 
 describe('stopDaemon', () => {
+  test('runs against a scratch home, never the real ~/.revue.pids', () => {
+    expect(os.homedir()).not.toBe(REAL_HOME);
+    expect(pidFilePath(1).startsWith(mockScratchHome)).toBe(true);
+  });
+
   test('returns an array of killed PIDs (empty when nothing was running)', () => {
     // Don't assume an empty environment — a real revue daemon may be tracked in
     // ~/.revue.pids during the run. The contract is simply "returns a PID array".
