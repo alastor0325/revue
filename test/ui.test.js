@@ -348,6 +348,14 @@ describe('scroll behavior', () => {
     const visible = await scrollPage.$eval('#btn-back-to-top', (el) => getComputedStyle(el).display !== 'none');
     expect(visible).toBe(false);
   });
+
+  test('a reload returns to the same scroll position', async () => {
+    await scrollPage.evaluate(() => window.scrollTo(0, 700));
+    await scrollPage.waitForFunction(() => window.scrollY === 700);
+    await scrollPage.reload();
+    await scrollPage.waitForFunction(() => Math.abs(window.scrollY - 700) < 2, null, { timeout: 5000 });
+    await scrollPage.evaluate(() => window.scrollTo(0, 0));
+  });
 });
 
 // ── Patch tabs ─────────────────────────────────────────────────────────────
@@ -2545,6 +2553,15 @@ describe('revision compare mode', () => {
     expect((await revCompPage.$$('.revision-toggle-bar')).length).toBe(1);
     expect(await revCompPage.$('.btn-compare-toggle')).not.toBeNull();
   });
+
+  test('a reload keeps the comparison open (per tab)', async () => {
+    if (!(await revCompPage.$('.btn-compare-toggle.active'))) await revCompPage.click('.btn-compare-toggle');
+    await revCompPage.waitForSelector('.btn-compare-toggle.active');
+    await revCompPage.reload();
+    await revCompPage.waitForSelector('.btn-compare-toggle.active');
+    expect(await revCompPage.$$eval('.revision-toggle-bar', (bars) => bars.length)).toBe(2);
+    await revCompPage.click('.btn-compare-toggle.active'); // leave compare mode for later tests
+  });
 });
 
 // ── Revision comparison file scoping ───────────────────────────────────────
@@ -3618,7 +3635,7 @@ describe('per-language syntax highlighting', () => {
 // ── Source | Rendered toggle (rich diff of Markdown) ──────────────────────
 
 describe('rendered (rich) diff of a Markdown file', () => {
-  let richServer, richPage, richRepo;
+  let richServer, richCtx, richPage, richRepo;
   // Patches are built lazily and hidden on switch, so scope to the visible one.
   const cur = '#files-changed > div:not([style*="display: none"])';
 
@@ -3636,7 +3653,8 @@ describe('rendered (rich) diff of a Markdown file', () => {
     const app = createApp({ worktreeName: 'rich-repo', worktreePath: richRepo, mainRepoPath });
     const port = await findAvailablePort(19480);
     await new Promise((r) => { richServer = app.listen(port, '127.0.0.1', r); });
-    richPage = await browser.newPage();
+    richCtx = await browser.newContext(); // explicit, so a test can open a second tab
+    richPage = await richCtx.newPage();
     await richPage.goto(`http://127.0.0.1:${port}`);
     await richPage.waitForSelector('.patch-tab');
     await richPage.locator('.patch-tab').nth(1).click(); // the edit commit
@@ -3644,7 +3662,7 @@ describe('rendered (rich) diff of a Markdown file', () => {
   }, 30000);
 
   afterAll(async () => {
-    await richPage?.close();
+    await richCtx?.close();
     await new Promise((r) => richServer?.close(r));
   });
 
@@ -3675,6 +3693,37 @@ describe('rendered (rich) diff of a Markdown file', () => {
     await richPage.click(`${cur} .view-toggle [data-view=source]`);
     expect(await richPage.isVisible(`${cur} .diff-table`)).toBe(true);
     expect(await richPage.isVisible(`${cur} .rich-view`)).toBe(false);
+  });
+
+  test('a reload keeps the layout: patch tab, sidebar, Rendered view, collapsed files', async () => {
+    // On the edit commit (tab 2): switch doc.md to Rendered and collapse the sidebar.
+    await richPage.click(`${cur} .view-toggle [data-view=rendered]`);
+    await richPage.click('.file-nav-toggle');
+    await richPage.waitForSelector('#file-nav.collapsed');
+    await richPage.reload();
+    await richPage.waitForSelector(`${cur} .view-toggle [data-view=rendered].active`);
+    expect(await richPage.$$eval('.patch-tab', (ts) => ts.map((t) => t.classList.contains('active')))).toEqual([false, true]);
+    expect(await richPage.$eval('#file-nav', (n) => n.classList.contains('collapsed'))).toBe(true);
+    expect(await richPage.isVisible(`${cur} .rich-view`)).toBe(true);
+
+    // Collapse the file itself, reload: it stays collapsed.
+    await richPage.click(`${cur} .file-header .file-path`);
+    await richPage.reload();
+    await richPage.waitForSelector(`${cur} .file-toggle.collapsed`);
+    expect(await richPage.isVisible(`${cur} .diff-body`)).toBe(false);
+
+    // A second tab shares the preferences (sidebar) but not where this tab
+    // is: it opens on the first patch.
+    const other = await richCtx.newPage();
+    await other.goto(richPage.url());
+    await other.waitForSelector('.patch-tab.active');
+    expect(await other.$$eval('.patch-tab', (ts) => ts.map((t) => t.classList.contains('active')))).toEqual([true, false]);
+    expect(await other.$eval('#file-nav', (n) => n.classList.contains('collapsed'))).toBe(true);
+    await other.close();
+
+    // Restore for the tests that follow.
+    await richPage.click(`${cur} .file-header .file-path`);
+    await richPage.click('.file-nav-toggle');
   });
 
   test('the chosen view survives a re-render (Approve)', async () => {

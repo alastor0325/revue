@@ -10,6 +10,7 @@ The browser-side application is split into five ES modules under `public/`. This
 | `public/persistence.js` | ~70 | `saveState`, `scheduleAutoSave`, `flushSave`, prompt bar data |
 | `public/revisions.js` | ~120 | `diffFingerprint`, `migrateApprovals`, `detectRevisionChanges`, `getRevisionList` |
 | `public/renderer.js` | ~1225 | All DOM construction and event wiring |
+| `public/layout.js` | ~140 | View layout kept across reloads: preferences in localStorage (sidebar, Rendered files, collapsed files), where the tab is in sessionStorage (open patch, revision/compare view, scroll); per project page and worktree, read once into memory; no imports |
 | `public/richdiff.js` | ~200 | Rendered (rich) diff of Markdown / Bikeshed files: block-level LCS diff (`diffSequences`), change marking (`markChanges`), the sandboxed-frame view (`mountRichView`). Server side: `src/render.js` + `GET /api/rendered` |
 | `public/highlight.js` | ~120 | Syntax highlighting of diff lines with the vendored `public/vendor/highlight.min.js`; pure helpers (`languageFor`, `splitHighlightedLines`, `highlightDiffLines`) |
 | `public/app.js` | ~370 | Orchestrators (`loadAndRender`, `submitReview`, `init`, `initWorktreeBar`, `startUpdatePolling`) + entry point |

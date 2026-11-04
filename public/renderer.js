@@ -13,6 +13,10 @@ import {
 import { getRevisionList } from './revisions.js';
 import { highlightDiffLines, languageClass } from './highlight.js';
 import { mountRichView } from './richdiff.js';
+import {
+  getSidebarCollapsed, setSidebarCollapsed, isRenderedView, setRenderedView,
+  isFileCollapsed, setFileCollapsed, savePatch, saveRevisionView,
+} from './layout.js';
 
 // ── DOM helpers ────────────────────────────────────────────────────────────
 function $(sel, root) { return (root || document).querySelector(sel); }
@@ -501,12 +505,19 @@ export function countStats(hunks) {
 }
 
 // Wire a file-header so clicking it collapses/expands its body.
-function makeCollapsible(header, body) {
-  let collapsed = false;
-  header.addEventListener('click', () => {
-    collapsed = !collapsed;
+// A file block's header collapses its body.  The choice survives reloads
+// (public/layout.js), keyed by commit and path: collapsing a file in one
+// patch must not hide its changes in another.
+function makeCollapsible(header, body, key) {
+  const apply = (collapsed) => {
     body.style.display = collapsed ? 'none' : '';
     header.querySelector('.file-toggle').classList.toggle('collapsed', collapsed);
+  };
+  apply(isFileCollapsed(key));
+  header.addEventListener('click', () => {
+    const collapsed = !isFileCollapsed(key);
+    setFileCollapsed(key, collapsed);
+    apply(collapsed);
   });
 }
 
@@ -555,7 +566,7 @@ export function renderFile(fileData, patchHash) {
     note.textContent = 'Binary file — content not shown';
     body.appendChild(note);
     block.appendChild(body);
-    makeCollapsible(header, body);
+    makeCollapsible(header, body, `${patchHash}:${filePath}`);
     return block;
   }
 
@@ -621,19 +632,17 @@ export function renderFile(fileData, patchHash) {
   body.appendChild(table);
   block.appendChild(body);
 
-  makeCollapsible(header, body);
+  makeCollapsible(header, body, `${patchHash}:${filePath}`);
   if (richToggle) richToggle.restore();
 
   return block;
 }
 
 // ── Source | Rendered toggle (Markdown and Bikeshed files) ─────────────────
-// Files whose Rendered view is on, by `${hash}:${path}`, so the many
-// re-renders of the patch view (approve/deny, refreshes) keep the choice.
-const richViewOn = new Set();
+// The chosen view is remembered per file path (public/layout.js), so it
+// survives the patch view's re-renders (approve/deny), reloads and amends.
 
 function addRichViewToggle(header, body, target) {
-  const key = `${target.hash}:${target.file}`;
   const toggle = document.createElement('span');
   toggle.className = 'view-toggle';
   toggle.innerHTML = '<button data-view="source" class="active">Source</button><button data-view="rendered">Rendered</button>';
@@ -649,14 +658,14 @@ function addRichViewToggle(header, body, target) {
       mountRichView(rich, target);
     }
     if (rich) rich.style.display = rendered ? '' : 'none';
-    if (rendered) richViewOn.add(key); else richViewOn.delete(key);
+    setRenderedView(target.file, rendered);
   };
   toggle.addEventListener('click', (e) => {
     e.stopPropagation(); // the header click collapses the file
     const b = e.target.closest('button');
     if (b) show(b.dataset.view === 'rendered');
   });
-  return { restore: () => { if (richViewOn.has(key)) show(true); } };
+  return { restore: () => { if (isRenderedView(target.file)) show(true); } };
 }
 
 // ── Patch tab rendering ─────────────────────────────────────────────────────
@@ -724,6 +733,7 @@ export function switchPatch(idx) {
   removeExistingForm();
   if (patchEls[state.currentPatchIdx]) patchEls[state.currentPatchIdx].el.style.display = 'none';
   state.currentPatchIdx = idx;
+  if (state.patches[idx]) savePatch(state.patches[idx].hash, idx);
   const entry = ensurePatchBuilt(idx); // build this patch's diff on first view
   if (entry) {
     entry.el.style.display = '';
@@ -761,7 +771,6 @@ function scrollTabIntoView(tab) {
 // ── File navigation sidebar ─────────────────────────────────────────────────
 const TOP_BAR_HEIGHT_VAR = '--top-bar-height';
 let fileNavScrollHandler = null;
-let fileNavCollapsed = false;
 let _stickyOffsetSetup = false;
 let _topBarHeight = 0;
 
@@ -903,20 +912,15 @@ export function activateFileNav(navItemsEl, diffWrap) {
     toggleBtn.className = 'file-nav-toggle';
     header.appendChild(toggleBtn);
     toggleBtn.addEventListener('click', () => {
-      fileNavCollapsed = !fileNavCollapsed;
-      nav.classList.toggle('collapsed', fileNavCollapsed);
-      toggleBtn.textContent = fileNavCollapsed ? '▶' : '◀';
-      toggleBtn.title = fileNavCollapsed ? 'Expand sidebar' : 'Collapse sidebar';
+      setSidebarCollapsed(!getSidebarCollapsed());
+      applySidebar(nav, header);
     });
   }
-  const toggleBtn = header.querySelector('.file-nav-toggle');
-  toggleBtn.textContent = fileNavCollapsed ? '▶' : '◀';
-  toggleBtn.title = fileNavCollapsed ? 'Expand sidebar' : 'Collapse sidebar';
 
   // Atomically swap to: header + new items
   nav.replaceChildren(header, navItemsEl);
   nav.style.display = '';
-  nav.classList.toggle('collapsed', fileNavCollapsed);
+  applySidebar(nav, header); // collapsed state is remembered across reloads (layout.js)
 
   const navItems = navItemsEl._navItems || [];
   const blocks   = navItemsEl._blocks   || [];
@@ -948,6 +952,14 @@ export function activateFileNav(navItemsEl, diffWrap) {
 }
 
 // Kept for backward compat — builds and activates in one call.
+function applySidebar(nav, header) {
+  const collapsed = getSidebarCollapsed();
+  nav.classList.toggle('collapsed', collapsed);
+  const btn = header.querySelector('.file-nav-toggle');
+  btn.textContent = collapsed ? '▶' : '◀';
+  btn.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+}
+
 export function renderFileNav(files, diffWrap) {
   activateFileNav(buildNavItemsEl(files, diffWrap), diffWrap);
 }
@@ -1373,6 +1385,9 @@ export function buildPatchEl(idx) {
 // Re-render the current patch in-place (called when approve/deny/comment state changes).
 export function renderCurrentPatch() {
   const idx = state.currentPatchIdx;
+  // Revision and compare choices take effect through this re-render; keep
+  // them for a reload of this tab.
+  saveRevisionView(state.showRevision, state.compareRevision);
   const { el, diffWrap, navItemsEl } = buildPatchEl(idx);
   const existing = patchEls[idx];
   patchEls[idx] = { el, diffWrap, navItemsEl, built: true };
@@ -1483,8 +1498,6 @@ export function initTabsDragScroll() {
   if (bar) addDragScroll(bar);
 }
 
-export function getFileNavCollapsed() { return fileNavCollapsed; }
-export function setFileNavCollapsed(v) { fileNavCollapsed = v; }
 
 // Allow unit tests to import without a full browser environment.
 if (typeof module !== 'undefined') {
@@ -1497,7 +1510,6 @@ if (typeof module !== 'undefined') {
     buildNavItemsEl, activateFileNav, renderFileNav, navigateFile,
     buildPatchEl, renderCurrentPatch, initPatchNodes, formatPatchDate,
     addDragScroll, initTabsDragScroll,
-    getFileNavCollapsed, setFileNavCollapsed,
     setupStickySidebarOffset,
   };
 }

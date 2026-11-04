@@ -13,8 +13,23 @@ import {
   initStateChannel, hasPendingSave, maybeCatchupOnVisible,
 } from './persistence.js';
 // Revisions: detect changes on load
-import { diffFingerprint, migrateApprovals, detectRevisionChanges } from './revisions.js';
+import { diffFingerprint, migrateApprovals, detectRevisionChanges, getRevisionList } from './revisions.js';
 import { loadHighlighter } from './highlight.js';
+import { setLayoutWorktree, savedPatchIndex, savedRevisionView, savedScroll, saveScroll } from './layout.js';
+
+// Restore this tab's revision / compare choices if those revisions still exist.
+function restoreRevisionView() {
+  const { showRevision, compareRevision } = savedRevisionView();
+  const has = (idx, hash) => getRevisionList(Number(idx)).some((r) => r.hash === hash);
+  for (const [idx, hash] of Object.entries(showRevision)) if (hash && has(idx, hash)) state.showRevision[idx] = hash;
+  for (const [idx, c] of Object.entries(compareRevision)) {
+    if (c && has(idx, c.from) && has(idx, c.to)) state.compareRevision[idx] = c;
+  }
+}
+
+// The scroll position is restored on the first load only (not on a worktree
+// switch or a reload button), and saved whenever the page is hidden or left.
+let scrollRestored = false;
 
 // Resolves once the syntax highlighter has loaded (or failed to).  Already
 // resolved when init() didn't run (unit tests import the module directly).
@@ -26,7 +41,7 @@ import {
   restoreLineDisplay,
   renderFileNav, renderFile, navigateFile,
   renderTabs, switchPatch, buildPatchEl, renderCurrentPatch, initPatchNodes,
-  addDragScroll, initTabsDragScroll, getFileNavCollapsed, setFileNavCollapsed,
+  addDragScroll, initTabsDragScroll,
   setupStickySidebarOffset, formatPatchDate,
 } from './renderer.js';
 
@@ -291,7 +306,9 @@ async function loadAndRender() {
     }
 
     state.patches = data.patches || [];
-    state.currentPatchIdx = 0;
+    // Reopen the patch tab this worktree was on before the reload.
+    setLayoutWorktree(data.worktreeName);
+    state.currentPatchIdx = savedPatchIndex(state.patches);
 
     // Reset the update-detection baseline to the worktree we just loaded, and
     // clear any stale banner.  Without this, switching worktrees would compare
@@ -315,9 +332,15 @@ async function loadAndRender() {
       }
     } else {
       detectRevisionChanges();
+      restoreRevisionView();
     }
     renderTabs();
     initPatchNodes();
+    if (!scrollRestored) {
+      scrollRestored = true;
+      const y = savedScroll();
+      if (y) requestAnimationFrame(() => window.scrollTo(0, y));
+    }
     updateSubmitButton();
     refreshPromptBar();
 
@@ -674,7 +697,9 @@ async function init() {
   // the tab is shown again.
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') maybeCatchupOnVisible();
+    else saveScroll(window.scrollY);
   });
+  window.addEventListener('pagehide', () => saveScroll(window.scrollY));
 
   await initWorktreeBar(); // awaited so hash-based switch completes before first render
   await loadAndRender();
@@ -718,7 +743,6 @@ if (typeof module !== 'undefined') {
     // renderer.js re-exports (for test backward compat)
     renderDraftDisplay, removeExistingForm, showCommentForm,
     renderFileNav, renderFile,
-    getFileNavCollapsed, setFileNavCollapsed,
     renderCommitMessageSection,
     buildPatchEl,
     initPatchNodes,

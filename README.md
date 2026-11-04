@@ -66,6 +66,7 @@ npm link                          # makes `revue` available globally
 | **Revision detection** | When commits are amended, a revision bar lets you compare old vs new diffs side-by-side. |
 | **Multi-tab sync** | Open the same worktree in any number of tabs, browsers, or windows. Edits stream over Server-Sent Events; open forms are never clobbered by a peer save. |
 | **Worktree switcher** | Running Claude in parallel on `myrepo-feature` and `myrepo-experiment`? Switch from the tab bar — no restart. |
+| **Layout survives reloads** | A reload comes back the way you left it. Your browser keeps, per project and worktree, the collapsed sidebar, collapsed files, and each file's Source/Rendered choice (by path, so it outlives amended commits). Each tab keeps its own open patch, revision or comparison, and scroll position, so two tabs on one worktree don't overwrite each other. |
 | **Keyboard navigation** | `←`/`→` switch patch tabs; `↑`/`↓` move between files in the current patch. Disabled while typing in a comment field. |
 | **Update banner** | Detects when Claude has pushed new commits to the worktree; click reload to pull them in without losing your session. |
 | **Background daemon** | `revue` starts in the background and returns control immediately. `revue --stop` / `--restart` for lifecycle. |

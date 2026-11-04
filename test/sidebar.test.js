@@ -4,10 +4,10 @@
 global.fetch = jest.fn();
 global.EventSource = jest.fn(() => ({ addEventListener: jest.fn(), close: jest.fn() }));
 
+const { renderFileNav, renderFile } = require('../public/app');
 const {
-  renderFileNav, renderFile,
-  getFileNavCollapsed, setFileNavCollapsed,
-} = require('../public/app');
+  getSidebarCollapsed: getFileNavCollapsed, setSidebarCollapsed: setFileNavCollapsed,
+} = require('../public/layout');
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 

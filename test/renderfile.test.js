@@ -27,6 +27,8 @@ function makeLine(type, content, oldLineNum = null, newLineNum = null) {
 beforeEach(() => {
   jest.clearAllMocks();
   state.comments = {};
+  localStorage.clear(); // layout (collapsed files) persists across tests otherwise
+  require('../public/layout').resetLayoutCache();
 });
 
 // ── Structure ────────────────────────────────────────────────────────────────
