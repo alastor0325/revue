@@ -128,7 +128,7 @@ revue --repo ~/code/firefox        # starts the daemon → http://localhost:7777
 revue --repo ~/code/revue          # joins it          → http://localhost:7777/r/revue/
 ```
 
-Each repo lives under `/r/<repo-name>/` (a numeric suffix is added if two repos share a name). `http://localhost:7777/` lists every project, or goes straight to it when there is only one. Running `revue --repo <path> <worktree>` for a repo that is already open switches it to that worktree. `--port N` targets the daemon on port N, and starts one there if none is running. `revue --restart` brings back every project that was open; `revue --stop` stops the daemon and all its projects.
+Each repo lives under `/r/<repo-name>/` (a numeric suffix is added if two repos share a name). `http://localhost:7777/` is the project dashboard: every open repo with its current worktree. Inside a project, the dropdown next to the **Revue** wordmark switches to another project or back to the dashboard (**All projects…**). Running `revue --repo <path> <worktree>` for a repo that is already open switches it to that worktree. `--port N` targets the daemon on port N, and starts one there if none is running. `revue --restart` brings back every project that was open; `revue --stop` stops the daemon and all its projects.
 
 ---
 

@@ -594,6 +594,30 @@ function initBackToTop() {
   sync(); // handle a reload that restored a scrolled position
 }
 
+// ── Project switcher ─────────────────────────────────────────────────────────
+// Under the hub every project has its own path on one port.  Fill the header
+// dropdown with the mounted projects (plus the dashboard at /) so the reviewer
+// can jump between them.  Stays hidden when this page isn't one of the hub's
+// projects (e.g. served standalone, where the hub endpoint doesn't exist).
+export async function initProjectSwitcher() {
+  const sel = $('#project-switcher');
+  if (!sel) return;
+  let projects;
+  try {
+    const res = await fetch('/api/hub/projects'); // hub root, not this project
+    if (!res.ok) return;
+    ({ projects } = await res.json());
+  } catch { return; }
+  const here = window.location.pathname;
+  if (!Array.isArray(projects) || !projects.some((p) => p.path === here)) return;
+  sel.replaceChildren(
+    ...projects.map((p) => new Option(p.slug, p.path, false, p.path === here)),
+    new Option('All projects…', '/'),
+  );
+  sel.hidden = false;
+  sel.addEventListener('change', () => { window.location.href = sel.value; });
+}
+
 async function init() {
   setupStickySidebarOffset();
   updateSubmitButton();
@@ -602,6 +626,7 @@ async function init() {
   document.addEventListener('keydown', handleArrowKeys);
   initBackToTop();
   initTabsDragScroll();
+  initProjectSwitcher();
 
   $('#btn-copy-prompt').addEventListener('click', () => {
     const prompt = $('#result-prompt').value;

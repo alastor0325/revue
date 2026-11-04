@@ -3520,6 +3520,23 @@ describe('UI under a hub project prefix', () => {
     await hubPage.waitForSelector('.btn-unapprove');
   }, 30000);
 
+  test('header switcher lists every project, marks the current one, and navigates', async () => {
+    await hubPage.goto(hubBase + '/r/hub-repo/');
+    await hubPage.waitForSelector('#project-switcher:not([hidden])');
+    const opts = await hubPage.$$eval('#project-switcher option', (os) => os.map((o) => [o.textContent, o.value]));
+    expect(opts).toEqual([['work-repo', '/r/work-repo/'], ['hub-repo', '/r/hub-repo/'], ['All projects…', '/']]);
+    expect(await hubPage.$eval('#project-switcher', (s) => s.value)).toBe('/r/hub-repo/');
+    await Promise.all([hubPage.waitForURL(hubBase + '/r/work-repo/'), hubPage.selectOption('#project-switcher', '/r/work-repo/')]);
+    await hubPage.waitForSelector('.patch-heading', { state: 'visible' });
+    expect(await hubPage.textContent('#bug-id-display')).toBe('work-repo');
+    await Promise.all([hubPage.waitForURL(hubBase + '/'), hubPage.selectOption('#project-switcher', '/')]);
+    expect(await hubPage.$$eval('#projects .project-card', (cs) => cs.length)).toBe(2);
+  }, 30000);
+
+  test('switcher stays hidden when the UI is not served by a hub', async () => {
+    expect(await page.$eval('#project-switcher', (s) => s.hidden)).toBe(true);
+  });
+
   test('a prefix without the trailing slash still loads the UI', async () => {
     await hubPage.goto(hubBase + '/r/hub-repo');
     await hubPage.waitForSelector('.patch-heading', { state: 'visible' });

@@ -1862,7 +1862,7 @@ describe('bulk write migrates legacy state', () => {
 // ── Hub: many projects behind one port ─────────────────────────────────────
 
 describe('hub — one port, one /r/<slug>/ per project', () => {
-  const { createHub, startHub, mergeProjects, isLocalCliRequest } = require('../src/hub');
+  const { createHub, startHub, mergeProjects, isLoopbackHost } = require('../src/hub');
   let server, base, hub;
 
   beforeAll(async () => {
@@ -1875,10 +1875,12 @@ describe('hub — one port, one /r/<slug>/ per project', () => {
 
   afterAll((done) => { server.close(done); });
 
-  test('/ redirects to the only project', async () => {
+  test('/ shows the dashboard even with a single project', async () => {
     const res = await httpRequest(`${base}/`);
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toBe('/r/work-repo/');
+    expect(res.status).toBe(200);
+    expect(res.body).toContain('href="/r/work-repo/"');
+    expect(res.body).toContain('1 project on this port');
+    expect((await httpRequest(`${base}/style.css`)).status).toBe(200);
   });
 
   test('/r/<slug> without a trailing slash redirects so relative UI URLs resolve', async () => {
@@ -1956,13 +1958,21 @@ describe('hub — one port, one /r/<slug>/ per project', () => {
     expect(rebound.status).toBe(403);
   });
 
-  test('isLocalCliRequest accepts loopback hosts only', () => {
-    const req = (host, origin) => ({ headers: { host, ...(origin && { origin }) } });
-    expect(isLocalCliRequest(req('localhost:7777'))).toBe(true);
-    expect(isLocalCliRequest(req('127.0.0.1:7777'))).toBe(true);
-    expect(isLocalCliRequest(req('[::1]:7777'))).toBe(true);
-    expect(isLocalCliRequest(req('localhost.evil.example'))).toBe(false);
-    expect(isLocalCliRequest(req('localhost:7777', 'http://localhost:7777'))).toBe(false);
+  test('isLoopbackHost accepts loopback hosts only', () => {
+    const req = (host) => ({ headers: { host } });
+    expect(isLoopbackHost(req('localhost:7777'))).toBe(true);
+    expect(isLoopbackHost(req('127.0.0.1:7777'))).toBe(true);
+    expect(isLoopbackHost(req('[::1]:7777'))).toBe(true);
+    expect(isLoopbackHost(req('localhost.evil.example'))).toBe(false);
+    expect(isLoopbackHost(req('evil.example:7777'))).toBe(false);
+  });
+
+  test('browser pages may read the project list but never register a project', async () => {
+    const origin = { Origin: base };
+    const reg = await httpRequest(`${base}/api/hub/projects`, { method: 'POST', body: { repoPath: mainRepoPath }, headers: origin });
+    expect(reg.status).toBe(403);
+    const dash = await httpRequest(`${base}/`, { headers: { Host: 'evil.example' } });
+    expect(dash.status).toBe(403);
   });
 
   test('two repos with the same basename get distinct slugs', () => {
@@ -1976,7 +1986,8 @@ describe('hub — one port, one /r/<slug>/ per project', () => {
     const pub = path.join(__dirname, '..', 'public');
     for (const f of fs.readdirSync(pub).filter((n) => n.endsWith('.js'))) {
       const code = fs.readFileSync(path.join(pub, f), 'utf8').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-      expect([f, code.match(/['"`]\/api\//g)]).toEqual([f, null]);
+      // /api/hub/ is the hub's own root endpoint, the one intentional absolute URL.
+      expect([f, code.match(/['"`]\/api\/(?!hub\/)/g)]).toEqual([f, null]);
     }
   });
 

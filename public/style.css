@@ -244,6 +244,42 @@ button { font-family: inherit; }
 }
 #header h1 .app-name:hover { color: var(--blue); }
 
+#project-switcher {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--bg-elev);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  padding: 3px 6px;
+  cursor: pointer;
+  align-self: center;
+}
+#project-switcher:hover { border-color: var(--rule-focus); }
+#project-switcher:focus-visible { outline: 2px solid var(--blue-line); outline-offset: 1px; }
+
+/* ─── Project dashboard (hub root) ──────────────────────────────────────── */
+.dashboard-main { max-width: 880px; margin: 32px auto; padding: 0 24px; }
+#projects { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.project-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 16px;
+  align-items: baseline;
+  padding: 14px 18px;
+  background: var(--bg-elev);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+.project-card:hover { border-color: var(--rule-strong); }
+.project-name { font-family: var(--font-mono); font-size: 16px; font-weight: 700; color: var(--ink); text-decoration: none; }
+.project-name:hover { color: var(--blue); }
+.project-worktree { font-family: var(--font-mono); font-size: 13px; color: var(--ink-2); }
+.project-path { grid-column: 1 / -1; font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); }
+.dashboard-empty, .dashboard-hint { color: var(--ink-quiet); font-size: 13px; margin-top: 20px; }
+.dashboard-hint code { font-family: var(--font-mono); color: var(--ink-2); }
+
 #bug-id-display {
   font-family: var(--font-mono);
   font-size: 13px;

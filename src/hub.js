@@ -70,11 +70,12 @@ function mergeProjects(list) {
   return [...byPath.values()];
 }
 
-// The register/list endpoints accept or expose absolute filesystem paths, so
-// only the local CLI may use them: reject anything a browser page could send
-// (an Origin header) and any Host that isn't loopback (DNS rebinding).
-function isLocalCliRequest(req) {
-  if (req.headers.origin) return false;
+// The hub routes accept or expose absolute filesystem paths, so all of them
+// require a loopback Host (blocks DNS rebinding).  Cross-origin pages can't
+// read the GET responses (no CORS headers), and revue's own pages send no
+// Origin on same-origin GETs.  Registration is CLI-only: the POST handler
+// also refuses any request carrying an Origin header, i.e. any browser page.
+function isLoopbackHost(req) {
   const host = String(req.headers.host || '').replace(/:\d+$/, '');
   return host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
 }
@@ -121,14 +122,14 @@ function createHub() {
   }
 
   app.get('/api/hub/projects', (req, res) => {
-    if (!isLocalCliRequest(req)) return res.status(403).json({ error: 'Forbidden.' });
+    if (!isLoopbackHost(req)) return res.status(403).json({ error: 'Forbidden.' });
     res.json({ projects: listProjects() });
   });
 
   // Body parser scoped to this route: a hub-wide one would pre-parse every
   // project's POST with the 100 KB default and 413 large state saves.
   app.post('/api/hub/projects', express.json(), (req, res) => {
-    if (!isLocalCliRequest(req)) return res.status(403).json({ error: 'Forbidden.' });
+    if (!isLoopbackHost(req) || req.headers.origin) return res.status(403).json({ error: 'Forbidden.' });
     const { repoPath, worktree } = req.body || {};
     if (typeof repoPath !== 'string' || !path.isAbsolute(repoPath)) {
       return res.status(400).json({ error: 'repoPath must be an absolute path.' });
@@ -156,32 +157,48 @@ function createHub() {
     project.app(req, res, next);
   });
 
+  // Dashboard: every mounted project, always shown (even with just one) so
+  // there is one place to see and switch between everything on this port.
   app.get('/', (req, res) => {
+    if (!isLoopbackHost(req)) return res.status(403).send('Forbidden.');
     const list = listProjects();
-    if (list.length === 1) return res.redirect(302, list[0].path);
-    const items = list.map((p) =>
-      `<li><a href="${escapeHtml(p.path)}">${escapeHtml(p.slug)}</a>` +
-      ` <span class="wt">${escapeHtml(p.worktree)}</span>` +
-      ` <code>${escapeHtml(p.repoPath)}</code></li>`).join('\n');
+    const cards = list.map((p) => `
+      <li class="project-card">
+        <a class="project-name" href="${escapeHtml(p.path)}">${escapeHtml(p.slug)}</a>
+        <span class="project-worktree" title="Current worktree">${escapeHtml(p.worktree)}</span>
+        <code class="project-path">${escapeHtml(p.repoPath)}</code>
+      </li>`).join('');
     res.type('html').send(`<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Revue — projects</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<style>
-  body { font: 15px/1.5 system-ui, sans-serif; max-width: 760px; margin: 48px auto; padding: 0 16px; }
-  li { margin: 8px 0; } a { font-weight: 600; } .wt { color: #666; } code { color: #888; font-size: 13px; }
-</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<h1>Revue</h1>
-${list.length ? `<ul id="projects">\n${items}\n</ul>` : '<p>No projects yet. Run <code>revue --repo &lt;path&gt;</code>.</p>'}
+<div id="header">
+  <div id="header-left">
+    <h1><a href="https://github.com/alastor0325/revue" target="_blank" class="app-name">Revue</a> <span id="bug-id-display">Projects</span></h1>
+    <div id="worktree-path">${list.length} project${list.length === 1 ? '' : 's'} on this port</div>
+  </div>
+</div>
+<main class="dashboard-main">
+${list.length ? `<ul id="projects">${cards}
+</ul>` : '<p class="dashboard-empty">No projects yet.</p>'}
+<p class="dashboard-hint">Add a project: <code>revue --repo &lt;path&gt;</code></p>
+</main>
 </body>
 </html>`);
   });
 
-  app.get('/favicon.svg', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'favicon.svg')));
+  const publicFile = (name) => (req, res) => res.sendFile(path.join(__dirname, '..', 'public', name));
+  app.get('/favicon.svg', publicFile('favicon.svg'));
+  app.get('/style.css', publicFile('style.css'));
 
   return { app, addProject, listProjects };
 }
@@ -212,5 +229,5 @@ async function startHub({ projects, port: preferredPort = 7777, pidFile, noOpen 
 }
 
 module.exports = {
-  createHub, startHub, mergeProjects, resolveEntry, buildEntries, pickDefaultEntry, isLocalCliRequest,
+  createHub, startHub, mergeProjects, resolveEntry, buildEntries, pickDefaultEntry, isLoopbackHost,
 };
