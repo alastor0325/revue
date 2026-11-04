@@ -119,6 +119,17 @@ revue --version                    # print the version and exit (alias: -v)
 
 Revue shows the patches between a worktree's HEAD and the branch it forked from. It infers that base from the branch's upstream (`@{u}`), falling back to `origin/main`/`origin/master`. For a branch off a non-main base (e.g. an esr/beta branch off `origin/esr115`) **set its upstream** — `git branch --set-upstream-to=origin/esr115` — otherwise the base resolves to `origin/main`, tens of thousands of commits back. Rather than hang on such a range, Revue shows an actionable error telling you to set the upstream.
 
+### One port for every project
+
+A single revue daemon serves all your repos on one port. Running `revue --repo <path>` while a daemon is up adds that repo to it instead of starting another server on the next free port:
+
+```bash
+revue --repo ~/code/firefox        # starts the daemon → http://localhost:7777/r/firefox/
+revue --repo ~/code/revue          # joins it          → http://localhost:7777/r/revue/
+```
+
+Each repo lives under `/r/<repo-name>/` (a numeric suffix is added if two repos share a name). `http://localhost:7777/` lists every project, or goes straight to it when there is only one. Running `revue --repo <path> <worktree>` for a repo that is already open switches it to that worktree. `--port N` targets the daemon on port N, and starts one there if none is running. `revue --restart` brings back every project that was open; `revue --stop` stops the daemon and all its projects.
+
 ---
 
 ## Development

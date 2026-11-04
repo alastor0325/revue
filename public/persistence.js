@@ -11,7 +11,7 @@ import { state, allPatchesFinished } from './state.js';
 // counter.  On SSE reconnect the server sends a fresh `hello` event with
 // its current `_version`; if the client missed events during the drop
 // (or the server restarted, resetting to 0), the client emits a synthetic
-// `catchup` delta so the app refetches `/api/state` and reconciles.
+// `catchup` delta so the app refetches `api/state` and reconciles.
 let stateEvents = null;
 let stateEventsCallback = null;
 const TAB_ID = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -25,7 +25,7 @@ export function initStateChannel(worktreeName, onRemoteDelta) {
   closeStateChannel();
   if (typeof EventSource === 'undefined') return null;
   stateEventsCallback = onRemoteDelta;
-  stateEvents = new EventSource('/api/state/events');
+  stateEvents = new EventSource('api/state/events');
   let sawHello = false;
   let lastSeenVersion = 0;
   stateEvents.onmessage = (e) => {
@@ -117,15 +117,15 @@ async function postJson(url, body) {
 // serialises read-modify-write under a per-worktree lock.
 
 export function saveCommentNow(patchHash, file, key, comment) {
-  return postJson('/api/state/comment', { patchHash, file, key, comment });
+  return postJson('api/state/comment', { patchHash, file, key, comment });
 }
 
 export function saveDecisionNow(patchHash, kind) {
-  return postJson('/api/state/decision', { patchHash, kind });
+  return postJson('api/state/decision', { patchHash, kind });
 }
 
 export function saveRevisionsNow(revisions, approved, denied, reapprovalNeeded = []) {
-  return postJson('/api/state/revisions', { revisions, approved, denied, reapprovalNeeded });
+  return postJson('api/state/revisions', { revisions, approved, denied, reapprovalNeeded });
 }
 
 // ── Debounced saves for typed text ─────────────────────────────────────────
@@ -171,11 +171,11 @@ function makeDebouncedSaver(url, buildBody) {
 }
 
 const draftSaver = makeDebouncedSaver(
-  '/api/state/draft',
+  'api/state/draft',
   (key, text) => ({ key, text }),
 );
 const gcSaver = makeDebouncedSaver(
-  '/api/state/general-comment',
+  'api/state/general-comment',
   (patchHash, text) => ({ patchHash, text }),
 );
 
@@ -186,7 +186,7 @@ export function scheduleGeneralCommentSave(patchHash, text) { gcSaver.schedule(p
 // debounce would visibly leak the cleared draft into other tabs.
 export function saveDraftNow(key, text) {
   draftSaver.cancelKey(key);
-  return postJson('/api/state/draft', { key, text });
+  return postJson('api/state/draft', { key, text });
 }
 
 export function hasPendingSave() {
@@ -212,7 +212,7 @@ export function cancelPendingSaves() {
 // and preserves approved.  Using delta endpoints here would mean N+M POSTs
 // for N comments and M drafts — the bulk endpoint exists for exactly this.
 export async function saveStateBulk(payload) {
-  return postJson('/api/state', payload);
+  return postJson('api/state', payload);
 }
 
 // ── Prompt bar ─────────────────────────────────────────────────────────────

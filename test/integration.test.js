@@ -20,7 +20,7 @@ const { git, stateFilePathFor } = require('./helpers');
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function httpRequest(url, { method = 'GET', body = null } = {}) {
+function httpRequest(url, { method = 'GET', body = null, headers = {} } = {}) {
   return new Promise((resolve, reject) => {
     const data = body != null ? JSON.stringify(body) : null;
     const urlObj = new URL(url);
@@ -29,13 +29,16 @@ function httpRequest(url, { method = 'GET', body = null } = {}) {
       port: urlObj.port,
       path: urlObj.pathname + urlObj.search,
       method,
-      ...(data && { headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) } }),
+      headers: {
+        ...(data && { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }),
+        ...headers,
+      },
     }, (res) => {
       let out = '';
       res.on('data', (c) => { out += c; });
       res.on('end', () => {
-        try { resolve({ status: res.statusCode, body: JSON.parse(out) }); }
-        catch { resolve({ status: res.statusCode, body: out }); }
+        try { resolve({ status: res.statusCode, headers: res.headers, body: JSON.parse(out) }); }
+        catch { resolve({ status: res.statusCode, headers: res.headers, body: out }); }
       });
     });
     req.on('error', reject);
@@ -1853,5 +1856,208 @@ describe('bulk write migrates legacy state', () => {
     expect(fs.existsSync(stateFilePathFor(bmWork))).toBe(true);
     const { body } = await httpRequest(`http://127.0.0.1:${bmPort}/api/state`);
     expect(body.approved).toEqual(['new']);
+  });
+});
+
+// ── Hub: many projects behind one port ─────────────────────────────────────
+
+describe('hub — one port, one /r/<slug>/ per project', () => {
+  const { createHub, startHub, mergeProjects, isLocalCliRequest } = require('../src/hub');
+  let server, base, hub;
+
+  beforeAll(async () => {
+    hub = createHub();
+    hub.addProject({ repoPath: workRepoPath });
+    const port = await findAvailablePort(19500);
+    await new Promise((r) => { server = hub.app.listen(port, '127.0.0.1', r); });
+    base = `http://127.0.0.1:${port}`;
+  });
+
+  afterAll((done) => { server.close(done); });
+
+  test('/ redirects to the only project', async () => {
+    const res = await httpRequest(`${base}/`);
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/r/work-repo/');
+  });
+
+  test('/r/<slug> without a trailing slash redirects so relative UI URLs resolve', async () => {
+    const res = await httpRequest(`${base}/r/work-repo?x=1`);
+    expect(res.status).toBe(301);
+    expect(res.headers.location).toBe('/r/work-repo/?x=1');
+  });
+
+  test('project UI and API are served under its prefix', async () => {
+    const page = await httpRequest(`${base}/r/work-repo/`);
+    expect(page.status).toBe(200);
+    expect(page.body).toContain('<script type="module" src="app.js">');
+    const head = await httpRequest(`${base}/r/work-repo/api/headhash`);
+    expect(head.status).toBe(200);
+    expect(head.body.hash).toBe(commitHash);
+    const diff = await httpRequest(`${base}/r/work-repo/api/diff`);
+    expect(diff.body.repoName).toBe('work-repo');
+  });
+
+  test('unknown project is a 404', async () => {
+    const res = await httpRequest(`${base}/r/nope/api/diff`);
+    expect(res.status).toBe(404);
+  });
+
+  test('registering a second repo mounts it on the same port; / lists both', async () => {
+    const res = await httpRequest(`${base}/api/hub/projects`, {
+      method: 'POST', body: { repoPath: mainRepoPath }, headers: { Host: 'localhost' },
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true, slug: 'main-repo', path: '/r/main-repo/' });
+
+    const diff = await httpRequest(`${base}/r/main-repo/api/diff`);
+    expect(diff.body.repoName).toBe('main-repo');
+    const other = await httpRequest(`${base}/r/work-repo/api/diff`);
+    expect(other.body.repoName).toBe('work-repo');
+
+    const landing = await httpRequest(`${base}/`);
+    expect(landing.status).toBe(200);
+    expect(landing.body).toContain('href="/r/main-repo/"');
+    expect(landing.body).toContain('href="/r/work-repo/"');
+  });
+
+  test('re-registering the same repo reuses its slug', async () => {
+    const res = await httpRequest(`${base}/api/hub/projects`, { method: 'POST', body: { repoPath: mainRepoPath } });
+    expect(res.body.slug).toBe('main-repo');
+    const list = await httpRequest(`${base}/api/hub/projects`);
+    expect(list.body.projects.map((p) => p.slug).sort()).toEqual(['main-repo', 'work-repo']);
+    expect(list.body.projects.find((p) => p.slug === 'work-repo')).toMatchObject({
+      repoPath: workRepoPath, worktree: 'work-repo', path: '/r/work-repo/',
+    });
+  });
+
+  test('state writes larger than 100 KB still reach the project (no hub-wide body limit)', async () => {
+    const big = { comments: {}, generalComments: { x: 'a'.repeat(200 * 1024) }, approved: [], denied: [] };
+    const res = await httpRequest(`${base}/r/work-repo/api/state`, { method: 'POST', body: big });
+    expect(res.status).toBe(200);
+    await httpRequest(`${base}/r/work-repo/api/state`, { method: 'POST', body: {} });
+  });
+
+  test('rejects unknown worktree, relative and missing paths with 400', async () => {
+    const post = (body) => httpRequest(`${base}/api/hub/projects`, { method: 'POST', body });
+    const wt = await post({ repoPath: workRepoPath, worktree: 'nope' });
+    expect(wt.status).toBe(400);
+    expect(wt.body.error).toMatch(/worktree 'nope' not found/);
+    expect((await post({ repoPath: 'relative/path' })).status).toBe(400);
+    expect((await post({ repoPath: path.join(tmpDir, 'missing') })).status).toBe(400);
+  });
+
+  test('hub endpoints refuse browser (Origin) and non-loopback Host requests', async () => {
+    const fromPage = await httpRequest(`${base}/api/hub/projects`, {
+      method: 'POST', body: { repoPath: mainRepoPath }, headers: { Origin: 'http://evil.example' },
+    });
+    expect(fromPage.status).toBe(403);
+    const rebound = await httpRequest(`${base}/api/hub/projects`, { headers: { Host: 'evil.example:80' } });
+    expect(rebound.status).toBe(403);
+  });
+
+  test('isLocalCliRequest accepts loopback hosts only', () => {
+    const req = (host, origin) => ({ headers: { host, ...(origin && { origin }) } });
+    expect(isLocalCliRequest(req('localhost:7777'))).toBe(true);
+    expect(isLocalCliRequest(req('127.0.0.1:7777'))).toBe(true);
+    expect(isLocalCliRequest(req('[::1]:7777'))).toBe(true);
+    expect(isLocalCliRequest(req('localhost.evil.example'))).toBe(false);
+    expect(isLocalCliRequest(req('localhost:7777', 'http://localhost:7777'))).toBe(false);
+  });
+
+  test('two repos with the same basename get distinct slugs', () => {
+    const twinParent = fs.mkdtempSync(path.join(tmpDir, 'twin-'));
+    const twin = path.join(twinParent, 'work-repo');
+    git(twinParent, `clone -q "${mainRepoPath}" work-repo`);
+    expect(hub.addProject({ repoPath: twin })).toBe('work-repo-2');
+  });
+
+  test('client code uses relative api/ URLs so it works under /r/<slug>/', () => {
+    const pub = path.join(__dirname, '..', 'public');
+    for (const f of fs.readdirSync(pub).filter((n) => n.endsWith('.js'))) {
+      const code = fs.readFileSync(path.join(pub, f), 'utf8').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+      expect([f, code.match(/['"`]\/api\//g)]).toEqual([f, null]);
+    }
+  });
+
+  test('mergeProjects keeps one entry per repo and the first non-empty worktree', () => {
+    expect(mergeProjects([
+      { repoPath: '/a', worktree: null },
+      { repoPath: '/b', worktree: 'x' },
+      { repoPath: '/a', worktree: 'w' },
+      { repoPath: '/a', worktree: 'z' },
+      null,
+    ])).toEqual([{ repoPath: '/a', worktree: 'w' }, { repoPath: '/b', worktree: 'x' }]);
+  });
+
+  test('startHub writes pid:port, mounts every project and skips a vanished repo', async () => {
+    const pidDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-hubpid-'));
+    const pidFile = path.join(pidDir, 'pid');
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const { server: s, port } = await startHub({
+      projects: [
+        { repoPath: workRepoPath, worktree: 'gone-worktree' }, // stale: falls back to default
+        { repoPath: path.join(tmpDir, 'deleted-repo') },        // stale: skipped
+        { repoPath: mainRepoPath },
+      ],
+      port: 19550, pidFile, noOpen: true,
+    });
+    try {
+      expect(fs.readFileSync(pidFile, 'utf8')).toBe(`${process.pid}:${port}`);
+      const list = await httpRequest(`http://127.0.0.1:${port}/api/hub/projects`);
+      expect(list.body.projects.map((p) => p.slug)).toEqual(['work-repo', 'main-repo']);
+    } finally {
+      errSpy.mockRestore();
+      await new Promise((r) => s.close(r));
+      fs.rmSync(pidDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('CLI hub client — revue --repo X joins the running hub', () => {
+  const { createHub } = require('../src/hub');
+  const { registerWithHub, collectHubProjects, runningHubPorts, pidFilePath, ensurePidsDir } = require('../bin/revue');
+  let server, port;
+
+  beforeAll(async () => {
+    const hub = createHub();
+    hub.addProject({ repoPath: workRepoPath });
+    port = await findAvailablePort(19600);
+    await new Promise((r) => { server = hub.app.listen(port, '127.0.0.1', r); });
+    // Advertise this test process as a running daemon on that port.
+    ensurePidsDir();
+    fs.writeFileSync(pidFilePath(process.pid), `${process.pid}:${port}`);
+  });
+
+  afterAll((done) => {
+    try { fs.unlinkSync(pidFilePath(process.pid)); } catch {}
+    server.close(done);
+  });
+
+  test('runningHubPorts finds the advertised port', () => {
+    expect(runningHubPorts(port)).toEqual([port]);
+    expect(runningHubPorts(port + 1000)).toEqual([]);
+  });
+
+  test('registerWithHub returns the project URL on the shared port', async () => {
+    const res = await registerWithHub({ repoPath: mainRepoPath, port });
+    expect(res).toEqual({ url: `http://localhost:${port}/r/main-repo/` });
+  });
+
+  test('registerWithHub surfaces a hub-side error', async () => {
+    const res = await registerWithHub({ repoPath: mainRepoPath, worktree: 'nope', port });
+    expect(res.error).toMatch(/worktree 'nope' not found/);
+  });
+
+  test('registerWithHub returns null when no hub listens on the requested port', async () => {
+    expect(await registerWithHub({ repoPath: mainRepoPath, port: port + 1000 })).toBeNull();
+  });
+
+  test('collectHubProjects returns every mounted project for --restart', async () => {
+    const projects = await collectHubProjects();
+    expect(projects).toEqual(expect.arrayContaining([
+      expect.objectContaining({ repoPath: workRepoPath, worktree: 'work-repo' }),
+      expect.objectContaining({ repoPath: mainRepoPath, worktree: 'main-repo' }),
+    ]));
   });
 });

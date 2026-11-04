@@ -5,8 +5,8 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { spawn } = require('child_process');
-const { startServer } = require('../src/server');
-const { discoverWorktrees, getMainWorktreeBasename } = require('../src/git');
+const { openBrowser } = require('../src/server');
+const { startHub, resolveEntry } = require('../src/hub');
 
 const CONFIG_DIR  = path.join(os.homedir(), '.revue');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
@@ -96,36 +96,6 @@ function readPid() {
   return all.length > 0 ? all[0].pid : null;
 }
 
-function buildEntries(mainRepoPath) {
-  const entries = [];
-  if (mainRepoPath && fs.existsSync(mainRepoPath)) {
-    // Strip the repo-name prefix so a --repo that points at a sibling worktree
-    // (e.g. firefox-2044124) is labelled "2044124", not "firefox-2044124".
-    const prefix = getMainWorktreeBasename(mainRepoPath) + '-';
-    const base = path.basename(mainRepoPath);
-    entries.push({
-      path: mainRepoPath,
-      worktreeName: base.startsWith(prefix) ? base.slice(prefix.length) : base,
-      isMain: true,
-    });
-    try {
-      entries.push(...discoverWorktrees(mainRepoPath));
-    } catch {
-      // ignore
-    }
-  }
-  return entries;
-}
-
-/**
- * Pick the default entry to open when no worktree arg is given.
- * Prefers the first registered worktree over the main repo so the user
- * sees actual patches instead of an empty "No patches found" state.
- */
-function pickDefaultEntry(entries) {
-  return entries.find((e) => !e.isMain) || entries[0];
-}
-
 function isRunning(pid) {
   try {
     process.kill(pid, 0);
@@ -202,13 +172,84 @@ async function waitForExit(pids, { timeoutMs = 5000, pollMs = 100 } = {}) {
   }
 }
 
-async function daemonize(worktreeArgs) {
+// ── Hub client ─────────────────────────────────────────────────────────────
+// A running daemon is a hub serving every project on its one port, so a new
+// `revue --repo X` adds X to it instead of starting another daemon.
+
+/** Ports of running revue daemons, restricted to `port` when one is given. */
+function runningHubPorts(port = null) {
+  const ports = readAllInstances()
+    .filter((i) => i.port && isRunning(i.pid) && (port == null || i.port === port))
+    .map((i) => i.port);
+  return [...new Set(ports)];
+}
+
+async function hubRequest(port, method, body) {
+  const res = await fetch(`http://127.0.0.1:${port}/api/hub/projects`, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : {},
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(1000), // loopback: a live hub answers in ms
+  });
+  let json = null;
+  try { json = await res.json(); } catch {}
+  return { status: res.status, json };
+}
+
+/**
+ * Register a repo with the first running hub that accepts it.
+ * Returns { url } on success, { error } when a hub rejected the request (e.g.
+ * unknown worktree), or null when no hub is reachable — including daemons
+ * from a revue version without the hub endpoint — so the caller starts one.
+ */
+async function registerWithHub({ repoPath, worktree, port = null }) {
+  for (const p of runningHubPorts(port)) {
+    try {
+      const { status, json } = await hubRequest(p, 'POST', { repoPath, worktree: worktree || null });
+      if (status === 200 && json && json.path) return { url: `http://localhost:${p}${json.path}` };
+      if (status === 400 && json && json.error) return { error: json.error };
+    } catch { /* not reachable — try the next one */ }
+  }
+  return null;
+}
+
+/** Projects mounted on all running hubs, so --restart can bring them back. */
+async function collectHubProjects() {
+  const out = [];
+  for (const p of runningHubPorts()) {
+    try {
+      const { status, json } = await hubRequest(p, 'GET');
+      if (status === 200 && json && Array.isArray(json.projects)) out.push(...json.projects);
+    } catch { /* ignore */ }
+  }
+  return out;
+}
+
+/**
+ * Exit with the error if the repo/worktree in `args` can't be opened.  Runs in
+ * the foreground before forking because the detached daemon's output is
+ * discarded.  (A running hub validates registrations itself.)
+ */
+function exitIfUnresolvable(args) {
+  const { repo, rest } = parseArgs(args);
+  const repoPath = repo ? resolvePath(repo) : readConfig().defaultRepo;
+  try { resolveEntry(repoPath, rest[0]); } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+async function daemonize(worktreeArgs, extraProjects = []) {
   ensurePidsDir();
 
   const child = spawn(process.execPath, [__filename, ...worktreeArgs], {
     detached: true,
     stdio: 'ignore',
-    env: { ...process.env, REVUE_DAEMON: '1' },
+    env: {
+      ...process.env,
+      REVUE_DAEMON: '1',
+      ...(extraProjects.length && { REVUE_PROJECTS: JSON.stringify(extraProjects) }),
+    },
   });
   child.unref();
   fs.writeFileSync(pidFilePath(child.pid), String(child.pid));
@@ -273,9 +314,12 @@ Commands:
   revue --stop                 Stop the running instance
   revue --restart              Restart the running instance
 
+One daemon serves every repo on one port, each under /r/<repo-name>/.
+Running revue for another repo while it is up adds that repo to it.
+
 Options:
   --repo <path>                Override the default repo for this run
-  --port <port>                Use a specific port (default: 7777)
+  --port <port>                Use (or join) the daemon on this port (default: 7777)
   --no-open                    Do not open the browser on start
   --help, -h                   Show this help message
   --version, -v                Print the version and exit
@@ -309,10 +353,13 @@ async function main() {
   }
 
   if (flag === '--restart') {
+    exitIfUnresolvable(rawArgs.slice(1)); // before stopping anything
+    // Capture the mounted projects first so the new hub serves them all again.
+    const previous = await collectHubProjects();
     // Wait for the old instance(s) to fully exit so the port is free before
     // the new one tries to bind it.
     await waitForExit(stopDaemon());
-    daemonize(rawArgs.slice(1));
+    daemonize(rawArgs.slice(1), previous);
     return;
   }
 
@@ -323,7 +370,7 @@ async function main() {
 
   // Validate config/repo before forking so errors are visible to the user.
   if (!process.env.REVUE_DAEMON) {
-    const { repo } = parseArgs(rawArgs);
+    const { repo, port, noOpen, rest } = parseArgs(rawArgs);
     const config = readConfig();
     const repoPath = repo ? resolvePath(repo) : config.defaultRepo;
     if (!repoPath) {
@@ -335,6 +382,17 @@ async function main() {
       console.error(`Error: repo path does not exist: ${repoPath}`);
       process.exit(1);
     }
+    const registered = await registerWithHub({ repoPath, worktree: rest[0], port });
+    if (registered && registered.error) {
+      console.error(`Error: ${registered.error}`);
+      process.exit(1);
+    }
+    if (registered) {
+      console.log(`revue running at ${registered.url}`);
+      if (!noOpen) openBrowser(registered.url);
+      return;
+    }
+    exitIfUnresolvable(rawArgs);
     daemonize(rawArgs);
     return;
   }
@@ -350,37 +408,20 @@ async function main() {
   const config = readConfig();
   const mainRepoPath = repo ? resolvePath(repo) : config.defaultRepo;
 
-  const argName = positional[0];
-  let worktreeName;
-  let worktreePath;
+  let extra = [];
+  try { extra = JSON.parse(process.env.REVUE_PROJECTS || '[]'); } catch {}
 
-  if (argName) {
-    const entries = buildEntries(mainRepoPath);
-    const found = entries.find((e) => e.worktreeName === argName);
-    if (!found) {
-      const names = entries.map((e) => e.worktreeName).join(', ') || 'none';
-      console.error(`Error: worktree '${argName}' not found. Available: ${names}`);
-      process.exit(1);
-    }
-    worktreeName = found.worktreeName;
-    worktreePath = found.path;
-  } else {
-    const entries = buildEntries(mainRepoPath);
-    if (entries.length === 0) {
-      console.error(`No worktrees found for repo: ${mainRepoPath}`);
-      process.exit(1);
-    }
-    const first = pickDefaultEntry(entries);
-    worktreeName = first.worktreeName;
-    worktreePath = first.path;
-  }
-
-  if (!fs.existsSync(worktreePath)) {
-    console.error(`Error: Worktree not found at ${worktreePath}`);
+  try {
+    await startHub({
+      projects: [{ repoPath: mainRepoPath, worktree: positional[0] || null }, ...extra],
+      pidFile: myPidFile,
+      ...(port && { port }),
+      noOpen,
+    });
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
     process.exit(1);
   }
-
-  startServer({ worktreeName, worktreePath, mainRepoPath, pidFile: myPidFile, ...(port && { port }), noOpen });
 }
 
 if (require.main === module) {
@@ -389,7 +430,8 @@ if (require.main === module) {
 
 module.exports = {
   readPid, readAllInstances, isRunning, stopDaemon, waitForExit, waitForPort,
-  buildEntries, pickDefaultEntry, parseArgs, pidFilePath, ensurePidsDir,
+  parseArgs, pidFilePath, ensurePidsDir,
+  runningHubPorts, registerWithHub, collectHubProjects,
   readConfig, writeConfig, runInit, printHelp,
   LEGACY_PID_FILE, CONFIG_FILE,
 };

@@ -559,9 +559,7 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
       if (!found) {
         return res.status(404).json({ error: `Worktree '${newName}' not found.` });
       }
-      worktreeName = found.worktreeName;
-      worktreePath = found.path;
-      patchesCache = null; // repopulated from diffCache (or recomputed) on next loadData
+      switchWorktree(found.worktreeName, found.path);
       res.json({ ok: true, worktreeName, worktreePath });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -593,26 +591,44 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
     }
   });
 
+  function switchWorktree(name, p) {
+    worktreeName = name;
+    worktreePath = p;
+    patchesCache = null; // repopulated from diffCache (or recomputed) on next loadData
+  }
+
+  // Used by the hub (src/hub.js) to switch worktree when `revue <worktree>`
+  // targets a project that is already mounted, and to list mounted projects.
+  app.locals.switchWorktree = switchWorktree;
+  app.locals.currentWorktree = () => worktreeName;
+
   return app;
 }
 
 /**
  * Start the review web server.
  */
-async function startServer({ worktreeName, worktreePath, mainRepoPath, pidFile, port: preferredPort = 7777, noOpen = false }) {
+async function startServer({ worktreeName, worktreePath, mainRepoPath, pidFile, port = 7777, noOpen = false }) {
   const app = createApp({ worktreeName, worktreePath, mainRepoPath });
-  const port = await findAvailablePort(preferredPort);
+  return (await listen(app, { port, pidFile, noOpen })).server;
+}
 
+/**
+ * Bind `app` to the first free port from `port`, advertise it as `pid:port` in
+ * `pidFile` (read by the CLI's readAllInstances/waitForPort), and open
+ * `openPath` in the browser unless `noOpen`.
+ */
+async function listen(app, { port: preferredPort = 7777, pidFile, noOpen = false, openPath = '' }) {
+  const port = await findAvailablePort(preferredPort);
   return new Promise((resolve) => {
     const server = app.listen(port, '127.0.0.1', () => {
-      const url = `http://localhost:${port}`;
       if (pidFile) {
         try { fs.writeFileSync(pidFile, `${process.pid}:${port}`); } catch {}
       }
-      if (!noOpen) openBrowser(url);
-      resolve(server);
+      if (!noOpen) openBrowser(`http://localhost:${port}${openPath}`);
+      resolve({ server, port });
     });
   });
 }
 
-module.exports = { startServer, createApp, findAvailablePort };
+module.exports = { startServer, listen, createApp, findAvailablePort, openBrowser };

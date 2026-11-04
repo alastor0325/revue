@@ -7,16 +7,17 @@ const path = require('path');
 // Mock child_process.spawn and src/server + src/git so requiring the bin
 // doesn't trigger real git or server code
 jest.mock('child_process', () => ({ spawn: jest.fn() }));
-jest.mock('../src/server', () => ({ startServer: jest.fn() }));
+jest.mock('../src/server', () => ({ openBrowser: jest.fn() }));
 jest.mock('../src/git', () => ({ discoverWorktrees: jest.fn(), getMainWorktreeBasename: jest.fn() }));
 
 const { discoverWorktrees } = require('../src/git');
 const {
   readPid, readAllInstances, isRunning, stopDaemon, waitForExit,
-  waitForPort, buildEntries, pickDefaultEntry, parseArgs,
+  waitForPort, parseArgs,
   pidFilePath, ensurePidsDir, LEGACY_PID_FILE,
   readConfig, writeConfig, runInit, printHelp, CONFIG_FILE,
 } = require('../bin/revue');
+const { buildEntries, pickDefaultEntry } = require('../src/hub');
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 

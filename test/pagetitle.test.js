@@ -49,13 +49,13 @@ function setupDOM() {
 
 function mockFetch(diffData) {
   global.fetch.mockImplementation((url) => {
-    if (url === '/api/diff') {
+    if (url === 'api/diff') {
       return Promise.resolve({ ok: true, json: () => Promise.resolve(diffData) });
     }
-    if (url === '/api/state') {
+    if (url === 'api/state') {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
     }
-    if (url === '/api/worktrees') {
+    if (url === 'api/worktrees') {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({ current: 'bugABC', worktrees: [] }) });
     }
     return Promise.reject(new Error(`Unmocked: ${url}`));
@@ -115,7 +115,7 @@ describe('#btn-reload-page — codebase update banner', () => {
 
     expect(banner.style.display).toBe('none');
     // loadAndRender fetches /api/diff again — verify it was called
-    const diffCalls = global.fetch.mock.calls.filter(([url]) => url === '/api/diff');
+    const diffCalls = global.fetch.mock.calls.filter(([url]) => url === 'api/diff');
     expect(diffCalls.length).toBeGreaterThanOrEqual(2);
   });
 });
@@ -131,7 +131,7 @@ describe('#worktree-bar scroll buttons — shown/hidden based on overflow', () =
     setupDOM();
     jest.clearAllMocks();
     global.fetch.mockImplementation((url) => {
-      if (url === '/api/worktrees') {
+      if (url === 'api/worktrees') {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ current: 'bug-111', worktrees: WORKTREES }),
@@ -208,13 +208,13 @@ describe('#hash navigation — URL hash switches to matching worktree on load', 
 
   function mockWorktreeFetch(current, switchOk = true) {
     global.fetch.mockImplementation((url, opts) => {
-      if (url === '/api/worktrees') {
+      if (url === 'api/worktrees') {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ current, worktrees: WORKTREES }),
         });
       }
-      if (url === '/api/switch') {
+      if (url === 'api/switch') {
         return Promise.resolve({ ok: switchOk });
       }
       return Promise.reject(new Error(`Unmocked: ${url}`));
@@ -227,7 +227,7 @@ describe('#hash navigation — URL hash switches to matching worktree on load', 
 
     await initWorktreeBar();
 
-    const switchCalls = global.fetch.mock.calls.filter(([url]) => url === '/api/switch');
+    const switchCalls = global.fetch.mock.calls.filter(([url]) => url === 'api/switch');
     expect(switchCalls).toHaveLength(1);
     const body = JSON.parse(switchCalls[0][1].body);
     expect(body.worktreeName).toBe('bug-222');
@@ -239,7 +239,7 @@ describe('#hash navigation — URL hash switches to matching worktree on load', 
 
     await initWorktreeBar();
 
-    const switchCalls = global.fetch.mock.calls.filter(([url]) => url === '/api/switch');
+    const switchCalls = global.fetch.mock.calls.filter(([url]) => url === 'api/switch');
     expect(switchCalls).toHaveLength(0);
   });
 
@@ -249,7 +249,7 @@ describe('#hash navigation — URL hash switches to matching worktree on load', 
 
     await initWorktreeBar();
 
-    const switchCalls = global.fetch.mock.calls.filter(([url]) => url === '/api/switch');
+    const switchCalls = global.fetch.mock.calls.filter(([url]) => url === 'api/switch');
     expect(switchCalls).toHaveLength(0);
   });
 
@@ -281,19 +281,19 @@ describe('#hash navigation — hashchange event switches worktree after page loa
 
   function mockSwitchFetch() {
     global.fetch.mockImplementation((url) => {
-      if (url === '/api/worktrees') {
+      if (url === 'api/worktrees') {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({ current: 'bug-111', worktrees: WORKTREES }),
         });
       }
-      if (url === '/api/switch') {
+      if (url === 'api/switch') {
         return Promise.resolve({ ok: true });
       }
-      if (url === '/api/diff') {
+      if (url === 'api/diff') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ patches: [], worktreeName: 'bug-222', worktreePath: '/tmp', repoName: 'firefox' }) });
       }
-      if (url === '/api/state') {
+      if (url === 'api/state') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
       }
       return Promise.reject(new Error(`Unmocked: ${url}`));
@@ -316,7 +316,7 @@ describe('#hash navigation — hashchange event switches worktree after page loa
     window.location.hash = '#bug-222';
     await initWorktreeBar._hashHandler();
 
-    const switchCalls = global.fetch.mock.calls.filter(([url]) => url === '/api/switch');
+    const switchCalls = global.fetch.mock.calls.filter(([url]) => url === 'api/switch');
     expect(switchCalls).toHaveLength(1);
     expect(JSON.parse(switchCalls[0][1].body).worktreeName).toBe('bug-222');
   });
@@ -329,7 +329,7 @@ describe('#hash navigation — hashchange event switches worktree after page loa
     window.location.hash = '#bug-111';
     await initWorktreeBar._hashHandler();
 
-    const switchCalls = global.fetch.mock.calls.filter(([url]) => url === '/api/switch');
+    const switchCalls = global.fetch.mock.calls.filter(([url]) => url === 'api/switch');
     expect(switchCalls).toHaveLength(0);
   });
 
@@ -340,7 +340,7 @@ describe('#hash navigation — hashchange event switches worktree after page loa
     window.location.hash = '#nonexistent';
     await initWorktreeBar._hashHandler();
 
-    const switchCalls = global.fetch.mock.calls.filter(([url]) => url === '/api/switch');
+    const switchCalls = global.fetch.mock.calls.filter(([url]) => url === 'api/switch');
     expect(switchCalls).toHaveLength(0);
   });
 });

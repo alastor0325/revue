@@ -158,7 +158,7 @@ describe('switchPatch', () => {
   beforeEach(() => {
     window.scrollTo = jest.fn(); // jsdom doesn't implement it
     global.fetch.mockImplementation((url) => {
-      if (url === '/api/worktrees') {
+      if (url === 'api/worktrees') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ current: 'x', worktrees: [] }) });
       }
       return Promise.reject(new Error(`Unmocked: ${url}`));

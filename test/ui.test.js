@@ -316,6 +316,8 @@ describe('scroll behavior', () => {
   test('back-to-top button is hidden at the top of the page', async () => {
     await scrollPage.evaluate(() => window.scrollTo(0, 0));
     await scrollPage.waitForFunction(() => window.scrollY === 0);
+    // The scroll event that hides the button fires after scrollTo returns.
+    await scrollPage.waitForFunction(() => !document.getElementById('btn-back-to-top').classList.contains('visible'));
     const visible = await scrollPage.$eval('#btn-back-to-top', (el) => getComputedStyle(el).display !== 'none');
     expect(visible).toBe(false);
   });
@@ -3455,5 +3457,72 @@ describe('docs/index.html interactive demo', () => {
     expect(boxes[0].x + boxes[0].width).toBeCloseTo(submitBox.x + submitBox.width, 1);
     // Reset so subsequent tests don't see leftover text.
     await demoPage.evaluate(() => { document.querySelector('#autosave-status').textContent = ''; });
+  }, 30000);
+});
+
+// ── Served from the hub under /r/<slug>/ ──────────────────────────────────
+// The client uses relative URLs (api/diff, app.js) so the same UI works at the
+// root of a single-project server and under a hub project prefix.  This drives
+// a project mounted by the hub and checks both reads and writes reach it.
+
+describe('UI under a hub project prefix', () => {
+  const { createHub } = require('../src/hub');
+  let hubServer, hubBase, hubPage, hubRepo;
+
+  beforeAll(async () => {
+    hubRepo = path.join(tmpDir, 'hub-repo');
+    execSync(`git clone -q "${mainRepoPath}" "${hubRepo}"`);
+    git(hubRepo, 'config user.email "test@test.com"');
+    git(hubRepo, 'config user.name "Test"');
+    fs.writeFileSync(path.join(hubRepo, 'hub.js'), 'module.exports = 1;\n');
+    git(hubRepo, 'add .');
+    git(hubRepo, 'commit -m "feat: hub fixture"');
+
+    const hub = createHub();
+    hub.addProject({ repoPath: workRepoPath });
+    hub.addProject({ repoPath: hubRepo });
+    const port = await findAvailablePort(19450);
+    await new Promise((r) => { hubServer = hub.app.listen(port, '127.0.0.1', r); });
+    hubBase = `http://127.0.0.1:${port}`;
+    hubPage = await browser.newPage();
+  }, 30000);
+
+  afterAll(async () => {
+    await hubPage?.close();
+    await new Promise((r) => hubServer?.close(r));
+  });
+
+  test('landing page links to each project', async () => {
+    await hubPage.goto(hubBase + '/');
+    const links = await hubPage.$$eval('#projects a', (as) => as.map((a) => a.getAttribute('href')));
+    expect(links).toEqual(['/r/work-repo/', '/r/hub-repo/']);
+  });
+
+  test('project page loads its own patches through prefixed API calls', async () => {
+    await hubPage.click('#projects a[href="/r/hub-repo/"]');
+    await hubPage.waitForSelector('.patch-heading', { state: 'visible' });
+    expect(new URL(hubPage.url()).pathname).toBe('/r/hub-repo/');
+    expect(await hubPage.textContent('.patch-heading')).toContain('hub fixture');
+    expect(await hubPage.title()).toContain('hub-repo');
+  }, 30000);
+
+  test('approving writes to that project\'s state and survives reload', async () => {
+    await hubPage.click('.btn-approve');
+    await hubPage.waitForSelector('.btn-unapprove');
+    const hash = git(hubRepo, 'rev-parse --short=7 HEAD');
+    const approved = () => {
+      try { return JSON.parse(fs.readFileSync(stateFilePathFor(hubRepo), 'utf8')).approved || []; }
+      catch { return []; }
+    };
+    for (let i = 0; i < 50 && !approved().includes(hash); i++) await hubPage.waitForTimeout(100);
+    expect(approved()).toContain(hash);
+    await hubPage.reload();
+    await hubPage.waitForSelector('.btn-unapprove');
+  }, 30000);
+
+  test('a prefix without the trailing slash still loads the UI', async () => {
+    await hubPage.goto(hubBase + '/r/hub-repo');
+    await hubPage.waitForSelector('.patch-heading', { state: 'visible' });
+    expect(new URL(hubPage.url()).pathname).toBe('/r/hub-repo/');
   }, 30000);
 });

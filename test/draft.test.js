@@ -221,7 +221,7 @@ describe('typing in a comment textarea auto-saves drafts', () => {
 
     expect(global.fetch).toHaveBeenCalled();
     const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toBe('/api/state/draft');
+    expect(url).toBe('api/state/draft');
     expect(opts.method).toBe('POST');
     const body = JSON.parse(opts.body);
     expect(body.key).toBe(dk());

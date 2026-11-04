@@ -53,7 +53,7 @@ async function submitReview() {
 
   let submitError = null;
   try {
-    const res = await fetch('/api/submit', {
+    const res = await fetch('api/submit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -114,7 +114,7 @@ async function submitReview() {
 // ── Worktree switcher ──────────────────────────────────────────────────────
 async function initWorktreeBar() {
   try {
-    const res = await fetch('/api/worktrees');
+    const res = await fetch('api/worktrees');
     if (!res.ok) return;
     let { current, worktrees } = await res.json();
     if (worktrees.length <= 1) return; // nothing to switch to
@@ -124,7 +124,7 @@ async function initWorktreeBar() {
     if (hashName && hashName !== current) {
       const target = worktrees.find((wt) => wt.worktreeName === hashName);
       if (target) {
-        const r = await fetch('/api/switch', {
+        const r = await fetch('api/switch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ worktreeName: hashName }),
@@ -171,7 +171,7 @@ async function initWorktreeBar() {
       btn.textContent = 'Switching…';
       btn.disabled = true;
       try {
-        const r = await fetch('/api/switch', {
+        const r = await fetch('api/switch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ worktreeName: name }),
@@ -211,7 +211,7 @@ async function initWorktreeBar() {
         if (p.dataset.name === name) p.textContent = 'Switching…';
       });
       try {
-        const r = await fetch('/api/switch', {
+        const r = await fetch('api/switch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ worktreeName: name }),
@@ -263,7 +263,7 @@ async function loadAndRender() {
   filesChanged.style.display = 'none';
 
   try {
-    const [diffRes, stateRes] = await Promise.all([fetch('/api/diff'), fetch('/api/state')]);
+    const [diffRes, stateRes] = await Promise.all([fetch('api/diff'), fetch('api/state')]);
 
     const data = await diffRes.json();
     if (!diffRes.ok) throw new Error(data.error || 'Failed to load diff');
@@ -537,7 +537,7 @@ async function fullRefresh() {
     return;
   }
   try {
-    const res = await fetch('/api/state');
+    const res = await fetch('api/state');
     if (!res.ok) return;
     applySavedState(await res.json());
     renderTabs();
@@ -658,7 +658,7 @@ let lastKnownHead = null;
 function startUpdatePolling() {
   _pollTimer = setInterval(async () => {
     try {
-      const res = await fetch('/api/headhash');
+      const res = await fetch('api/headhash');
       if (!res.ok) return;
       const { hash } = await res.json();
       if (lastKnownHead == null) { lastKnownHead = hash; return; } // not loaded yet

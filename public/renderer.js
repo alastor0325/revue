@@ -437,7 +437,7 @@ export function renderExpandRow(table, patchHash, filePath, hiddenStart, hiddenE
 
     try {
       const resp = await fetch(
-        `/api/filecontext?hash=${encodeURIComponent(patchHash)}&file=${encodeURIComponent(filePath)}&start=${fetchStart}&end=${fetchEnd}`
+        `api/filecontext?hash=${encodeURIComponent(patchHash)}&file=${encodeURIComponent(filePath)}&start=${fetchStart}&end=${fetchEnd}`
       );
       if (!resp.ok) {
         console.error(`filecontext: HTTP ${resp.status} for ${filePath}`);
@@ -1236,7 +1236,7 @@ export function buildPatchEl(idx) {
     placeholder.textContent = 'Loading comparison…';
     el.appendChild(placeholder);
 
-    fetch(`/api/revdiff?from=${compareRev.from}&to=${compareRev.to}`)
+    fetch(`api/revdiff?from=${compareRev.from}&to=${compareRev.to}`)
       .then((r) => r.json())
       .then((data) => {
         placeholder.remove();
@@ -1277,7 +1277,7 @@ export function buildPatchEl(idx) {
     placeholder.textContent = 'Loading revision…';
     el.appendChild(placeholder);
 
-    fetch(`/api/patchdiff/${effectiveHash}`)
+    fetch(`api/patchdiff/${effectiveHash}`)
       .then((r) => r.json())
       .then((data) => {
         placeholder.remove();

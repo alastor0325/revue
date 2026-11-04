@@ -477,6 +477,9 @@
   const okEmpty = () => okJson({ ok: true });
 
   window.fetch = function(url, opts) {
+    // The client requests relative URLs (api/diff) so it works under a hub
+    // project prefix; match them against the absolute routes below.
+    if (url.startsWith('api/')) url = '/' + url;
     // GET /api/diff
     if (url === '/api/diff') return okJson(MOCK_DIFF);
 
