@@ -19,7 +19,7 @@ const path = require('path');
 const { execSync } = require('child_process');
 const { chromium } = require('playwright');
 const { createApp, findAvailablePort } = require('../src/server');
-const { git, stateFilePathFor } = require('./helpers');
+const { git, stateFilePathFor, hasBikeshed, bikeshedSpec } = require('./helpers');
 
 // ── Shared fixtures ────────────────────────────────────────────────────────
 
@@ -3685,5 +3685,46 @@ describe('rendered (rich) diff of a Markdown file', () => {
     await richPage.waitForSelector(`${cur} .view-toggle [data-view=rendered].active`);
     expect(await richPage.isVisible(`${cur} .rich-view`)).toBe(true);
     await richPage.click(`${cur} .btn-unapprove`);
+  });
+});
+
+// ── Rendered Bikeshed spec: links read as on the published spec ───────────
+
+describe('rendered Bikeshed spec links', () => {
+  let bsServer, bsPage;
+  const cur = '#files-changed > div:not([style*="display: none"])';
+
+  beforeAll(async () => {
+    if (!hasBikeshed) return;
+    const repo = path.join(tmpDir, 'bs-repo');
+    execSync(`git clone -q "${mainRepoPath}" "${repo}"`);
+    git(repo, 'config user.email "test@test.com"');
+    git(repo, 'config user.name "Test"');
+    fs.writeFileSync(path.join(repo, 'index.bs'), bikeshedSpec({ body: 'See [[#intro]].' }));
+    git(repo, 'add .');
+    git(repo, 'commit -m "spec: add"');
+    fs.writeFileSync(path.join(repo, 'index.bs'), bikeshedSpec({ body: 'See [[#intro]] again.' }));
+    git(repo, 'commit -am "spec: edit"');
+    const app = createApp({ worktreeName: 'bs-repo', worktreePath: repo, mainRepoPath });
+    const port = await findAvailablePort(19485);
+    await new Promise((r) => { bsServer = app.listen(port, '127.0.0.1', r); });
+    bsPage = await browser.newPage();
+    await bsPage.goto(`http://127.0.0.1:${port}`);
+    await bsPage.locator('.patch-tab').nth(1).click();
+    await bsPage.click(`${cur} .view-toggle [data-view=rendered]`);
+    await bsPage.waitForFunction(() => /change/.test(document.querySelector('#files-changed > div:not([style*="display: none"]) .rich-count')?.textContent || ''), null, { timeout: 60000 });
+  }, 90000);
+
+  afterAll(async () => {
+    await bsPage?.close();
+    await new Promise((r) => (bsServer ? bsServer.close(r) : r()));
+  });
+
+  (hasBikeshed ? test : test.skip)('in-page links point at the published spec, and clicking only scrolls the frame', async () => {
+    const f = await (await bsPage.$(`${cur} .rich-frame`)).contentFrame();
+    const link = f.locator('p a[data-revue-anchor="intro"]').first();
+    expect(await link.evaluate((a) => a.href)).toBe('https://example.org/t/#intro');
+    await link.click();
+    expect(await f.evaluate(() => location.href)).toBe('about:srcdoc');
   });
 });

@@ -74,6 +74,13 @@ async function renderMarkdown(repo, sha, filePath) {
   return markdownPage(marked.parse(source));
 }
 
+// The address the spec is published at: the "This version:" link that
+// Bikeshed writes in every spec's header (from ED: metadata, or derived).
+function specAddress(html) {
+  const m = html && /<dt>This version:\s*<dd><a class="u-url" href="(https?:\/\/[^"]+)"/.exec(html);
+  return m ? m[1] : null;
+}
+
 // Bikeshed resolves includes and local data files relative to the spec, so
 // extract the spec's whole directory at that commit and render it there.
 // --allow-execute / --allow-nonlocal-files stay off: repo content can't run
@@ -108,7 +115,7 @@ const CACHE_MAX = 16;    // a rendered spec pair is ~1 MB
 
 /**
  * Render `filePath` as of commit `hash` and of its parent (`oldPath` there,
- * for renames).  Resolves to { format, old, new } where old/new are HTML
+ * for renames).  Resolves to { format, old, new, base } where old/new are HTML
  * pages, or null when the file doesn't exist on that side (added / deleted
  * file).  Rejects with `status` 415 when the file has no rendered view and
  * 404 when the commit doesn't exist.
@@ -132,7 +139,9 @@ function renderFileVersions(repo, hash, filePath, oldPath = filePath) {
       parent ? render(repo, parent, oldPath) : null,
       render(repo, sha, filePath),
     ]);
-    return { format, old: oldHtml, new: newHtml };
+    // `base`: where the document's links point when published (the client
+    // rewrites links to it, so they read as on the published spec).
+    return { format, old: oldHtml, new: newHtml, base: format === 'bikeshed' ? specAddress(newHtml || oldHtml) : null };
   })();
   cache.set(key, p);
   p.catch(() => cache.delete(key)); // don't cache failures

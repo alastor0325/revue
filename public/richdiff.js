@@ -137,21 +137,34 @@ function scrollFrameTo(doc, el, where = 'center') {
   view.scrollTo(0, where === 'center' ? top - view.innerHeight / 3 : top - 8);
 }
 
-// In-page anchors scroll the frame and absolute http(s) links open in a new
-// tab.  Every other link stays inert: relative links would resolve against
-// revue's own origin, and the frame must not navigate away from the document.
+// srcdoc has no URL of its own, so the page's links resolve against revue's
+// address.  Point them at the published document (`base`, for specs) so they
+// read and open as there.  In-page anchors are tagged first so clicks still
+// scroll the frame.  Images are left alone: loading them from the published
+// site would show its version, not the reviewed commit's.
+function pointLinksAt(doc, base) {
+  for (const a of doc.querySelectorAll('a[href]')) {
+    const href = a.getAttribute('href');
+    if (href.startsWith('#')) a.dataset.revueAnchor = decodeURIComponent(href.slice(1));
+    if (base) { try { a.href = new URL(href, base).href; } catch { /* leave malformed links */ } }
+  }
+}
+
+// Tagged anchors scroll the frame; links to another site open in a new tab.
+// Anything that resolves to revue's own origin (a relative link with no
+// published address) stays inert, and the frame never navigates away.
 function wireLinks(doc) {
   doc.addEventListener('click', (e) => {
     const a = e.target.closest && e.target.closest('a[href]');
     if (!a) return;
     e.preventDefault();
-    const href = a.getAttribute('href');
-    if (href.startsWith('#')) {
-      const target = doc.getElementById(decodeURIComponent(href.slice(1)));
+    if (a.dataset.revueAnchor != null) {
+      const target = doc.getElementById(a.dataset.revueAnchor);
       if (target) scrollFrameTo(doc, target, 'start');
-    } else if (/^https?:\/\//i.test(href)) {
-      window.open(href, '_blank', 'noopener');
+      return;
     }
+    const url = new URL(a.href);
+    if (/^https?:$/.test(url.protocol) && url.origin !== window.location.origin) window.open(url.href, '_blank', 'noopener');
   });
 }
 
@@ -209,19 +222,21 @@ export async function mountRichView(container, { hash, file, oldFile }) {
     style.textContent = MARK_STYLE;
     doc.head.appendChild(style);
     wireLinks(doc);
+    // After marking, so removed blocks copied in from the old page get it too.
+    const finish = () => { pointLinksAt(doc, data.base); win.scrollTo(0, view.scrollY); };
     win.addEventListener('scroll', () => { view.scrollY = win.scrollY; }, { passive: true });
 
     prev.hidden = next.hidden = true;
     if (!data.old || !data.new) {
       label.textContent = data.old ? 'Deleted file' : 'New file';
       if (!data.new) for (const el of diffBlocks(doc)) el.classList.add('revue-removed');
-      win.scrollTo(0, view.scrollY);
+      finish();
       return;
     }
     const changed = markChanges(doc, new DOMParser().parseFromString(data.old, 'text/html'));
     if (changed.length === 0) {
       label.textContent = 'No rendered changes';
-      win.scrollTo(0, view.scrollY);
+      finish();
       return;
     }
     label.textContent = `${changed.length} change${changed.length === 1 ? '' : 's'}`;
@@ -234,6 +249,7 @@ export async function mountRichView(container, { hash, file, oldFile }) {
     };
     prev.onclick = () => go(-1);
     next.onclick = () => go(1);
+    pointLinksAt(doc, data.base);
     if (view.cur < 0) {
       go(1); // first open: jump to the first change
     } else {

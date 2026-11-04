@@ -15,4 +15,15 @@ function stateFilePathFor(worktreePath) {
   return path.join(gitDir, 'revue-state.json');
 }
 
-module.exports = { git, stateFilePathFor };
+// Whether the bikeshed CLI is installed (tests that need it are skipped otherwise).
+const hasBikeshed = (() => {
+  try { require('child_process').execSync('bikeshed --version', { stdio: 'ignore' }); return true; } catch { return false; }
+})();
+
+// A minimal Bikeshed spec: metadata (with an ED: address) plus `body` under one section.
+function bikeshedSpec({ title = 'T', ed = 'https://example.org/t/', body = 'Hello.' } = {}) {
+  return `<pre class=metadata>\nTitle: ${title}\nShortname: t\nLevel: none\nStatus: LS\nED: ${ed}\n`
+    + `Editor: A B\nAbstract: x\n</pre>\n\nIntro {#intro}\n=====\n\n${body}\n`;
+}
+
+module.exports = { git, stateFilePathFor, hasBikeshed, bikeshedSpec };

@@ -16,7 +16,7 @@ const {
   getDiffForCommit, getDiffBetweenCommits, discoverWorktrees, getMergeBase,
 } = require('../src/git');
 const { createApp, startServer, findAvailablePort } = require('../src/server');
-const { git, stateFilePathFor } = require('./helpers');
+const { git, stateFilePathFor, hasBikeshed, bikeshedSpec } = require('./helpers');
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -2132,7 +2132,6 @@ describe('CLI hub client — revue --repo X joins the running hub', () => {
 
 describe('GET /api/rendered', () => {
   let server, base, repo, head;
-  const hasBikeshed = (() => { try { execSync('bikeshed --version', { stdio: 'ignore' }); return true; } catch { return false; } })();
 
   beforeAll(async () => {
     repo = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-rendered-'));
@@ -2141,14 +2140,12 @@ describe('GET /api/rendered', () => {
     git(repo, 'config user.name "Test"');
     fs.writeFileSync(path.join(repo, 'README.md'), '# Old title\n\nkeep\n\ngone\n');
     fs.mkdirSync(path.join(repo, 'spec'));
-    fs.writeFileSync(path.join(repo, 'spec', 'index.bs'),
-      '<pre class=metadata>\nTitle: Old Spec\nShortname: test\nLevel: none\nStatus: LS\nEditor: A B\nAbstract: x\n</pre>\n\nIntro {#intro}\n=====\n\nHello.\n');
+    fs.writeFileSync(path.join(repo, 'spec', 'index.bs'), bikeshedSpec({ title: 'Old Spec', ed: 'https://example.org/spec/' }));
     git(repo, 'add .');
     git(repo, 'commit -m "base"');
     fs.writeFileSync(path.join(repo, 'README.md'), '# New title\n\nkeep\n');
     fs.writeFileSync(path.join(repo, 'ADDED.md'), 'brand new\n');
-    fs.writeFileSync(path.join(repo, 'spec', 'index.bs'),
-      '<pre class=metadata>\nTitle: New Spec\nShortname: test\nLevel: none\nStatus: LS\nEditor: A B\nAbstract: x\n</pre>\n\nIntro {#intro}\n=====\n\nHello again.\n');
+    fs.writeFileSync(path.join(repo, 'spec', 'index.bs'), bikeshedSpec({ title: 'New Spec', ed: 'https://example.org/spec/', body: 'Hello again.' }));
     git(repo, 'add .');
     git(repo, 'commit -m "edit docs"');
     head = git(repo, 'rev-parse HEAD');
@@ -2166,6 +2163,7 @@ describe('GET /api/rendered', () => {
     const { status, body } = await get(`hash=${head}&file=README.md`);
     expect(status).toBe(200);
     expect(body.format).toBe('markdown');
+    expect(body.base).toBeNull();
     expect(body.new).toContain('<h1>New title</h1>');
     expect(body.old).toContain('<h1>Old title</h1>');
     expect(body.old).toContain('<p>gone</p>');
@@ -2201,5 +2199,7 @@ describe('GET /api/rendered', () => {
     expect(body.new).toMatch(/<h1[^>]*>New Spec<\/h1>/);
     expect(body.old).toMatch(/<h1[^>]*>Old Spec<\/h1>/);
     expect(body.new).toContain('Hello again.');
+    // Where the spec's links point when published (the client rewrites them to it).
+    expect(body.base).toBe('https://example.org/spec/');
   }, 60000);
 });
