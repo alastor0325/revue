@@ -17,6 +17,7 @@ export const state = {
   updatedPatches: {},   // { patchIdx: { oldHash, oldMessage } } — computed on init, not persisted
   showRevision: {},     // { patchIdx: hash | null } — null means current; ephemeral toggle state
   compareRevision: {},  // { patchIdx: { from: hash, to: hash } | absent } — compare mode
+  linkRules: [],        // [{ pattern, url }] — issue references to link in commit text, from the server
 };
 
 // ── Comment draft cache ────────────────────────────────────────────────────

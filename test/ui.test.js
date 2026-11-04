@@ -3593,7 +3593,9 @@ describe('per-language syntax highlighting', () => {
     fs.writeFileSync(path.join(langRepo, 'b.js'), 'class A { m() { return this.x; } }\n');
     fs.writeFileSync(path.join(langRepo, 'test_page.html'), '<script>\ndocument.title = "t";\n</script>\n');
     git(langRepo, 'add .');
-    git(langRepo, 'commit -m "feat: languages"');
+    git(langRepo, 'commit -m "Bug 1234567 - feat: languages" -m "Differential Revision: https://phabricator.services.mozilla.com/D338964"');
+    // A Firefox remote makes revue link "Bug NNN" to Bugzilla (src/links.js).
+    git(langRepo, 'remote set-url origin https://github.com/mozilla-firefox/firefox');
     const app = createApp({ worktreeName: 'lang-repo', worktreePath: langRepo, mainRepoPath });
     const port = await findAvailablePort(19470);
     await new Promise((r) => { langServer = app.listen(port, '127.0.0.1', r); });
@@ -3608,6 +3610,13 @@ describe('per-language syntax highlighting', () => {
   });
 
   const style = (sel, prop) => langPage.$eval(sel, (el, p) => getComputedStyle(el)[p], prop);
+
+  test('the Part title links its bug to Bugzilla; URLs in the commit message are links', async () => {
+    const heading = await langPage.$$eval('.patch-heading-msg a', (as) => as.map((a) => [a.textContent, a.href, a.target]));
+    expect(heading).toEqual([['Bug 1234567', 'https://bugzilla.mozilla.org/show_bug.cgi?id=1234567', '_blank']]);
+    const body = await langPage.$$eval('.commit-msg-text a', (as) => as.map((a) => a.href));
+    expect(body).toEqual(['https://phabricator.services.mozilla.com/D338964']);
+  });
 
   test('C++ preprocessor lines use the preprocessor colour, include paths stay strings', async () => {
     expect(await style('.language-cpp .hljs-meta', 'color')).toBe('rgb(232, 177, 79)');

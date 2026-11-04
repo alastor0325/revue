@@ -306,6 +306,7 @@ async function loadAndRender() {
     }
 
     state.patches = data.patches || [];
+    state.linkRules = data.linkRules || [];
     // Reopen the patch tab this worktree was on before the reload.
     setLayoutWorktree(data.worktreeName);
     state.currentPatchIdx = savedPatchIndex(state.patches);

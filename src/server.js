@@ -11,6 +11,7 @@ const { execSync } = require('child_process');
 const { getHeadHash, getMergeBase, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getFileLines, discoverWorktrees } = require('./git');
 const { submitReview } = require('./claude');
 const { renderFileVersions, tagRenderableFiles } = require('./render');
+const { linkRules } = require('./links');
 
 // A (possibly abbreviated) commit hash, as accepted in API parameters.
 const HASH_RE = /^[0-9a-f]{4,40}$/i;
@@ -204,6 +205,8 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
         worktreePath,
         headHash,
         patches: patchesCache,
+        // How issue references in commit text link, from this repo's remotes.
+        linkRules: linkRules(worktreePath),
       });
     } catch (err) {
       res.status(500).json({ error: err.message });

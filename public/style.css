@@ -1282,6 +1282,9 @@ tr.comment-draft-row td {
   transition: background 0.12s var(--ease);
 }
 .commit-msg-text-empty { padding: 0; }
+/* URLs and issue references in the patch title and commit message (linkifyText). */
+.commit-link { color: var(--blue); text-decoration: none; }
+.commit-link:hover { text-decoration: underline; }
 .commit-msg-subject:hover,
 .commit-msg-text:not(.commit-msg-text-empty):hover { background: var(--bg-elev); }
 

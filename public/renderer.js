@@ -30,6 +30,42 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+// ── Links in commit text ───────────────────────────────────────────────────
+// Commit titles and messages: URLs become links, and so do issue references
+// matched by `rules` — per repo, from the server (src/links.js): "Bug 1234567"
+// to Bugzilla in Mozilla repos, "#123" to GitHub in GitHub repos.  Returns
+// escaped HTML.
+const URL_RE = /https?:\/\/[^\s<>"']+/g;
+const linkTag = (href, text) =>
+  `<a class="commit-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`;
+
+export function linkifyText(text, rules = state.linkRules) {
+  text = String(text ?? '');
+  const spans = [];
+  for (const m of text.matchAll(URL_RE)) {
+    // Sentence punctuation and an unmatched ")" after a URL aren't part of it.
+    let url = m[0].replace(/[.,;:!?]+$/, '');
+    if (url.endsWith(')') && !url.includes('(')) url = url.slice(0, -1);
+    spans.push({ start: m.index, end: m.index + url.length, href: url });
+  }
+  for (const rule of rules || []) {
+    for (const m of text.matchAll(new RegExp(rule.pattern, 'gi'))) {
+      spans.push({ start: m.index, end: m.index + m[0].length, href: rule.url.replace('$1', m[1]) });
+    }
+  }
+  // Earliest first; on overlap the first kept wins (URLs were added first),
+  // so a reference inside a URL isn't linked again.
+  spans.sort((x, y) => x.start - y.start);
+  let out = '';
+  let last = 0;
+  for (const sp of spans) {
+    if (sp.start < last) continue;
+    out += escapeHtml(text.slice(last, sp.start)) + linkTag(sp.href, text.slice(sp.start, sp.end));
+    last = sp.end;
+  }
+  return out + escapeHtml(text.slice(last));
+}
+
 // Pre-rendered patch elements. Each entry: { el, diffWrap, navItemsEl }.
 // All are kept in #files-changed; only the active one is visible (display:'').
 export const patchEls = [];
@@ -262,13 +298,13 @@ export function renderCommitMessageSection(container, patchHash, commitMessage, 
 
   const subjectEl = document.createElement('div');
   subjectEl.className = 'commit-msg-subject';
-  subjectEl.textContent = subject;
+  subjectEl.innerHTML = linkifyText(subject);
   box.appendChild(subjectEl);
 
   const msgEl = document.createElement('div');
   msgEl.className = 'commit-msg-text' + (bodyText ? '' : ' commit-msg-text-empty');
   if (bodyText) {
-    msgEl.textContent = bodyText;
+    msgEl.innerHTML = linkifyText(bodyText);
   }
   box.appendChild(msgEl);
 
@@ -367,7 +403,8 @@ export function renderCommitMessageSection(container, patchHash, commitMessage, 
     for (const el of [subjectEl, msgEl]) {
       el.style.cursor = 'pointer';
       el.title = 'Click to leave feedback on this commit message';
-      el.addEventListener('click', showForm);
+      // A link opens its page; it doesn't start a comment.
+      el.addEventListener('click', (e) => { if (!e.target.closest('a')) showForm(); });
     }
   }
 
@@ -1029,7 +1066,7 @@ export function buildPatchEl(idx) {
   const dateStr = formatPatchDate(patch.date);
   heading.innerHTML = `
     <span class="patch-heading-label">Part ${patchNum}${total > 1 ? ` of ${total}` : ''}</span>
-    <span class="patch-heading-msg">${escapeHtml(patch.message)}</span>
+    <span class="patch-heading-msg">${linkifyText(patch.message)}</span>
     <span class="patch-heading-hash">${escapeHtml(patch.hash)}</span>
     ${dateStr ? `<span class="patch-heading-date" title="Last modified">${escapeHtml(dateStr)}</span>` : ''}`;
 
@@ -1504,7 +1541,7 @@ if (typeof module !== 'undefined') {
   module.exports = {
     patchEls, updateSubmitButton, removeExistingForm, showCommentForm,
     renderCommentDisplay, renderDraftDisplay, restoreLineDisplay,
-    renderCommitMessageSection,
+    renderCommitMessageSection, linkifyText,
     renderExpandRow, countStats, renderFile,
     renderTabs, switchPatch,
     buildNavItemsEl, activateFileNav, renderFileNav, navigateFile,
