@@ -12,6 +12,7 @@ import {
 } from './persistence.js';
 import { getRevisionList } from './revisions.js';
 import { highlightDiffLines, languageClass } from './highlight.js';
+import { mountRichView } from './richdiff.js';
 
 // ── DOM helpers ────────────────────────────────────────────────────────────
 function $(sel, root) { return (root || document).querySelector(sel); }
@@ -540,6 +541,11 @@ export function renderFile(fileData, patchHash) {
 
   const body = document.createElement('div');
   body.className = 'diff-body';
+  // The server tags files it can render (Markdown, Bikeshed when installed).
+  // Compare views pass a synthetic "compare:…" hash and get no toggle.
+  const richToggle = fileData.richFormat && /^[0-9a-f]{4,40}$/i.test(patchHash)
+    ? addRichViewToggle(header, body, { hash: patchHash, file: filePath, oldFile: fileData.oldPath })
+    : null;
 
   // Binary files carry no textual diff — list the file with a placeholder
   // rather than dropping it from the changed-files list entirely.
@@ -616,8 +622,41 @@ export function renderFile(fileData, patchHash) {
   block.appendChild(body);
 
   makeCollapsible(header, body);
+  if (richToggle) richToggle.restore();
 
   return block;
+}
+
+// ── Source | Rendered toggle (Markdown and Bikeshed files) ─────────────────
+// Files whose Rendered view is on, by `${hash}:${path}`, so the many
+// re-renders of the patch view (approve/deny, refreshes) keep the choice.
+const richViewOn = new Set();
+
+function addRichViewToggle(header, body, target) {
+  const key = `${target.hash}:${target.file}`;
+  const toggle = document.createElement('span');
+  toggle.className = 'view-toggle';
+  toggle.innerHTML = '<button data-view="source" class="active">Source</button><button data-view="rendered">Rendered</button>';
+  header.querySelector('.file-stats').before(toggle);
+  let rich = null;
+  const show = (rendered) => {
+    for (const b of toggle.querySelectorAll('button')) b.classList.toggle('active', (b.dataset.view === 'rendered') === rendered);
+    for (const el of body.children) if (el !== rich) el.style.display = rendered ? 'none' : '';
+    if (rendered && !rich) {
+      rich = document.createElement('div');
+      rich.className = 'rich-view';
+      body.appendChild(rich);
+      mountRichView(rich, target);
+    }
+    if (rich) rich.style.display = rendered ? '' : 'none';
+    if (rendered) richViewOn.add(key); else richViewOn.delete(key);
+  };
+  toggle.addEventListener('click', (e) => {
+    e.stopPropagation(); // the header click collapses the file
+    const b = e.target.closest('button');
+    if (b) show(b.dataset.view === 'rendered');
+  });
+  return { restore: () => { if (richViewOn.has(key)) show(true); } };
 }
 
 // ── Patch tab rendering ─────────────────────────────────────────────────────

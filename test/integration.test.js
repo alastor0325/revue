@@ -2127,3 +2127,79 @@ describe('CLI hub client — revue --repo X joins the running hub', () => {
     ]));
   });
 });
+
+// ── Rendered (rich) view: GET /api/rendered ───────────────────────────────
+
+describe('GET /api/rendered', () => {
+  let server, base, repo, head;
+  const hasBikeshed = (() => { try { execSync('bikeshed --version', { stdio: 'ignore' }); return true; } catch { return false; } })();
+
+  beforeAll(async () => {
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-rendered-'));
+    git(repo, 'init');
+    git(repo, 'config user.email "test@test.com"');
+    git(repo, 'config user.name "Test"');
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Old title\n\nkeep\n\ngone\n');
+    fs.mkdirSync(path.join(repo, 'spec'));
+    fs.writeFileSync(path.join(repo, 'spec', 'index.bs'),
+      '<pre class=metadata>\nTitle: Old Spec\nShortname: test\nLevel: none\nStatus: LS\nEditor: A B\nAbstract: x\n</pre>\n\nIntro {#intro}\n=====\n\nHello.\n');
+    git(repo, 'add .');
+    git(repo, 'commit -m "base"');
+    fs.writeFileSync(path.join(repo, 'README.md'), '# New title\n\nkeep\n');
+    fs.writeFileSync(path.join(repo, 'ADDED.md'), 'brand new\n');
+    fs.writeFileSync(path.join(repo, 'spec', 'index.bs'),
+      '<pre class=metadata>\nTitle: New Spec\nShortname: test\nLevel: none\nStatus: LS\nEditor: A B\nAbstract: x\n</pre>\n\nIntro {#intro}\n=====\n\nHello again.\n');
+    git(repo, 'add .');
+    git(repo, 'commit -m "edit docs"');
+    head = git(repo, 'rev-parse HEAD');
+    const app = createApp({ worktreeName: 'r', worktreePath: repo, mainRepoPath: repo });
+    const port = await findAvailablePort(19700);
+    await new Promise((r) => { server = app.listen(port, '127.0.0.1', r); });
+    base = `http://127.0.0.1:${port}`;
+  });
+
+  afterAll((done) => { server.close(() => { fs.rmSync(repo, { recursive: true, force: true }); done(); }); });
+
+  const get = (q) => httpRequest(`${base}/api/rendered?${q}`);
+
+  test('renders a Markdown file at the commit and at its parent', async () => {
+    const { status, body } = await get(`hash=${head}&file=README.md`);
+    expect(status).toBe(200);
+    expect(body.format).toBe('markdown');
+    expect(body.new).toContain('<h1>New title</h1>');
+    expect(body.old).toContain('<h1>Old title</h1>');
+    expect(body.old).toContain('<p>gone</p>');
+    expect(body.new).not.toContain('gone');
+  });
+
+  test('an added file has no old side', async () => {
+    const { body } = await get(`hash=${head}&file=ADDED.md`);
+    expect(body.old).toBeNull();
+    expect(body.new).toContain('brand new');
+  });
+
+  test('the diff API tags files that have a rendered view', async () => {
+    const { body } = await httpRequest(`${base}/api/patchdiff/${head}`);
+    const formats = Object.fromEntries(body.files.map((f) => [f.newPath, f.richFormat]));
+    expect(formats['README.md']).toBe('markdown');
+    expect(formats['ADDED.md']).toBe('markdown');
+    expect(formats['spec/index.bs']).toBe(hasBikeshed ? 'bikeshed' : null);
+  });
+
+  test('rejects bad hashes, path traversal and unsupported files', async () => {
+    expect((await get('hash=nothex&file=README.md')).status).toBe(400);
+    expect((await get(`hash=${head}&file=../etc/passwd.md`)).status).toBe(400);
+    expect((await get(`hash=${head}&file=/abs.md`)).status).toBe(400);
+    expect((await get(`hash=${head}&file=notes.txt`)).status).toBe(415);
+    expect((await get(`hash=deadbeef&file=README.md`)).status).toBe(404);
+  });
+
+  (hasBikeshed ? test : test.skip)('renders a Bikeshed spec in a subdirectory with the real bikeshed', async () => {
+    const { status, body } = await get(`hash=${head}&file=spec/index.bs`);
+    expect(status).toBe(200);
+    expect(body.format).toBe('bikeshed');
+    expect(body.new).toMatch(/<h1[^>]*>New Spec<\/h1>/);
+    expect(body.old).toMatch(/<h1[^>]*>Old Spec<\/h1>/);
+    expect(body.new).toContain('Hello again.');
+  }, 60000);
+});

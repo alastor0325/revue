@@ -10,6 +10,10 @@ const fs = require('fs');
 const { execSync } = require('child_process');
 const { getHeadHash, getMergeBase, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getFileLines, discoverWorktrees } = require('./git');
 const { submitReview } = require('./claude');
+const { renderFileVersions, tagRenderableFiles } = require('./render');
+
+// A (possibly abbreviated) commit hash, as accepted in API parameters.
+const HASH_RE = /^[0-9a-f]{4,40}$/i;
 
 /**
  * Open the browser in a cross-platform way.
@@ -190,9 +194,10 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
   }
 
   // GET /api/diff — return patches (one per commit) and metadata
-  app.get('/api/diff', (req, res) => {
+  app.get('/api/diff', async (req, res) => {
     try {
       const headHash = loadData();
+      await Promise.all(patchesCache.map((p) => tagRenderableFiles(p.files)));
       res.json({
         repoName: path.basename(mainRepoPath),
         worktreeName,
@@ -503,8 +508,7 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
   // GET /api/revdiff?from=hash1&to=hash2 — diff between two commit hashes (compare two revisions)
   app.get('/api/revdiff', (req, res) => {
     const { from, to } = req.query;
-    const hashRe = /^[0-9a-f]{4,40}$/i;
-    if (!from || !to || !hashRe.test(from) || !hashRe.test(to)) {
+    if (!HASH_RE.test(from) || !HASH_RE.test(to)) {
       return res.status(400).json({ error: 'Invalid hash format.' });
     }
     try {
@@ -516,14 +520,14 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
   });
 
   // GET /api/patchdiff/:hash — return diff for a single commit hash (for revision comparison)
-  app.get('/api/patchdiff/:hash', (req, res) => {
+  app.get('/api/patchdiff/:hash', async (req, res) => {
     const { hash } = req.params;
-    if (!/^[0-9a-f]{4,40}$/i.test(hash)) {
+    if (!HASH_RE.test(hash)) {
       return res.status(400).json({ error: 'Invalid hash format.' });
     }
     try {
       const files = getDiffForCommit(worktreePath, hash);
-      res.json({ hash, files });
+      res.json({ hash, files: await tagRenderableFiles(files) });
     } catch (err) {
       res.status(404).json({ error: `Commit ${hash} not found: ${err.message}` });
     }
@@ -566,12 +570,29 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
     }
   });
 
+  // GET /api/rendered?hash=<hash>&file=<path>[&oldFile=<path>]
+  // Rendered (rich) view of a Markdown or Bikeshed file at a commit and at its
+  // parent: { format, old, new } with full HTML pages (null for the side where
+  // the file doesn't exist).  The client shows them in a sandboxed iframe.
+  app.get('/api/rendered', async (req, res) => {
+    const { hash, file } = req.query;
+    const oldFile = req.query.oldFile || file;
+    const badPath = (p) => typeof p !== 'string' || !p || p.startsWith('/') || p.split('/').includes('..');
+    if (!HASH_RE.test(hash) || badPath(file) || badPath(oldFile)) {
+      return res.status(400).json({ error: 'Invalid parameters.' });
+    }
+    try {
+      res.json(await renderFileVersions(worktreePath, hash, file, oldFile));
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  });
+
   // GET /api/filecontext?hash=<hash>&file=<path>&start=<n>&end=<n>
   // Returns lines from the new version of a file at the given commit.
   app.get('/api/filecontext', (req, res) => {
     const { hash, file, start, end } = req.query;
-    const hashRe = /^[0-9a-f]{4,40}$/i;
-    if (!hash || !hashRe.test(hash) || !file || !start || !end) {
+    if (!HASH_RE.test(hash) || !file || !start || !end) {
       return res.status(400).json({ error: 'Invalid parameters.' });
     }
     // A " in the file path breaks shell quoting in git show "${hash}:${file}".

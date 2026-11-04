@@ -877,6 +877,61 @@ button { font-family: inherit; }
   min-width: 0;
 }
 
+.view-toggle + .file-stats { margin-left: 0; }
+
+/* ─── Source | Rendered toggle and rendered (rich) diff ──────────────────── */
+.view-toggle {
+  margin-left: auto;
+  display: inline-flex;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.view-toggle button {
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--ink-quiet);
+  background: transparent;
+  border: 0;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.view-toggle button + button { border-left: 1px solid var(--rule-strong); }
+.view-toggle button:hover { color: var(--ink); }
+.view-toggle button.active { color: var(--blue); background: var(--blue-bg); }
+
+.rich-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg-elev);
+}
+.rich-count { font-size: 12px; color: var(--ink-2); margin-right: auto; }
+.rich-nav {
+  font-size: 13px;
+  line-height: 1;
+  color: var(--ink-2);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  padding: 3px 9px;
+  cursor: pointer;
+}
+.rich-nav:hover { color: var(--ink); border-color: var(--rule-focus); }
+.rich-frame {
+  display: block;
+  width: 100%;
+  height: 75vh;
+  border: 0;
+  background: #fff;
+  resize: vertical;
+}
+.diff-revision-loading.rich-error { color: var(--red); }
+
 .file-stats {
   margin-left: auto;
   display: flex;

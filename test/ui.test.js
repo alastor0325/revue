@@ -3614,3 +3614,76 @@ describe('per-language syntax highlighting', () => {
     expect(await style('.diff-table.language-javascript .hljs-property', 'color')).toBe('rgb(121, 192, 255)');
   });
 });
+
+// ── Source | Rendered toggle (rich diff of Markdown) ──────────────────────
+
+describe('rendered (rich) diff of a Markdown file', () => {
+  let richServer, richPage, richRepo;
+  // Patches are built lazily and hidden on switch, so scope to the visible one.
+  const cur = '#files-changed > div:not([style*="display: none"])';
+
+  beforeAll(async () => {
+    richRepo = path.join(tmpDir, 'rich-repo');
+    execSync(`git clone -q "${mainRepoPath}" "${richRepo}"`);
+    git(richRepo, 'config user.email "test@test.com"');
+    git(richRepo, 'config user.name "Test"');
+    fs.writeFileSync(path.join(richRepo, 'doc.md'), '# Guide\n\nkeep this\n\nold paragraph\n');
+    git(richRepo, 'add .');
+    git(richRepo, 'commit -m "docs: add guide"');
+    fs.writeFileSync(path.join(richRepo, 'doc.md'),
+      '# Guide\n\nkeep this\n\nnew paragraph <img src=x onerror="window.parent.__pwned=1">\n');
+    git(richRepo, 'commit -am "docs: rewrite guide"');
+    const app = createApp({ worktreeName: 'rich-repo', worktreePath: richRepo, mainRepoPath });
+    const port = await findAvailablePort(19480);
+    await new Promise((r) => { richServer = app.listen(port, '127.0.0.1', r); });
+    richPage = await browser.newPage();
+    await richPage.goto(`http://127.0.0.1:${port}`);
+    await richPage.waitForSelector('.patch-tab');
+    await richPage.locator('.patch-tab').nth(1).click(); // the edit commit
+    await richPage.waitForSelector(`${cur} .view-toggle`);
+  }, 30000);
+
+  afterAll(async () => {
+    await richPage?.close();
+    await new Promise((r) => richServer?.close(r));
+  });
+
+  const frame = async () => (await richPage.$(`${cur} .rich-frame`)).contentFrame();
+
+  test('Markdown files get a Source | Rendered toggle, Source first', async () => {
+    const views = await richPage.$$eval(`${cur} .view-toggle button`, (bs) => bs.map((b) => [b.textContent, b.classList.contains('active')]));
+    expect(views).toEqual([['Source', true], ['Rendered', false]]);
+  });
+
+  test('Rendered shows the document with removed and added blocks marked', async () => {
+    await richPage.click(`${cur} .view-toggle [data-view=rendered]`);
+    await richPage.waitForFunction(() => /2 changes/.test(document.querySelector('#files-changed > div:not([style*="display: none"]) .rich-count')?.textContent || ''));
+    const f = await frame();
+    expect(await f.textContent('h1')).toBe('Guide');
+    expect((await f.textContent('.revue-removed')).trim()).toBe('old paragraph');
+    expect((await f.textContent('.revue-added')).trim()).toBe('new paragraph');
+    expect(await richPage.isVisible(`${cur} .diff-table`)).toBe(false);
+  });
+
+  test('the rendered page cannot run scripts (sandboxed frame)', async () => {
+    expect(await richPage.$eval(`${cur} .rich-frame`, (f) => f.getAttribute('sandbox'))).toBe('allow-same-origin');
+    await richPage.waitForTimeout(300);
+    expect(await richPage.evaluate(() => window.__pwned)).toBeUndefined();
+  });
+
+  test('switching back to Source shows the line diff again', async () => {
+    await richPage.click(`${cur} .view-toggle [data-view=source]`);
+    expect(await richPage.isVisible(`${cur} .diff-table`)).toBe(true);
+    expect(await richPage.isVisible(`${cur} .rich-view`)).toBe(false);
+  });
+
+  test('the chosen view survives a re-render (Approve)', async () => {
+    await richPage.click(`${cur} .view-toggle [data-view=rendered]`);
+    await richPage.waitForSelector(`${cur} .rich-frame`);
+    await richPage.click(`${cur} .btn-approve`);
+    await richPage.waitForSelector(`${cur} .btn-unapprove`);
+    await richPage.waitForSelector(`${cur} .view-toggle [data-view=rendered].active`);
+    expect(await richPage.isVisible(`${cur} .rich-view`)).toBe(true);
+    await richPage.click(`${cur} .btn-unapprove`);
+  });
+});
