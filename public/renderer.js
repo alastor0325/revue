@@ -11,6 +11,7 @@ import {
   refreshPromptBar,
 } from './persistence.js';
 import { getRevisionList } from './revisions.js';
+import { highlightDiffLines } from './highlight.js';
 
 // ── DOM helpers ────────────────────────────────────────────────────────────
 function $(sel, root) { return (root || document).querySelector(sel); }
@@ -457,18 +458,19 @@ export function renderExpandRow(table, patchHash, filePath, hiddenStart, hiddenE
       // fromTop=true  → insert before tr (rows appear above the expand bar)
       // fromTop=false → insert before tr.nextSibling (rows appear below the bar)
       const anchor = fromTop ? tr : tr.nextSibling;
-      for (const line of data.lines) {
+      const hl = highlightDiffLines(data.lines, filePath); // the server tags these as context lines
+      data.lines.forEach((line, i) => {
         const row = document.createElement('tr');
         row.className = 'line-context line-context-expanded';
         row.innerHTML = `
           <td class="ln-old">${line.oldLineNum != null ? line.oldLineNum : ''}</td>
           <td class="ln-new">${line.newLineNum != null ? line.newLineNum : ''}</td>
-          <td class="ln-content"><span class="line-icon">＋</span>${escapeHtml(' ' + line.content)}</td>`;
+          ${contentCell(' ', line.content, hl && hl[i])}`;
         parent.insertBefore(row, anchor);
         // Treat expanded context lines like any other line so comments can be
         // left on them too.
         wireLineComment(row, patchHash, filePath, line);
-      }
+      });
 
       if (fromTop) curStart = fetchEnd + 1;
       else         curEnd   = fetchStart - 1;
@@ -505,6 +507,15 @@ function makeCollapsible(header, body) {
     body.style.display = collapsed ? 'none' : '';
     header.querySelector('.file-toggle').classList.toggle('collapsed', collapsed);
   });
+}
+
+// The code cell of one diff row.  `html` is the line's syntax-highlighted
+// markup (from highlightDiffLines); without it the line is plain escaped text.
+function contentCell(prefix, content, html) {
+  if (html == null) {
+    return `<td class="ln-content"><span class="line-icon">＋</span>${escapeHtml(prefix + content)}</td>`;
+  }
+  return `<td class="ln-content hl"><span class="line-icon">＋</span><span class="diff-sign">${escapeHtml(prefix)}</span>${html}</td>`;
 }
 
 export function renderFile(fileData, patchHash) {
@@ -569,7 +580,8 @@ export function renderFile(fileData, patchHash) {
       renderExpandRow(table, patchHash, filePath, gapStart, gapEnd, hunkTr);
     }
 
-    for (const line of hunk.lines) {
+    const hl = highlightDiffLines(hunk.lines, filePath);
+    hunk.lines.forEach((line, li) => {
       const tr = document.createElement('tr');
       const typeClass =
         line.type === 'added' ? 'line-added' :
@@ -586,11 +598,11 @@ export function renderFile(fileData, patchHash) {
       tr.innerHTML = `
         <td class="ln-old">${escapeHtml(String(oldNum))}</td>
         <td class="ln-new">${escapeHtml(String(newNum))}</td>
-        <td class="ln-content"><span class="line-icon">＋</span>${escapeHtml(prefix + line.content)}</td>`;
+        ${contentCell(prefix, line.content, hl && hl[li])}`;
 
       table.appendChild(tr);
       wireLineComment(tr, patchHash, filePath, line);
-    }
+    });
 
     // After the last hunk: expand row for remaining lines to end of file
     if (hi === fileData.hunks.length - 1 && hunk.newCount > 0) {

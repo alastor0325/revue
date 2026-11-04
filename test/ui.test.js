@@ -115,6 +115,17 @@ describe('page structure', () => {
     expect(wtPath).toContain('work-repo');
   });
 
+  test('diff lines are syntax highlighted (feature.js)', async () => {
+    await page.waitForSelector('.ln-content.hl .hljs-keyword');
+    const added = await page.$$eval('tr.line-added .ln-content.hl', (cs) => cs.map((c) => c.innerHTML));
+    expect(added.some((h) => h.includes('<span class="hljs-keyword">function</span>'))).toBe(true);
+    // Token colour comes from the theme, and the line text is unchanged.
+    const kw = await page.$eval('.ln-content.hl .hljs-keyword', (el) => getComputedStyle(el).color);
+    expect(kw).toBe('rgb(255, 123, 114)');
+    const texts = await page.$$eval('tr.line-added .ln-content', (cs) => cs.map((c) => c.textContent));
+    expect(texts).toContain('＋+function hello() {');
+  });
+
   test('loading indicator is hidden after content loads', async () => {
     const display = await page.$eval('#loading', (el) => getComputedStyle(el).display);
     expect(display).toBe('none');
@@ -3357,6 +3368,10 @@ describe('docs/index.html interactive demo', () => {
     // Demo has six mock patches (Bug 1234567 Parts 1-6).
     const tabCount = await demoPage.locator('.patch-tab').count();
     expect(tabCount).toBe(6);
+  });
+
+  test('demo diffs are syntax highlighted (vendored highlighter loads from ../public)', async () => {
+    await demoPage.waitForSelector('.ln-content.hl .hljs-keyword');
   });
 
   test('saving a comment in the demo does not surface "Save failed"', async () => {

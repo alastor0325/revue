@@ -14,6 +14,11 @@ import {
 } from './persistence.js';
 // Revisions: detect changes on load
 import { diffFingerprint, migrateApprovals, detectRevisionChanges } from './revisions.js';
+import { loadHighlighter } from './highlight.js';
+
+// Resolves once the syntax highlighter has loaded (or failed to).  Already
+// resolved when init() didn't run (unit tests import the module directly).
+let highlighterReady = Promise.resolve();
 // Renderer: all DOM functions + re-exportable items for tests
 import {
   patchEls, updateSubmitButton, removeExistingForm, showCommentForm,
@@ -263,7 +268,9 @@ async function loadAndRender() {
   filesChanged.style.display = 'none';
 
   try {
-    const [diffRes, stateRes] = await Promise.all([fetch('api/diff'), fetch('api/state')]);
+    // The highlighter loads in parallel with the diff; wait for it (it never
+    // rejects — on failure diffs render as plain text) before rendering.
+    const [diffRes, stateRes] = await Promise.all([fetch('api/diff'), fetch('api/state'), highlighterReady]);
 
     const data = await diffRes.json();
     if (!diffRes.ok) throw new Error(data.error || 'Failed to load diff');
@@ -619,6 +626,7 @@ export async function initProjectSwitcher() {
 }
 
 async function init() {
+  highlighterReady = loadHighlighter(); // awaited by loadAndRender, next to the diff fetch
   setupStickySidebarOffset();
   updateSubmitButton();
 

@@ -51,6 +51,15 @@
   --diff-del-gutter: rgba(248, 81, 73, 0.22);
   --diff-del-fg:     #ffa198;
 
+  /* Syntax highlighting tokens (diff lines) */
+  --syn-keyword:  #ff7b72;
+  --syn-string:   #a5d6ff;
+  --syn-constant: #79c0ff;
+  --syn-function: #d2a8ff;
+  --syn-type:     #ffa657;
+  --syn-tag:      #7ee787;
+  --syn-comment:  var(--ink-quiet);
+
   /* Type stacks */
   --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
@@ -943,6 +952,31 @@ tr.line-removed .ln-content { background: var(--diff-del-bg); color: var(--diff-
 tr.line-removed .ln-content:hover { background: rgba(248, 81, 73, 0.16); }
 
 tr.line-context .ln-content { color: var(--ink-2); }
+
+/* ─── Syntax highlighting (public/highlight.js → .ln-content.hl) ───────── */
+/* A highlighted row keeps its green/red background tint and coloured +/-
+   sign to mark the change; the code itself uses normal ink + token colours
+   instead of the all-green / all-red text of an unhighlighted row. */
+tr.line-added .ln-content.hl,
+tr.line-removed .ln-content.hl { color: var(--ink); }
+tr.line-added .ln-content.hl .diff-sign   { color: var(--green); }
+tr.line-removed .ln-content.hl .diff-sign { color: var(--red); }
+
+.ln-content :is(.hljs-keyword, .hljs-selector-tag, .hljs-doctag, .hljs-template-tag,
+  .hljs-template-variable, .hljs-variable.language_)        { color: var(--syn-keyword); }
+.ln-content :is(.hljs-string, .hljs-regexp)                 { color: var(--syn-string); }
+.ln-content :is(.hljs-number, .hljs-literal, .hljs-symbol, .hljs-attr, .hljs-attribute,
+  .hljs-variable.constant_, .hljs-selector-attr, .hljs-selector-class,
+  .hljs-selector-id, .hljs-meta)                            { color: var(--syn-constant); }
+/* Inside a preprocessor line (.hljs-meta), keep keywords and strings their own colour. */
+.ln-content .hljs-meta :is(.hljs-keyword)                   { color: var(--syn-keyword); }
+.ln-content .hljs-meta :is(.hljs-string)                    { color: var(--syn-string); }
+.ln-content :is(.hljs-title, .hljs-section)                 { color: var(--syn-function); }
+.ln-content :is(.hljs-type, .hljs-built_in, .hljs-title.class_) { color: var(--syn-type); }
+.ln-content :is(.hljs-name, .hljs-tag)                      { color: var(--syn-tag); }
+.ln-content :is(.hljs-comment, .hljs-quote)                 { color: var(--syn-comment); font-style: italic; }
+.ln-content .hljs-emphasis { font-style: italic; }
+.ln-content .hljs-strong   { font-weight: 700; }
 
 .line-icon {
   display: none;

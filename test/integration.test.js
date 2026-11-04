@@ -1900,6 +1900,13 @@ describe('hub — one port, one /r/<slug>/ per project', () => {
     expect(diff.body.repoName).toBe('work-repo');
   });
 
+  test('the vendored syntax highlighter is served as JavaScript under the project prefix', async () => {
+    const res = await httpRequest(`${base}/r/work-repo/vendor/highlight.min.js`);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/javascript/);
+    expect(res.body).toContain('Highlight.js v11');
+  });
+
   test('unknown project is a 404', async () => {
     const res = await httpRequest(`${base}/r/nope/api/diff`);
     expect(res.status).toBe(404);
