@@ -39,21 +39,40 @@ function resolvePath(p) {
   return path.resolve(p.replace(/^~/, os.homedir()));
 }
 
+/**
+ * `revue init [<repo-path>] [--port <port>]` — remember the default repo and/or
+ * the default port.  Each call updates only the keys it is given, so setting
+ * the port (e.g. the port forwarded from a remote box) keeps the repo.
+ */
 function runInit(args, configFile = CONFIG_FILE) {
-  const repoArg = args[0];
-  if (!repoArg) {
-    console.error('Usage: revue init <repo-path>');
+  const { port, rest } = parseArgs(args);
+  const repoArg = rest[0];
+  if (!repoArg && port == null) {
+    console.error('Usage: revue init [<repo-path>] [--port <port>]');
     process.exit(1);
   }
-  const repoPath = resolvePath(repoArg);
-  if (!fs.existsSync(repoPath)) {
-    console.error(`Error: path does not exist: ${repoPath}`);
-    process.exit(1);
+  const config = readConfig(configFile);
+  if (repoArg) {
+    const repoPath = resolvePath(repoArg);
+    if (!fs.existsSync(repoPath)) {
+      console.error(`Error: path does not exist: ${repoPath}`);
+      process.exit(1);
+    }
+    config.defaultRepo = repoPath;
+    console.log(`Default repo set to: ${repoPath}`);
   }
-  writeConfig({ defaultRepo: repoPath }, configFile);
-  console.log(`Default repo set to: ${repoPath}`);
+  if (port != null) {
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      console.error('Error: --port must be a number from 1 to 65535.');
+      process.exit(1);
+    }
+    config.port = port;
+    console.log(`Default port set to: ${port}`);
+  }
+  writeConfig(config, configFile);
   console.log(`Config saved to: ${configFile}`);
 }
+
 
 // ── PID tracking ───────────────────────────────────────────────────────────
 
@@ -176,12 +195,17 @@ async function waitForExit(pids, { timeoutMs = 5000, pollMs = 100 } = {}) {
 // A running daemon is a hub serving every project on its one port, so a new
 // `revue --repo X` adds X to it instead of starting another daemon.
 
-/** Ports of running revue daemons, restricted to `port` when one is given. */
+/** Running revue daemons ({ pid, port, filePath }), one per port, restricted to `port` if given. */
+function runningHubs(port = null) {
+  const byPort = new Map();
+  for (const i of readAllInstances()) {
+    if (i.port && isRunning(i.pid) && (port == null || i.port === port) && !byPort.has(i.port)) byPort.set(i.port, i);
+  }
+  return [...byPort.values()];
+}
+
 function runningHubPorts(port = null) {
-  const ports = readAllInstances()
-    .filter((i) => i.port && isRunning(i.pid) && (port == null || i.port === port))
-    .map((i) => i.port);
-  return [...new Set(ports)];
+  return runningHubs(port).map((h) => h.port);
 }
 
 async function hubRequest(port, method, body) {
@@ -199,18 +223,32 @@ async function hubRequest(port, method, body) {
 /**
  * Register a repo with the first running hub that accepts it.
  * Returns { url } on success, { error } when a hub rejected the request (e.g.
- * unknown worktree), or null when no hub is reachable — including daemons
- * from a revue version without the hub endpoint — so the caller starts one.
+ * unknown worktree), or null when no hub accepted it, so the caller starts
+ * one.  With null comes `legacy`: tracked daemons that answered 404, i.e. a
+ * pre-0.3.0 revue with no hub endpoint, which the caller must replace or the
+ * new daemon would be bumped off their port.
  */
 async function registerWithHub({ repoPath, worktree, port = null }) {
-  for (const p of runningHubPorts(port)) {
+  const legacy = [];
+  for (const h of runningHubs(port)) {
     try {
-      const { status, json } = await hubRequest(p, 'POST', { repoPath, worktree: worktree || null });
-      if (status === 200 && json && json.path) return { url: `http://localhost:${p}${json.path}` };
+      const { status, json } = await hubRequest(h.port, 'POST', { repoPath, worktree: worktree || null });
+      if (status === 200 && json && json.path) return { url: `http://localhost:${h.port}${json.path}` };
       if (status === 400 && json && json.error) return { error: json.error };
+      if (status === 404) legacy.push(h);
     } catch { /* not reachable — try the next one */ }
   }
-  return null;
+  return legacy.length ? { legacy } : null;
+}
+
+/** Stop pre-0.3.0 daemons so the new hub can take their port. */
+async function replaceLegacyDaemons(legacy) {
+  for (const h of legacy) {
+    console.log(`Replacing an older revue (before 0.3.0) on port ${h.port}.`);
+    try { process.kill(h.pid, 'SIGTERM'); } catch {}
+    try { fs.unlinkSync(h.filePath); } catch {}
+  }
+  await waitForExit(legacy.map((h) => h.pid));
 }
 
 /** Projects mounted on all running hubs, so --restart can bring them back. */
@@ -310,6 +348,7 @@ Usage: revue [worktree] [options]
 Commands:
   revue                        Start with default repo (configured via init)
   revue init <repo-path>       Set the default repo path
+  revue init --port <port>     Set the default port (e.g. a port forwarded over SSH)
   revue <worktree>             Open a specific worktree by name
   revue --stop                 Stop the running instance
   revue --restart              Restart the running instance
@@ -319,7 +358,8 @@ Running revue for another repo while it is up adds that repo to it.
 
 Options:
   --repo <path>                Override the default repo for this run
-  --port <port>                Use (or join) the daemon on this port (default: 7777)
+  --port <port>                Use (or join) the daemon on this port
+                               (default: the port from init, else 7777)
   --no-open                    Do not open the browser on start
   --help, -h                   Show this help message
   --version, -v                Print the version and exit
@@ -382,17 +422,18 @@ async function main() {
       console.error(`Error: repo path does not exist: ${repoPath}`);
       process.exit(1);
     }
-    const registered = await registerWithHub({ repoPath, worktree: rest[0], port });
+    const registered = await registerWithHub({ repoPath, worktree: rest[0], port: port || config.port });
     if (registered && registered.error) {
       console.error(`Error: ${registered.error}`);
       process.exit(1);
     }
-    if (registered) {
+    if (registered && registered.url) {
       console.log(`revue running at ${registered.url}`);
       if (!noOpen) openBrowser(registered.url);
       return;
     }
-    exitIfUnresolvable(rawArgs);
+    exitIfUnresolvable(rawArgs); // before stopping anything
+    if (registered && registered.legacy) await replaceLegacyDaemons(registered.legacy);
     daemonize(rawArgs);
     return;
   }
@@ -404,8 +445,9 @@ async function main() {
   process.on('exit', () => { try { fs.unlinkSync(myPidFile); } catch {} });
   process.on('SIGTERM', () => process.exit(0));
 
-  const { port, repo, noOpen, rest: positional } = parseArgs(rawArgs);
+  const { port: portArg, repo, noOpen, rest: positional } = parseArgs(rawArgs);
   const config = readConfig();
+  const port = portArg || config.port;
   const mainRepoPath = repo ? resolvePath(repo) : config.defaultRepo;
 
   let extra = [];
@@ -431,7 +473,7 @@ if (require.main === module) {
 module.exports = {
   readPid, readAllInstances, isRunning, stopDaemon, waitForExit, waitForPort,
   parseArgs, pidFilePath, ensurePidsDir,
-  runningHubPorts, registerWithHub, collectHubProjects,
+  runningHubPorts, registerWithHub, replaceLegacyDaemons, collectHubProjects,
   readConfig, writeConfig, runInit, printHelp,
   LEGACY_PID_FILE, CONFIG_FILE,
 };

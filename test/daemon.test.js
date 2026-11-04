@@ -548,6 +548,25 @@ describe('runInit', () => {
     expect(path.isAbsolute(config.defaultRepo)).toBe(true);
   });
 
+  test('--port saves a default port and keeps the saved repo', () => {
+    const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+    runInit([tmpDir], configFile);
+    runInit(['--port', '7779'], configFile);
+    expect(readConfig(configFile)).toEqual({ defaultRepo: tmpDir, port: 7779 });
+    runInit([tmpDir, '--port', '7780'], configFile);
+    expect(readConfig(configFile)).toEqual({ defaultRepo: tmpDir, port: 7780 });
+    log.mockRestore();
+  });
+
+  test('rejects a port outside 1-65535', () => {
+    const exitSpy = jest.spyOn(process, 'exit').mockImplementation(() => { throw new Error('exit'); });
+    const err = jest.spyOn(console, 'error').mockImplementation(() => {});
+    expect(() => runInit(['--port', '70000'], configFile)).toThrow('exit');
+    expect(() => runInit(['--port', 'abc'], configFile)).toThrow('exit');
+    expect(fs.existsSync(configFile)).toBe(false);
+    exitSpy.mockRestore(); err.mockRestore();
+  });
+
   test('exits with error when no path given', () => {
     const exitSpy = jest.spyOn(process, 'exit').mockImplementation(() => { throw new Error('exit'); });
     expect(() => runInit([], configFile)).toThrow('exit');
@@ -617,3 +636,4 @@ describe('CLI --version flag', () => {
     expect(run('-v').trim()).toBe(pkgVersion);
   });
 });
+

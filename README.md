@@ -109,6 +109,7 @@ revue                              # default repo (from init)
 revue --stop                       # stop the running daemon
 revue --restart                    # restart (picks up server code changes)
 revue --port 8080                  # custom port (default: 7777, auto-bumps if busy)
+revue init --port 7779             # remember a default port (e.g. an SSH-forwarded one)
 revue my-feature                   # open a specific worktree by name
 revue --repo ~/other/repo          # override default repo for this run
 revue --repo ~/other/repo feature  # override repo + worktree together
@@ -128,7 +129,7 @@ revue --repo ~/code/firefox        # starts the daemon → http://localhost:7777
 revue --repo ~/code/revue          # joins it          → http://localhost:7777/r/revue/
 ```
 
-Each repo lives under `/r/<repo-name>/` (a numeric suffix is added if two repos share a name). `http://localhost:7777/` is the project dashboard: every open repo with its current worktree. Inside a project, the dropdown next to the **Revue** wordmark switches to another project or back to the dashboard (**All projects…**). Running `revue --repo <path> <worktree>` for a repo that is already open switches it to that worktree. `--port N` targets the daemon on port N, and starts one there if none is running. `revue --restart` brings back every project that was open; `revue --stop` stops the daemon and all its projects.
+Each repo lives under `/r/<repo-name>/` (a numeric suffix is added if two repos share a name). `http://localhost:7777/` is the project dashboard: every open repo with its current worktree. Inside a project, the dropdown next to the **Revue** wordmark switches to another project or back to the dashboard (**All projects…**). Running `revue --repo <path> <worktree>` for a repo that is already open switches it to that worktree. `--port N` targets the daemon on port N, and starts one there if none is running. `revue init --port N` saves a default port to `~/.revue/config.json`, for example the port a remote box forwards over SSH. An older revue daemon (before 0.3.0) can't share its port, so revue replaces it. `revue --restart` brings back every project that was open; `revue --stop` stops the daemon and all its projects.
 
 ---
 

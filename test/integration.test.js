@@ -2031,10 +2031,10 @@ describe('CLI hub client — revue --repo X joins the running hub', () => {
   // time; load it with homedir pointed at a scratch dir so this block never
   // sees or touches real running daemons.
   const scratchHome = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-cli-home-'));
-  let registerWithHub, collectHubProjects, runningHubPorts, pidFilePath, ensurePidsDir;
+  let registerWithHub, replaceLegacyDaemons, collectHubProjects, runningHubPorts, pidFilePath, ensurePidsDir;
   jest.isolateModules(() => {
     jest.doMock('os', () => ({ ...jest.requireActual('os'), homedir: () => scratchHome }));
-    ({ registerWithHub, collectHubProjects, runningHubPorts, pidFilePath, ensurePidsDir } = require('../bin/revue'));
+    ({ registerWithHub, replaceLegacyDaemons, collectHubProjects, runningHubPorts, pidFilePath, ensurePidsDir } = require('../bin/revue'));
     jest.dontMock('os');
   });
   let server, port;
@@ -2075,6 +2075,41 @@ describe('CLI hub client — revue --repo X joins the running hub', () => {
 
   test('registerWithHub returns null when no hub listens on the requested port', async () => {
     expect(await registerWithHub({ repoPath: mainRepoPath, port: port + 1000 })).toBeNull();
+  });
+
+  test('registerWithHub reports a pre-0.3.0 daemon (no hub endpoint) for replacement', async () => {
+    const express = require('express');
+    const legacyPort = await findAvailablePort(19650);
+    const legacy = await new Promise((r) => { const s = express().listen(legacyPort, '127.0.0.1', () => r(s)); });
+    // Advertise it under a live pid other than ours (the jest parent process).
+    fs.writeFileSync(pidFilePath(process.ppid), `${process.ppid}:${legacyPort}`);
+    try {
+      expect(await registerWithHub({ repoPath: mainRepoPath, port: legacyPort })).toEqual({
+        legacy: [{ pid: process.ppid, port: legacyPort, filePath: pidFilePath(process.ppid) }],
+      });
+    } finally {
+      fs.unlinkSync(pidFilePath(process.ppid));
+      await new Promise((r) => legacy.close(r));
+    }
+  });
+
+  test('replaceLegacyDaemons stops the old daemon and drops its pid file', async () => {
+    const { spawn } = jest.requireActual('child_process');
+    const old = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+    const exited = new Promise((r) => old.on('exit', r));
+    const filePath = pidFilePath(old.pid);
+    fs.writeFileSync(filePath, `${old.pid}:19651`);
+    const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await replaceLegacyDaemons([{ pid: old.pid, port: 19651, filePath }]);
+      await exited;
+      expect(old.signalCode).toBe('SIGTERM');
+      expect(fs.existsSync(filePath)).toBe(false);
+      expect(log.mock.calls.flat().join(' ')).toMatch(/Replacing an older revue .*port 19651/);
+    } finally {
+      log.mockRestore();
+      try { old.kill('SIGKILL'); } catch {}
+    }
   });
 
   test('collectHubProjects returns every mounted project for --restart', async () => {
