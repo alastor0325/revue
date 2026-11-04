@@ -59,6 +59,7 @@
   --syn-type:     #ffa657;
   --syn-tag:      #7ee787;
   --syn-comment:  var(--ink-quiet);
+  --syn-preproc:  var(--amber);
 
   /* Type stacks */
   --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
@@ -962,21 +963,55 @@ tr.line-removed .ln-content.hl { color: var(--ink); }
 tr.line-added .ln-content.hl .diff-sign   { color: var(--green); }
 tr.line-removed .ln-content.hl .diff-sign { color: var(--red); }
 
-.ln-content :is(.hljs-keyword, .hljs-selector-tag, .hljs-doctag, .hljs-template-tag,
+/* :where() keeps the base rules at .ln-content's specificity, so per-language
+   rules below override them (see "Per-language rules"). */
+.ln-content :where(.hljs-keyword, .hljs-selector-tag, .hljs-doctag, .hljs-template-tag,
   .hljs-template-variable, .hljs-variable.language_)        { color: var(--syn-keyword); }
-.ln-content :is(.hljs-string, .hljs-regexp)                 { color: var(--syn-string); }
-.ln-content :is(.hljs-number, .hljs-literal, .hljs-symbol, .hljs-attr, .hljs-attribute,
+.ln-content :where(.hljs-string, .hljs-regexp)                 { color: var(--syn-string); }
+.ln-content :where(.hljs-number, .hljs-literal, .hljs-symbol, .hljs-attr, .hljs-attribute,
   .hljs-variable.constant_, .hljs-selector-attr, .hljs-selector-class,
   .hljs-selector-id, .hljs-meta)                            { color: var(--syn-constant); }
-/* Inside a preprocessor line (.hljs-meta), keep keywords and strings their own colour. */
+/* Keywords and strings inside a .hljs-meta span (directives, attributes) keep their own colour. */
 .ln-content .hljs-meta :is(.hljs-keyword)                   { color: var(--syn-keyword); }
 .ln-content .hljs-meta :is(.hljs-string)                    { color: var(--syn-string); }
-.ln-content :is(.hljs-title, .hljs-section)                 { color: var(--syn-function); }
-.ln-content :is(.hljs-type, .hljs-built_in, .hljs-title.class_) { color: var(--syn-type); }
-.ln-content :is(.hljs-name, .hljs-tag)                      { color: var(--syn-tag); }
-.ln-content :is(.hljs-comment, .hljs-quote)                 { color: var(--syn-comment); font-style: italic; }
+.ln-content :where(.hljs-title, .hljs-section)                 { color: var(--syn-function); }
+.ln-content :where(.hljs-type, .hljs-built_in, .hljs-title.class_) { color: var(--syn-type); }
+.ln-content :where(.hljs-name, .hljs-tag)                      { color: var(--syn-tag); }
+.ln-content :where(.hljs-comment, .hljs-quote)                 { color: var(--syn-comment); font-style: italic; }
 .ln-content .hljs-emphasis { font-style: italic; }
 .ln-content .hljs-strong   { font-weight: 700; }
+/* Interpolations inside strings (JS `${}`, Python f-strings, shell) are code. */
+.ln-content .hljs-subst             { color: var(--ink); }
+/* this / self / super */
+.ln-content .hljs-variable.language_ { font-style: italic; }
+
+/* Per-language rules.  renderFile puts .language-<name> on the diff table
+   (public/highlight.js languageClass); highlight.js puts the same class on
+   code embedded in another file, e.g. a <script> block in HTML.
+   The base token rules above use :where(), so these short selectors win
+   both when the class is on the table and on an embedded block's span. */
+
+/* C / C++ / Objective-C preprocessor lines and Rust #[attributes] stand apart. */
+:is(.language-cpp, .language-c, .language-objectivec, .language-rust) .hljs-meta,
+:is(.language-cpp, .language-c, .language-objectivec) .hljs-meta .hljs-keyword { color: var(--syn-preproc); }
+.language-rust .hljs-symbol { color: var(--syn-type); font-style: italic; }   /* 'lifetimes */
+
+/* JavaScript / TypeScript */
+:is(.language-javascript, .language-typescript) .hljs-property { color: var(--syn-constant); }
+:is(.language-javascript, .language-typescript) .hljs-regexp   { color: var(--syn-tag); }
+
+/* Markdown: document structure, not code tokens. */
+.language-markdown .hljs-section { color: var(--syn-constant); font-weight: 700; }
+.language-markdown .hljs-bullet  { color: var(--syn-type); }
+.language-markdown .hljs-code    { color: var(--syn-string); background: rgba(255, 255, 255, 0.06); border-radius: var(--radius); }
+.language-markdown .hljs-string  { color: var(--syn-function); }   /* [link text] */
+.language-markdown .hljs-link    { color: var(--syn-string); text-decoration: underline; }
+
+/* Python decorators */
+.language-python .hljs-meta { color: var(--syn-function); }
+
+/* JSON / YAML: keys distinct from values. */
+:is(.language-json, .language-yaml) .hljs-attr { color: var(--syn-tag); }
 
 .line-icon {
   display: none;

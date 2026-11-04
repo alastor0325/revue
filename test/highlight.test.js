@@ -11,7 +11,7 @@ global.EventSource = jest.fn(() => ({ addEventListener: jest.fn(), close: jest.f
 
 const hljs = require('../public/vendor/highlight.min.js').default;
 const {
-  setHighlighter, languageFor, splitHighlightedLines, highlightDiffLines,
+  setHighlighter, languageFor, languageClass, splitHighlightedLines, highlightDiffLines,
 } = require('../public/highlight');
 const { renderFile, state } = require('../public/app');
 
@@ -165,5 +165,47 @@ describe('highlightDiffLines caching and limits', () => {
   test('skips hunks larger than the size limit', () => {
     const big = [add('x'.repeat(150000)), add('y'.repeat(60000))];
     expect(highlightDiffLines(big, 'a.cpp')).toBeNull();
+  });
+});
+
+describe('per-language rules', () => {
+  test('languageClass uses the canonical highlight.js name, aliases included', () => {
+    expect(languageClass('dom/media/MediaDecoder.h')).toBe('language-cpp'); // via the "h" override
+    expect(languageClass('Foo.sys.mjs')).toBe('language-javascript');      // "mjs" alias
+    expect(languageClass('README.md')).toBe('language-markdown');          // "md" alias
+    expect(languageClass('nsAppShell.mm')).toBe('language-objectivec');
+    expect(languageClass('notes.xyz')).toBeNull();
+  });
+
+  test('renderFile tags the diff table with the language class', () => {
+    const file = (newPath) => ({
+      newPath, oldPath: newPath, binary: false,
+      hunks: [{ header: '@@ -0,0 +1 @@', oldStart: 0, oldCount: 0, newStart: 1, newCount: 1,
+        lines: [{ type: 'added', content: 'x', oldLineNum: null, newLineNum: 1 }] }],
+    });
+    expect(renderFile(file('a.cpp'), 'h').querySelector('.diff-table').className).toBe('diff-table language-cpp');
+    expect(renderFile(file('blob.xyz'), 'h').querySelector('.diff-table').className).toBe('diff-table');
+  });
+
+  test('code embedded in HTML carries its own language class, so its rules apply', () => {
+    const html = highlightDiffLines([add('<script>this.x = 1;</script>')], 'page.html')[0];
+    expect(html).toContain('class="language-javascript"');
+  });
+
+  // Each grammar must emit the token classes that style.css's per-language
+  // rules target, or those rules would silently never match.
+  const tokens = (path, code) => highlightDiffLines(code.split('\n').map(add), path).join('\n');
+  test.each([
+    ['a.cpp', '#include "foo.h"\n#define N 1', ['hljs-meta', 'hljs-keyword', 'hljs-string']],
+    ['a.js', 'this.x = `a${b}` + /ab+c/.source;', ['hljs-variable language_', 'hljs-property', 'hljs-subst', 'hljs-regexp']],
+    ['README.md', '# Title\n- item *em* **st** `code` [t](http://x)\n> quote',
+      ['hljs-section', 'hljs-bullet', 'hljs-emphasis', 'hljs-strong', 'hljs-code', 'hljs-string', 'hljs-link', 'hljs-quote']],
+    ['a.py', '@cached\ndef f(self):\n    return f"{self.x}"', ['hljs-meta', 'hljs-subst']],
+    ['lib.rs', "#[derive(Debug)]\nfn f<'a>(x: &'a str) {}", ['hljs-meta', 'hljs-symbol']],
+    ['a.json', '{"key": 1}', ['hljs-attr']],
+    ['a.yaml', 'key: value', ['hljs-attr']],
+  ])('%s emits the classes its rules use', (path, code, classes) => {
+    const html = tokens(path, code);
+    for (const c of classes) expect(html).toContain(`class="${c}"`);
   });
 });

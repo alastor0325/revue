@@ -11,7 +11,7 @@ import {
   refreshPromptBar,
 } from './persistence.js';
 import { getRevisionList } from './revisions.js';
-import { highlightDiffLines } from './highlight.js';
+import { highlightDiffLines, languageClass } from './highlight.js';
 
 // ── DOM helpers ────────────────────────────────────────────────────────────
 function $(sel, root) { return (root || document).querySelector(sel); }
@@ -554,7 +554,9 @@ export function renderFile(fileData, patchHash) {
   }
 
   const table = document.createElement('table');
-  table.className = 'diff-table';
+  // The language class lets style.css apply that format's token rules.
+  const langClass = languageClass(filePath);
+  table.className = langClass ? `diff-table ${langClass}` : 'diff-table';
 
   for (let hi = 0; hi < fileData.hunks.length; hi++) {
     const hunk = fileData.hunks[hi];

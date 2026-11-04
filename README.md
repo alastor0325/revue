@@ -57,7 +57,7 @@ npm link                          # makes `revue` available globally
 
 | | |
 |---|---|
-| **Syntax highlighting** | Added, removed and context lines are syntax highlighted (C/C++, Objective-C, JS/TS, Python, Rust, Java, Kotlin, Go, HTML/XML, CSS, JSON, YAML, TOML, shell, Markdown and more), on top of the green/red diff tint. A comment or string that spans several lines is coloured correctly. Firefox headers, IDL/IPDL and `moz.build` files are recognised. |
+| **Syntax highlighting** | Added, removed and context lines are syntax highlighted (C/C++, Objective-C, JS/TS, Python, Rust, Java, Kotlin, Go, HTML/XML, CSS, JSON, YAML, TOML, shell, Markdown and more), on top of the green/red diff tint. A comment or string that spans several lines is coloured correctly. Each format has its own rules: C/C++ preprocessor lines and Rust attributes stand apart, Markdown shows headings, bullets, inline code and links, JS/TS mark property access and regexes, plus Python decorators, Rust lifetimes and JSON/YAML keys; code embedded in HTML gets its language's rules too. In every language, `this`/`self` are italic and string interpolations (`${}`, f-strings) read as code. Firefox headers, IDL/IPDL and `moz.build` files are recognised. |
 | **Per-line comments** | Click any diff line or commit message to annotate — including the surrounding context lines you reveal with the ↑/↓ expanders. Drafts persist across reloads. |
 | **Approve / Deny per patch** | Mark each commit. Denied patches always appear in the generated prompt — comment or no comment. |
 | **Approval persistence** | Approvals survive page reloads, rebases, and commit-message amends. *Same code = same approval.* Only actual code changes clear an approval. |

@@ -3558,3 +3558,59 @@ describe('UI under a hub project prefix', () => {
     expect(new URL(hubPage.url()).pathname).toBe('/r/hub-repo/');
   }, 30000);
 });
+
+// ── Per-language highlight rules ──────────────────────────────────────────
+// Each language gets its own token rules (a .language-* class on the diff
+// table): C++ preprocessor lines, Markdown headings/inline code.
+
+describe('per-language syntax highlighting', () => {
+  let langServer, langPage, langRepo;
+
+  beforeAll(async () => {
+    langRepo = path.join(tmpDir, 'lang-repo');
+    execSync(`git clone -q "${mainRepoPath}" "${langRepo}"`);
+    git(langRepo, 'config user.email "test@test.com"');
+    git(langRepo, 'config user.name "Test"');
+    fs.writeFileSync(path.join(langRepo, 'a.cpp'), '#include "a.h"\nint f() { return 1; }\n');
+    fs.writeFileSync(path.join(langRepo, 'README.md'), '# Title\n\nUse `revue` **now**.\n');
+    fs.writeFileSync(path.join(langRepo, 'b.js'), 'class A { m() { return this.x; } }\n');
+    fs.writeFileSync(path.join(langRepo, 'test_page.html'), '<script>\ndocument.title = "t";\n</script>\n');
+    git(langRepo, 'add .');
+    git(langRepo, 'commit -m "feat: languages"');
+    const app = createApp({ worktreeName: 'lang-repo', worktreePath: langRepo, mainRepoPath });
+    const port = await findAvailablePort(19470);
+    await new Promise((r) => { langServer = app.listen(port, '127.0.0.1', r); });
+    langPage = await browser.newPage();
+    await langPage.goto(`http://127.0.0.1:${port}`);
+    await langPage.waitForSelector('.diff-table.language-markdown .hljs-section');
+  }, 30000);
+
+  afterAll(async () => {
+    await langPage?.close();
+    await new Promise((r) => langServer?.close(r));
+  });
+
+  const style = (sel, prop) => langPage.$eval(sel, (el, p) => getComputedStyle(el)[p], prop);
+
+  test('C++ preprocessor lines use the preprocessor colour, include paths stay strings', async () => {
+    expect(await style('.language-cpp .hljs-meta', 'color')).toBe('rgb(232, 177, 79)');
+    expect(await style('.language-cpp .hljs-meta .hljs-string', 'color')).toBe('rgb(165, 214, 255)');
+  });
+
+  test('Markdown headings are bold, inline code gets a background', async () => {
+    expect(await style('.language-markdown .hljs-section', 'fontWeight')).toBe('700');
+    expect(await style('.language-markdown .hljs-section', 'color')).toBe('rgb(121, 192, 255)');
+    expect(await style('.language-markdown .hljs-code', 'backgroundColor')).not.toBe('rgba(0, 0, 0, 0)');
+  });
+
+  test('JS `this` is italic', async () => {
+    expect(await style('.language-javascript .hljs-variable.language_', 'fontStyle')).toBe('italic');
+  });
+
+  test('JS rules also apply to a <script> embedded in an HTML file (mochitests)', async () => {
+    const sel = '.diff-table.language-xml .language-javascript .hljs-property';
+    expect(await style(sel, 'color')).toBe('rgb(121, 192, 255)');
+    // The same token in the whole-file JS table gets the same rule.
+    expect(await style('.diff-table.language-javascript .hljs-property', 'color')).toBe('rgb(121, 192, 255)');
+  });
+});

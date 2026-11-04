@@ -21,6 +21,7 @@ export async function loadHighlighter() {
 /** Test seam: install (or clear, with null) the highlighter. */
 export function setHighlighter(h) {
   hljs = h;
+  canonical.clear();
 }
 
 // Only the cases where highlight.js's own aliases are wrong or missing for
@@ -40,6 +41,26 @@ export function languageFor(filePath) {
   const ext = base.includes('.') ? base.split('.').pop() : base; // "Makefile" → "makefile"
   const lang = OVERRIDES[base] || OVERRIDES[ext] || ext;
   return hljs.getLanguage(lang) ? lang : null;
+}
+
+// Canonical highlight.js language name per alias ("h" → "cpp", "md" →
+// "markdown"), cached because renderFile runs again on every re-render.
+const canonical = new Map();
+
+/**
+ * "language-<canonical name>" for the file's language, or null when it isn't
+ * highlighted.  It goes on the diff table so style.css can give each format
+ * its own token rules; it is the same class highlight.js puts on code embedded
+ * in another file (e.g. a <script> in HTML), so those rules cover that too.
+ */
+export function languageClass(filePath) {
+  const lang = languageFor(filePath);
+  if (!lang) return null;
+  if (!canonical.has(lang)) {
+    const grammar = hljs.getLanguage(lang);
+    canonical.set(lang, hljs.listLanguages().find((n) => hljs.getLanguage(n) === grammar) || lang);
+  }
+  return `language-${canonical.get(lang)}`;
 }
 
 /**
@@ -120,5 +141,5 @@ export function highlightDiffLines(lines, filePath) {
 const cache = new WeakMap(); // hunk lines array → { filePath, hljs, out }
 
 if (typeof module !== 'undefined') {
-  module.exports = { loadHighlighter, setHighlighter, languageFor, splitHighlightedLines, highlightDiffLines };
+  module.exports = { loadHighlighter, setHighlighter, languageFor, languageClass, splitHighlightedLines, highlightDiffLines };
 }
