@@ -3654,8 +3654,10 @@ describe('rendered (rich) diff of a Markdown file', () => {
     git(richRepo, 'config user.email "test@test.com"');
     git(richRepo, 'config user.name "Test"');
     fs.writeFileSync(path.join(richRepo, 'doc.md'), '# Guide\n\nkeep this\n\nold paragraph\n');
+    fs.writeFileSync(path.join(richRepo, 'notes.txt'), 'one\ntwo\nthree\n');
     git(richRepo, 'add .');
     git(richRepo, 'commit -m "docs: add guide"');
+    git(richRepo, 'mv notes.txt moved-notes.txt');
     fs.writeFileSync(path.join(richRepo, 'doc.md'),
       '# Guide\n\nkeep this\n\nnew paragraph <img src=x onerror="window.parent.__pwned=1">\n');
     fs.writeFileSync(path.join(richRepo, 'prompt.md.j2'), '# Prompt\n\nHi {{ name }}.\n');
@@ -3702,6 +3704,18 @@ describe('rendered (rich) diff of a Markdown file', () => {
     expect(await f.textContent('h1')).toBe('Prompt');
     expect(await f.textContent('code.jinja')).toBe('{{ name }}');
     await file.locator('.view-toggle [data-view=source]').click();
+  });
+
+  test('a pure rename shows both paths and a Renamed badge, not +0/-0', async () => {
+    const file = richPage.locator(`${cur} .file-block`, { hasText: 'moved-notes.txt' });
+    expect(await file.locator('.file-path').textContent()).toBe('notes.txt → moved-notes.txt');
+    expect(await file.locator('.file-stats').textContent()).toBe('Renamed');
+    expect(await file.locator('.file-empty-note').textContent()).toBe('File renamed without changes');
+    const oldStyle = await file.locator('.file-old-path').evaluate((el) => getComputedStyle(el).color);
+    const newStyle = await file.locator('.file-path').evaluate((el) => getComputedStyle(el).color);
+    expect(oldStyle).not.toBe(newStyle); // the old path reads as secondary
+    const nav = richPage.locator('.file-nav-item', { hasText: 'moved-notes.txt' });
+    expect(await nav.locator('.file-nav-stats').textContent()).toBe('Renamed');
   });
 
   test('the rendered page cannot run scripts (sandboxed frame)', async () => {

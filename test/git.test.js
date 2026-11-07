@@ -57,6 +57,19 @@ describe('parseDiff', () => {
     expect(parseDiff('\n\n')).toEqual([]);
   });
 
+  test('takes a rename\'s paths from its rename from/to lines', () => {
+    // A path containing " b/" makes the `diff --git` line ambiguous.
+    const diff = `diff --git a/x b/old.md b/x b/new.md
+similarity index 100%
+rename from x b/old.md
+rename to x b/new.md`;
+    const [f] = parseDiff(diff);
+    expect(f.oldPath).toBe('x b/old.md');
+    expect(f.newPath).toBe('x b/new.md');
+    expect(f.renamed).toBe(true);
+    expect(f.hunks).toEqual([]);
+  });
+
   test('parses a simple added line', () => {
     const diff = `diff --git a/foo.js b/foo.js
 --- a/foo.js

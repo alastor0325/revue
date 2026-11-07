@@ -9,8 +9,8 @@ global.EventSource = jest.fn(() => ({ addEventListener: jest.fn(), close: jest.f
 const { renderFile, state } = require('../public/app');
 
 // Minimal file data factory
-function makeFile({ newPath = 'src/foo.cpp', oldPath = 'src/foo.cpp', hunks = [] } = {}) {
-  return { newPath, oldPath, binary: false, hunks };
+function makeFile({ newPath = 'src/foo.cpp', oldPath = 'src/foo.cpp', renamed = false, hunks = [] } = {}) {
+  return { newPath, oldPath, binary: false, renamed, hunks };
 }
 
 function makeHunk({ header = '@@ -1,3 +1,3 @@', oldStart = 1, oldCount = 3, newStart = 1, newCount = 3, lines = [] } = {}) {
@@ -31,6 +31,44 @@ beforeEach(() => {
   require('../public/layout').resetLayoutCache();
 });
 
+// ── Renamed files ───────────────────────────────────────────────────────────
+
+describe('renderFile — renamed files', () => {
+  const rename = (hunks = []) => renderFile(makeFile({ oldPath: 'a/old.md', newPath: 'b/new.md', renamed: true, hunks }), 'hash1');
+
+  test('the header shows the old and the new path', () => {
+    const el = rename();
+    expect(el.querySelector('.file-old-path').textContent).toBe('a/old.md');
+    expect(el.querySelector('.file-path').textContent).toBe('a/old.md → b/new.md');
+  });
+
+  test('a pure rename shows a Renamed badge, not +0/-0, and says so in the body', () => {
+    const el = rename();
+    expect(el.querySelector('.file-stats').textContent).toBe('Renamed');
+    expect(el.querySelector('.diff-table')).toBeNull();
+    expect(el.querySelector('.file-empty-note').textContent).toBe('File renamed without changes');
+  });
+
+  test('a rename with edits keeps its line counts', () => {
+    const el = rename([makeHunk({ lines: [makeLine('added', 'x', null, 1)] })]);
+    expect(el.querySelector('.file-stats').textContent).toBe('Renamed+1-0');
+    expect(el.querySelector('.diff-table')).not.toBeNull();
+    expect(el.querySelector('.file-empty-note')).toBeNull();
+  });
+
+  test('an unrenamed file shows only its path', () => {
+    const el = renderFile(makeFile(), 'hash1');
+    expect(el.querySelector('.file-path').textContent).toBe('src/foo.cpp');
+    expect(el.querySelector('.file-old-path')).toBeNull();
+  });
+
+  test('a text file with no hunks (e.g. a mode change) says it has no content changes', () => {
+    const el = renderFile(makeFile(), 'hash1');
+    expect(el.querySelector('.file-empty-note').textContent).toBe('No content changes');
+    expect(el.querySelector('.file-stats').textContent).toBe('+0-0');
+  });
+});
+
 // ── Structure ────────────────────────────────────────────────────────────────
 
 describe('renderFile — structure', () => {
@@ -40,7 +78,7 @@ describe('renderFile — structure', () => {
   });
 
   test('contains a .file-header with the file path', () => {
-    const el = renderFile(makeFile({ newPath: 'dom/media/foo.cpp' }), 'hash1');
+    const el = renderFile(makeFile({ newPath: 'dom/media/foo.cpp', oldPath: 'dom/media/foo.cpp' }), 'hash1');
     expect(el.querySelector('.file-path').textContent).toBe('dom/media/foo.cpp');
   });
 
@@ -55,7 +93,7 @@ describe('renderFile — structure', () => {
   });
 
   test('contains a .diff-body with a .diff-table', () => {
-    const el = renderFile(makeFile(), 'hash1');
+    const el = renderFile(makeFile({ hunks: [makeHunk({ lines: [makeLine('added', 'x', null, 1)] })] }), 'hash1');
     expect(el.querySelector('.diff-body')).not.toBeNull();
     expect(el.querySelector('.diff-table')).not.toBeNull();
   });
@@ -191,9 +229,10 @@ describe('renderFile — line rows', () => {
 
 describe('renderFile — HTML escaping', () => {
   test('escapes < and > in file path', () => {
-    const el = renderFile(makeFile({ newPath: '<script>alert(1)</script>' }), 'hash1');
-    expect(el.querySelector('.file-path').textContent).toBe('<script>alert(1)</script>');
+    const el = renderFile(makeFile({ newPath: '<script>alert(1)</script>', oldPath: '<img src=x onerror=1>', renamed: true }), 'hash1');
+    expect(el.querySelector('.file-path').textContent).toBe('<img src=x onerror=1> → <script>alert(1)</script>');
     expect(el.querySelector('.file-path').innerHTML).not.toContain('<script>');
+    expect(el.querySelector('.file-path img')).toBeNull();
   });
 
   test('escapes < and > in line content', () => {

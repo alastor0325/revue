@@ -943,13 +943,15 @@ button { font-family: inherit; }
 }
 .stat-add { color: var(--green); }
 .stat-del { color: var(--red); }
-.file-binary-badge { color: var(--ink-quiet); text-transform: uppercase; letter-spacing: 0.04em; }
+.file-binary-badge, .file-rename-badge { color: var(--ink-quiet); text-transform: uppercase; letter-spacing: 0.04em; }
+/* A renamed file's old path, before "→ new path". */
+.file-old-path { color: var(--ink-quiet); font-weight: 400; }
 
 /* ─── Diff table ────────────────────────────────────────────────────────── */
 .diff-body { overflow-x: auto; }
 
-/* Placeholder shown in place of a binary file's (unrendered) diff. */
-.binary-file-note {
+/* Placeholder for a file with no diff to show: binary, or renamed unchanged. */
+.binary-file-note, .file-empty-note {
   padding: 14px 24px;
   color: var(--ink-quiet);
   font-size: 13px;

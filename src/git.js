@@ -313,6 +313,7 @@ function diffHeaderPath(raw, prefix) {
  *   oldPath: string,
  *   newPath: string,
  *   binary: boolean,
+ *   renamed: boolean,   // git found the file under another path (rename from/to)
  *   hunks: [{
  *     oldStart, oldCount, newStart, newCount,
  *     lines: [{ type: 'context'|'added'|'removed', content: string, newLineNum: number|null, oldLineNum: number|null }]
@@ -345,11 +346,12 @@ function parseDiff(diffText) {
         oldPath: null,
         newPath: null,
         binary: false,
+        renamed: false,
         hunks: [],
       };
-      // Seed paths from the `diff --git a/<old> b/<new>` line.  Entries without
-      // `---`/`+++` lines (binary files, pure renames) have no other source for
-      // their path; for text files the `---`/`+++` handlers refine it below.
+      // Seed paths from the `diff --git a/<old> b/<new>` line.  Binary files
+      // have no other source for their path; for other files the `rename`
+      // and `---`/`+++` handlers refine it below.
       const m = line.match(/^diff --git a\/(.+) b\/(.+)$/);
       if (m) {
         currentFile.oldPath = m[1];
@@ -367,6 +369,16 @@ function parseDiff(diffText) {
     // Binary file notice
     if (line.startsWith('Binary files')) {
       currentFile.binary = true;
+      i++;
+      continue;
+    }
+
+    // A rename's paths, unquoted and unambiguous (the `diff --git` line is
+    // not when a path contains " b/").
+    const rename = /^rename (from|to) (.*)$/.exec(line);
+    if (rename) {
+      currentFile[rename[1] === 'from' ? 'oldPath' : 'newPath'] = rename[2];
+      currentFile.renamed = true;
       i++;
       continue;
     }

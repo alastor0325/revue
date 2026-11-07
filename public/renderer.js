@@ -530,6 +530,20 @@ export function renderExpandRow(table, patchHash, filePath, hiddenStart, hiddenE
   else                table.appendChild(tr);
 }
 
+// parseDiff marks a file git found under another path (src/git.js).
+const isRenamed = (f) => !!f.renamed;
+
+// The stats of a file header or sidebar entry: "+N -M", after a Renamed badge
+// for a renamed file.  A rename without edits shows the badge alone, because
+// "+0 -0" looks like a broken diff.  A binary file has a Binary badge instead.
+function fileStatsHtml(f) {
+  const renamed = isRenamed(f) ? '<span class="file-rename-badge">Renamed</span>' : '';
+  if (f.binary) return `${renamed}<span class="file-binary-badge">Binary</span>`;
+  if (renamed && f.hunks.length === 0) return renamed;
+  const { added, removed } = countStats(f.hunks);
+  return `${renamed}<span class="stat-add">+${added}</span><span class="stat-del">-${removed}</span>`;
+}
+
 export function countStats(hunks) {
   let added = 0, removed = 0;
   for (const hunk of hunks) {
@@ -569,22 +583,19 @@ function contentCell(prefix, content, html) {
 
 export function renderFile(fileData, patchHash) {
   const filePath = fileData.newPath || fileData.oldPath || '(unknown)';
-  const { added, removed } = countStats(fileData.hunks);
 
   const block = document.createElement('div');
   block.className = 'file-block';
 
-  // Binary files have no line-level diff; show a Binary badge instead of +/-.
-  const statsHtml = fileData.binary
-    ? '<span class="file-binary-badge">Binary</span>'
-    : `<span class="stat-add">+${added}</span><span class="stat-del">-${removed}</span>`;
-
+  const pathHtml = isRenamed(fileData)
+    ? `<span class="file-old-path">${escapeHtml(fileData.oldPath)}</span> → ${escapeHtml(filePath)}`
+    : escapeHtml(filePath);
   const header = document.createElement('div');
   header.className = 'file-header';
   header.innerHTML = `
     <span class="file-toggle">▼</span>
-    <span class="file-path">${escapeHtml(filePath)}</span>
-    <span class="file-stats">${statsHtml}</span>`;
+    <span class="file-path">${pathHtml}</span>
+    <span class="file-stats">${fileStatsHtml(fileData)}</span>`;
   block.appendChild(header);
 
   const body = document.createElement('div');
@@ -595,12 +606,13 @@ export function renderFile(fileData, patchHash) {
     ? addRichViewToggle(header, body, { hash: patchHash, file: filePath, oldFile: fileData.oldPath })
     : null;
 
-  // Binary files carry no textual diff — list the file with a placeholder
-  // rather than dropping it from the changed-files list entirely.
-  if (fileData.binary) {
+  // Binary files carry no textual diff, and a pure rename (or a mode change)
+  // none at all — list the file with a placeholder rather than an empty body.
+  if (fileData.hunks.length === 0) {
     const note = document.createElement('div');
-    note.className = 'binary-file-note';
-    note.textContent = 'Binary file — content not shown';
+    note.className = fileData.binary ? 'binary-file-note' : 'file-empty-note';
+    note.textContent = fileData.binary ? 'Binary file — content not shown'
+      : isRenamed(fileData) ? 'File renamed without changes' : 'No content changes';
     body.appendChild(note);
     block.appendChild(body);
     makeCollapsible(header, body, `${patchHash}:${filePath}`);
@@ -866,7 +878,6 @@ export function buildNavItemsEl(files, diffWrap) {
 
   files.forEach((fileData, idx) => {
     const filePath = fileData.newPath || fileData.oldPath || '(unknown)';
-    const { added, removed } = countStats(fileData.hunks);
 
     const lastSlash = filePath.lastIndexOf('/');
     const filename = lastSlash >= 0 ? filePath.slice(lastSlash + 1) : filePath;
@@ -875,7 +886,7 @@ export function buildNavItemsEl(files, diffWrap) {
     const block = blocks[idx] || null;
     const item = document.createElement('div');
     item.className = 'file-nav-item';
-    item.title = filePath;
+    item.title = isRenamed(fileData) ? `${fileData.oldPath} → ${filePath}` : filePath;
 
     const filenameRow = document.createElement('div');
     filenameRow.className = 'file-nav-filename-row';
@@ -895,7 +906,7 @@ export function buildNavItemsEl(files, diffWrap) {
 
     const statsSpan = document.createElement('div');
     statsSpan.className = 'file-nav-stats';
-    statsSpan.innerHTML = `<span class="stat-add">+${added}</span><span class="stat-del">-${removed}</span>`;
+    statsSpan.innerHTML = fileStatsHtml(fileData);
     item.appendChild(statsSpan);
 
     // Click handler reads getBoundingClientRect at click time (element is visible then).

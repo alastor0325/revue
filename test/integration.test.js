@@ -2307,6 +2307,45 @@ describe('CLI hub client — revue --repo X joins the running hub', () => {
   });
 });
 
+// ── Renamed files in the diff API ─────────────────────────────────────────
+
+describe('GET /api/patchdiff — renamed files', () => {
+  let server, base, repo, head;
+
+  beforeAll(async () => {
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-rename-'));
+    git(repo, 'init');
+    git(repo, 'config user.email "test@test.com"');
+    git(repo, 'config user.name "Test"');
+    fs.writeFileSync(path.join(repo, 'same.txt'), 'one\ntwo\nthree\nfour\nfive\n');
+    fs.writeFileSync(path.join(repo, 'edit.txt'), 'a\nb\nc\nd\ne\nf\n');
+    git(repo, 'add .');
+    git(repo, 'commit -m "base"');
+    fs.mkdirSync(path.join(repo, 'moved'));
+    git(repo, 'mv same.txt moved/same.txt');
+    git(repo, 'mv edit.txt moved/edit.txt');
+    fs.appendFileSync(path.join(repo, 'moved', 'edit.txt'), 'g\n');
+    git(repo, 'add .');
+    git(repo, 'commit -m "move"');
+    head = git(repo, 'rev-parse HEAD');
+    const app = createApp({ worktreeName: 'r', worktreePath: repo, mainRepoPath: repo });
+    const port = await findAvailablePort(19760);
+    await new Promise((r) => { server = app.listen(port, '127.0.0.1', r); });
+    base = `http://127.0.0.1:${port}`;
+  });
+
+  afterAll((done) => { server.close(() => { fs.rmSync(repo, { recursive: true, force: true }); done(); }); });
+
+  test('reports both paths of a rename, and no hunks for a pure one', async () => {
+    const { body } = await httpRequest(`${base}/api/patchdiff/${head}`);
+    const byNew = Object.fromEntries(body.files.map((f) => [f.newPath, f]));
+    expect(byNew['moved/same.txt']).toMatchObject({ oldPath: 'same.txt', renamed: true, hunks: [] });
+    expect(byNew['moved/edit.txt']).toMatchObject({ oldPath: 'edit.txt', renamed: true });
+    expect(byNew['moved/edit.txt'].hunks.length).toBe(1);
+    expect(body.files).toHaveLength(2); // a rename is one entry, not a delete plus an add
+  });
+});
+
 // ── Rendered (rich) view: GET /api/rendered ───────────────────────────────
 
 describe('GET /api/rendered', () => {

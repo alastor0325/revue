@@ -93,6 +93,19 @@ describe('renderFileNav — header', () => {
   });
 });
 
+// ── Renamed files ──────────────────────────────────────────────────────────
+
+describe('renderFileNav — renamed files', () => {
+  test('a pure rename shows Renamed instead of +0/-0, with both paths in the tooltip', () => {
+    const files = [{ oldPath: 'old/Foo.h', newPath: 'dom/Foo.h', renamed: true, hunks: [] }];
+    renderFileNav(files, makeDiffWrap(files));
+    const item = document.querySelector('.file-nav-item');
+    expect(item.querySelector('.file-nav-stats').textContent).toBe('Renamed');
+    expect(item.title).toBe('old/Foo.h → dom/Foo.h');
+    expect(item.querySelector('.file-nav-filename').textContent).toBe('Foo.h');
+  });
+});
+
 // ── Two-level file display ─────────────────────────────────────────────────
 
 describe('renderFileNav — filename and directory hierarchy', () => {
