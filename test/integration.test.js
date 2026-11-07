@@ -2324,6 +2324,9 @@ describe('GET /api/rendered', () => {
     git(repo, 'commit -m "base"');
     fs.writeFileSync(path.join(repo, 'README.md'), '# New title\n\nkeep\n');
     fs.writeFileSync(path.join(repo, 'ADDED.md'), 'brand new\n');
+    fs.writeFileSync(path.join(repo, 'prompt.md.j2'),
+      '{# a note #}\n# Hello {{ name }}\n\n{% if x %}Use `{{ y }}`.{% endif %}\n\n```\n{{ raw }}\n```\n');
+    fs.writeFileSync(path.join(repo, 'macros.j2'), '{% macro m() %}x{% endmacro %}\n');
     fs.writeFileSync(path.join(repo, 'spec', 'index.bs'), bikeshedSpec({ title: 'New Spec', ed: 'https://example.org/spec/', body: 'Hello again.' }));
     git(repo, 'add .');
     git(repo, 'commit -m "edit docs"');
@@ -2355,11 +2358,24 @@ describe('GET /api/rendered', () => {
     expect(body.new).toContain('brand new');
   });
 
+  test('renders a Markdown Jinja template with its tags as code', async () => {
+    const { status, body } = await get(`hash=${head}&file=prompt.md.j2`);
+    expect(status).toBe(200);
+    expect(body.format).toBe('markdown');
+    expect(body.old).toBeNull();
+    expect(body.new).toContain('<code class="jinja">{# a note #}</code>');
+    expect(body.new).toMatch(/<h1>Hello <code class="jinja">\{\{ name \}\}<\/code><\/h1>/);
+    expect(body.new).toContain('<code class="jinja">{% if x %}</code>Use <code>{{ y }}</code>.<code class="jinja">{% endif %}</code>');
+    expect(body.new).toContain('<pre><code>{{ raw }}\n</code></pre>'); // code blocks stay verbatim
+  });
+
   test('the diff API tags files that have a rendered view', async () => {
     const { body } = await httpRequest(`${base}/api/patchdiff/${head}`);
     const formats = Object.fromEntries(body.files.map((f) => [f.newPath, f.richFormat]));
     expect(formats['README.md']).toBe('markdown');
     expect(formats['ADDED.md']).toBe('markdown');
+    expect(formats['prompt.md.j2']).toBe('markdown');
+    expect(formats['macros.j2']).toBeNull(); // no known output format
     expect(formats['spec/index.bs']).toBe(hasBikeshed ? 'bikeshed' : null);
   });
 

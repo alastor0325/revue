@@ -11,7 +11,25 @@ const os = require('os');
 const path = require('path');
 const { promisify } = require('util');
 const execFile = promisify(require('child_process').execFile);
-const { marked } = require('marked');
+const { marked, Marked } = require('marked');
+const { escapeHtml } = require('./html');
+
+// A Jinja template renders like the file it produces, so `prompt.md.j2` is
+// Markdown.  Its tags ({{ }}, {% %}, {# #}) show as code: they stay visible
+// without being read as Markdown.  Code spans and blocks keep them verbatim.
+const TEMPLATE_EXT = /\.(j2|jinja2?)$/i;
+const jinjaMarked = new Marked({
+  extensions: [{
+    name: 'jinja',
+    level: 'inline',
+    start: (src) => src.search(/\{[{%#]/),
+    tokenizer(src) {
+      const m = /^\{(\{[\s\S]*?\}|%[\s\S]*?%|#[\s\S]*?#)\}/.exec(src);
+      return m && { type: 'jinja', raw: m[0] };
+    },
+    renderer: (t) => `<code class="jinja">${escapeHtml(t.raw)}</code>`,
+  }],
+});
 
 const run = (cmd, args, opts = {}) =>
   execFile(cmd, args, { maxBuffer: 64 * 1024 * 1024, encoding: 'utf8', ...opts }).then((r) => r.stdout);
@@ -29,7 +47,7 @@ function hasBikeshed() {
  * so the client shows the Source | Rendered toggle exactly when it works.
  */
 async function renderFormat(filePath) {
-  if (/\.(md|markdown)$/i.test(filePath)) return 'markdown';
+  if (/\.(md|markdown)$/i.test(filePath.replace(TEMPLATE_EXT, ''))) return 'markdown';
   if (/\.bs$/i.test(filePath) && (await hasBikeshed())) return 'bikeshed';
   return null;
 }
@@ -59,6 +77,7 @@ function markdownPage(body) {
   a { color: #58a6ff; }
   code, pre { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-size: 13px; }
   code { background: rgba(255,255,255,.08); padding: .15em .35em; border-radius: 4px; }
+  code.jinja { color: #d2a8ff; background: rgba(210,168,255,.1); }
   pre { background: #13161b; padding: 12px 16px; border-radius: 6px; overflow: auto; }
   pre code { background: none; padding: 0; }
   blockquote { margin: 0; padding: 0 1em; color: #b9c1cc; border-left: 4px solid #363c46; }
@@ -71,7 +90,7 @@ function markdownPage(body) {
 async function renderMarkdown(repo, sha, filePath) {
   let source;
   try { source = await run('git', ['-C', repo, 'show', `${sha}:${filePath}`]); } catch { return null; }
-  return markdownPage(marked.parse(source));
+  return markdownPage((TEMPLATE_EXT.test(filePath) ? jinjaMarked : marked).parse(source));
 }
 
 // The address the spec is published at: the "This version:" link that

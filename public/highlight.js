@@ -37,7 +37,9 @@ const OVERRIDES = {
 /** highlight.js language for a file path, or null when it can't be highlighted. */
 export function languageFor(filePath) {
   if (!hljs) return null;
-  const base = filePath.split('/').pop().toLowerCase();
+  // A Jinja template ("prompt.md.j2") is highlighted as the file it produces
+  // (same suffixes as src/render.js TEMPLATE_EXT).
+  const base = filePath.split('/').pop().toLowerCase().replace(/\.(j2|jinja2?)$/, '');
   const ext = base.includes('.') ? base.split('.').pop() : base; // "Makefile" → "makefile"
   const lang = OVERRIDES[base] || OVERRIDES[ext] || ext;
   return hljs.getLanguage(lang) ? lang : null;

@@ -44,6 +44,13 @@ describe('languageFor', () => {
     resolves('test/foo.py', 'python');
   });
 
+  test('a Jinja template is highlighted as the format it renders to', () => {
+    resolves('prompts/system.md.j2', 'markdown');
+    resolves('conf/app.yaml.jinja2', 'yaml');
+    resolves('page.html.jinja', 'xml');
+    expect(languageFor('prompts/descriptions.j2')).toBeNull();
+  });
+
   test('returns null for unknown types and without a loaded highlighter', () => {
     expect(languageFor('data/blob.xyz')).toBeNull();
     expect(languageFor('LICENSE')).toBeNull();

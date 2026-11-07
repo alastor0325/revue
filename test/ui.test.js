@@ -3658,6 +3658,8 @@ describe('rendered (rich) diff of a Markdown file', () => {
     git(richRepo, 'commit -m "docs: add guide"');
     fs.writeFileSync(path.join(richRepo, 'doc.md'),
       '# Guide\n\nkeep this\n\nnew paragraph <img src=x onerror="window.parent.__pwned=1">\n');
+    fs.writeFileSync(path.join(richRepo, 'prompt.md.j2'), '# Prompt\n\nHi {{ name }}.\n');
+    git(richRepo, 'add .');
     git(richRepo, 'commit -am "docs: rewrite guide"');
     const app = createApp({ worktreeName: 'rich-repo', worktreePath: richRepo, mainRepoPath });
     const port = await findAvailablePort(19480);
@@ -3678,7 +3680,7 @@ describe('rendered (rich) diff of a Markdown file', () => {
   const frame = async () => (await richPage.$(`${cur} .rich-frame`)).contentFrame();
 
   test('Markdown files get a Source | Rendered toggle, Source first', async () => {
-    const views = await richPage.$$eval(`${cur} .view-toggle button`, (bs) => bs.map((b) => [b.textContent, b.classList.contains('active')]));
+    const views = await richPage.locator(`${cur} .view-toggle`).first().locator('button').evaluateAll((bs) => bs.map((b) => [b.textContent, b.classList.contains('active')]));
     expect(views).toEqual([['Source', true], ['Rendered', false]]);
   });
 
@@ -3690,6 +3692,16 @@ describe('rendered (rich) diff of a Markdown file', () => {
     expect((await f.textContent('.revue-removed')).trim()).toBe('old paragraph');
     expect((await f.textContent('.revue-added')).trim()).toBe('new paragraph');
     expect(await richPage.isVisible(`${cur} .diff-table`)).toBe(false);
+  });
+
+  test('a Markdown Jinja template renders with its tags as code', async () => {
+    const file = richPage.locator(`${cur} .file-block`, { hasText: 'prompt.md.j2' });
+    await file.locator('.view-toggle [data-view=rendered]').click();
+    const f = await (await file.locator('.rich-frame').elementHandle()).contentFrame();
+    await f.waitForSelector('h1');
+    expect(await f.textContent('h1')).toBe('Prompt');
+    expect(await f.textContent('code.jinja')).toBe('{{ name }}');
+    await file.locator('.view-toggle [data-view=source]').click();
   });
 
   test('the rendered page cannot run scripts (sandboxed frame)', async () => {

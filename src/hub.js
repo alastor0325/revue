@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const { createApp, listen } = require('./server');
 const { discoverWorktrees, pathKey, resolveRepoTarget } = require('./git');
+const { escapeHtml } = require('./html');
 
 function buildEntries(mainRepoPath) {
   const entries = [];
@@ -87,12 +88,6 @@ function mergeProjects(list) {
 function isLoopbackHost(req) {
   const host = String(req.headers.host || '').replace(/:\d+$/, '');
   return host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
-}
-
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 function createHub() {
