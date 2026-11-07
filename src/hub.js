@@ -9,20 +9,12 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const { createApp, listen } = require('./server');
-const { discoverWorktrees, getMainWorktreeBasename } = require('./git');
+const { discoverWorktrees, pathKey, resolveRepoTarget } = require('./git');
 
 function buildEntries(mainRepoPath) {
   const entries = [];
   if (mainRepoPath && fs.existsSync(mainRepoPath)) {
-    // Strip the repo-name prefix so a --repo that points at a sibling worktree
-    // (e.g. firefox-2044124) is labelled "2044124", not "firefox-2044124".
-    const prefix = getMainWorktreeBasename(mainRepoPath) + '-';
-    const base = path.basename(mainRepoPath);
-    entries.push({
-      path: mainRepoPath,
-      worktreeName: base.startsWith(prefix) ? base.slice(prefix.length) : base,
-      isMain: true,
-    });
+    entries.push({ path: mainRepoPath, worktreeName: path.basename(mainRepoPath), isMain: true });
     try {
       entries.push(...discoverWorktrees(mainRepoPath));
     } catch {
@@ -55,19 +47,36 @@ function resolveEntry(repoPath, worktree) {
 }
 
 /**
- * Collapse a project list to one entry per repo path, keeping the first
- * non-empty worktree seen for each.  Used on --restart so the explicitly
- * requested project stays first and the previously mounted ones follow.
+ * Turn a requested { repoPath, worktree } into the repo's main worktree plus
+ * the worktree name to open.  repoPath may be a linked worktree or a folder
+ * inside one: that worktree is opened unless a worktree name is also given.
+ * Worktree names are unique, so the name stands for the path.
+ */
+function resolveProject({ repoPath, worktree = null }) {
+  const target = resolveRepoTarget(repoPath);
+  if (worktree || !target.worktreePath) return { repoPath: target.repoPath, worktree: worktree || null };
+  const key = pathKey(target.worktreePath);
+  const entry = buildEntries(target.repoPath).find((e) => pathKey(e.path) === key);
+  if (!entry) throw new Error(`${target.worktreePath} is not a worktree of ${target.repoPath}`);
+  return { repoPath: target.repoPath, worktree: entry.worktreeName };
+}
+
+/**
+ * Collapse a project list to one entry per repo (compared by pathKey),
+ * keeping the first non-empty worktree seen for each.  Used on --restart so
+ * the explicitly requested project stays first and the previously mounted
+ * ones follow.
  */
 function mergeProjects(list) {
-  const byPath = new Map();
+  const byKey = new Map();
   for (const p of list) {
     if (!p || !p.repoPath) continue;
-    const prev = byPath.get(p.repoPath);
-    if (!prev) byPath.set(p.repoPath, { repoPath: p.repoPath, worktree: p.worktree || null });
+    const key = pathKey(p.repoPath);
+    const prev = byKey.get(key);
+    if (!prev) byKey.set(key, { repoPath: p.repoPath, worktree: p.worktree || null });
     else if (!prev.worktree && p.worktree) prev.worktree = p.worktree;
   }
-  return [...byPath.values()];
+  return [...byKey.values()];
 }
 
 // The hub routes accept or expose absolute filesystem paths, so all of them
@@ -97,9 +106,10 @@ function createHub() {
     return slug;
   }
 
-  /** Mount a repo (or switch an already-mounted one to `worktree`). Returns its slug. */
-  function addProject({ repoPath, worktree = null }) {
-    const existing = [...projects.values()].find((p) => p.repoPath === repoPath);
+  /** Mount a resolved { repoPath, worktree } (or switch an already-mounted repo to `worktree`). Returns its slug. */
+  function mountProject({ repoPath, worktree = null }) {
+    const key = pathKey(repoPath);
+    const existing = [...projects.values()].find((p) => p.key === key);
     if (existing && !worktree) return existing.slug;
     const entry = resolveEntry(repoPath, worktree);
     if (existing) {
@@ -108,8 +118,13 @@ function createHub() {
     }
     const slug = uniqueSlug(repoPath);
     const sub = createApp({ worktreeName: entry.worktreeName, worktreePath: entry.path, mainRepoPath: repoPath });
-    projects.set(slug, { slug, repoPath, app: sub });
+    projects.set(slug, { slug, repoPath, key, app: sub });
     return slug;
+  }
+
+  /** Mount the repo that contains any path (see resolveProject). Returns its slug. */
+  function addProject(request) {
+    return mountProject(resolveProject(request));
   }
 
   function listProjects() {
@@ -200,7 +215,7 @@ ${list.length ? `<ul id="projects">${cards}
   app.get('/favicon.svg', publicFile('favicon.svg'));
   app.get('/style.css', publicFile('style.css'));
 
-  return { app, addProject, listProjects };
+  return { app, addProject, mountProject, listProjects };
 }
 
 /**
@@ -213,13 +228,17 @@ ${list.length ? `<ul id="projects">${cards}
 async function startHub({ projects, port: preferredPort = 7777, pidFile, noOpen = false }) {
   const hub = createHub();
   const add = (p) => {
-    try { return hub.addProject(p); } catch (err) {
+    try { return hub.mountProject(p); } catch (err) {
       if (!p.worktree) throw err;
       console.error(`${p.repoPath}: ${err.message}; opening the default worktree.`);
-      return hub.addProject({ repoPath: p.repoPath });
+      return hub.mountProject({ repoPath: p.repoPath });
     }
   };
-  const [primary, ...rest] = mergeProjects(projects);
+  // Resolve before merging so every spelling of a repo merges into one entry.
+  const resolve = (p) => {
+    try { return resolveProject(p); } catch { return { repoPath: p.repoPath, worktree: p.worktree || null }; }
+  };
+  const [primary, ...rest] = mergeProjects(projects.filter((p) => p && p.repoPath).map(resolve));
   const primarySlug = add(primary);
   for (const p of rest) {
     try { add(p); } catch (err) { console.error(`Skipping ${p.repoPath}: ${err.message}`); }
@@ -229,5 +248,5 @@ async function startHub({ projects, port: preferredPort = 7777, pidFile, noOpen 
 }
 
 module.exports = {
-  createHub, startHub, mergeProjects, resolveEntry, buildEntries, pickDefaultEntry, isLoopbackHost,
+  createHub, startHub, mergeProjects, resolveEntry, resolveProject, buildEntries, pickDefaultEntry, isLoopbackHost,
 };
