@@ -1,6 +1,6 @@
 {
   "name": "revue",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Revue — a web UI for reviewing patches in git worktrees",
   "repository": {
     "type": "git",
