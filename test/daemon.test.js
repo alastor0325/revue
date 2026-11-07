@@ -19,7 +19,7 @@ afterAll(() => fs.rmSync(mockScratchHome, { recursive: true, force: true }));
 // doesn't trigger real git or server code
 jest.mock('child_process', () => ({ spawn: jest.fn() }));
 jest.mock('../src/server', () => ({ openBrowser: jest.fn() }));
-jest.mock('../src/git', () => ({ discoverWorktrees: jest.fn(), getMainWorktreeBasename: jest.fn() }));
+jest.mock('../src/git', () => ({ discoverWorktrees: jest.fn(), pathKey: (p) => p, resolveRepoTarget: (p) => ({ repoPath: p, worktreePath: null }) }));
 
 const { discoverWorktrees } = require('../src/git');
 const {
@@ -479,6 +479,7 @@ describe('buildEntries', () => {
     const entries = buildEntries(tmpDir);
     expect(entries[0].isMain).toBe(true);
     expect(entries[0].path).toBe(tmpDir);
+    expect(entries[0].worktreeName).toBe(path.basename(tmpDir));
   });
 
   test('includes worktrees returned by discoverWorktrees', () => {

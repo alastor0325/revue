@@ -117,10 +117,13 @@ revue init --port 7779             # remember a default port (e.g. an SSH-forwar
 revue my-feature                   # open a specific worktree by name
 revue --repo ~/other/repo          # override default repo for this run
 revue --repo ~/other/repo feature  # override repo + worktree together
+revue --repo ~/myrepo-feature      # open the repo of that linked worktree, on that worktree
 revue --version                    # print the version and exit (alias: -v)
 ```
 
-`<worktree-name>` is the directory basename with the repo prefix stripped (`myrepo-feature` → `feature`). If omitted, the server starts on the first registered worktree; switch any time using the worktree tabs at the top — drag the bar left/right to scroll through them when they overflow.
+`<worktree-name>` is the directory basename with the repo prefix stripped (`myrepo-feature` → `feature`). When two worktrees would get the same name (for example `/a/myrepo-x` and `/b/x`, or a worktree folder named like the main repo), the later one gets a `-2`, `-3`, … suffix, so a name always means one worktree.
+
+`--repo` (and the default repo from `revue init`) may point at the main checkout, a linked worktree, or a folder inside either. Revue always mounts the repo's main checkout, so one repo is one project however you spell its path (symlinks, a trailing slash, or Windows `\` and drive-letter case). When the path is in a linked worktree, Revue opens that worktree; a `<worktree-name>` argument wins over it. If neither is given, the server starts on the first registered worktree; switch any time using the worktree tabs at the top — drag the bar left/right to scroll through them when they overflow.
 
 Revue shows the patches between a worktree's HEAD and the branch it forked from. It infers that base from the branch's upstream (`@{u}`), falling back to `origin/main`/`origin/master`. For a branch off a non-main base (e.g. an esr/beta branch off `origin/esr115`) **set its upstream** — `git branch --set-upstream-to=origin/esr115` — otherwise the base resolves to `origin/main`, tens of thousands of commits back. Rather than hang on such a range, Revue shows an actionable error telling you to set the upstream.
 

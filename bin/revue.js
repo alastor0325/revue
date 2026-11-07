@@ -6,7 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const { spawn } = require('child_process');
 const { openBrowser } = require('../src/server');
-const { startHub, resolveEntry } = require('../src/hub');
+const { startHub, resolveEntry, resolveProject } = require('../src/hub');
 
 const CONFIG_DIR  = path.join(os.homedir(), '.revue');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
@@ -270,8 +270,10 @@ async function collectHubProjects() {
  */
 function exitIfUnresolvable(args) {
   const { repo, rest } = parseArgs(args);
-  const repoPath = repo ? resolvePath(repo) : readConfig().defaultRepo;
-  try { resolveEntry(repoPath, rest[0]); } catch (err) {
+  try {
+    const target = resolveProject({ repoPath: repo ? resolvePath(repo) : readConfig().defaultRepo, worktree: rest[0] });
+    resolveEntry(target.repoPath, target.worktree);
+  } catch (err) {
     console.error(`Error: ${err.message}`);
     process.exit(1);
   }

@@ -1936,7 +1936,7 @@ describe('hub — one port, one /r/<slug>/ per project', () => {
     const list = await httpRequest(`${base}/api/hub/projects`);
     expect(list.body.projects.map((p) => p.slug).sort()).toEqual(['main-repo', 'work-repo']);
     expect(list.body.projects.find((p) => p.slug === 'work-repo')).toMatchObject({
-      repoPath: workRepoPath, worktree: 'work-repo', path: '/r/work-repo/',
+      repoPath: fs.realpathSync(workRepoPath), worktree: 'work-repo', path: '/r/work-repo/',
     });
   });
 
@@ -2026,6 +2026,185 @@ describe('hub — one port, one /r/<slug>/ per project', () => {
       expect(list.body.projects.map((p) => p.slug)).toEqual(['work-repo', 'main-repo']);
     } finally {
       errSpy.mockRestore();
+      await new Promise((r) => s.close(r));
+      fs.rmSync(pidDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ── --repo pointing at a linked worktree ──────────────────────────────────
+// Fixture: <tmp>/proj (main) with linked worktrees <tmp>/proj-vtt and
+// <tmp>/proj-other, plus two worktrees whose names would collide:
+// <tmp>/elsewhere/proj (same folder name as the main repo) and
+// <tmp>/a/proj-x + <tmp>/b/x (both "x").
+
+describe('--repo at a linked worktree opens that worktree in the main repo', () => {
+  const { createHub, startHub, mergeProjects, resolveProject } = require('../src/hub');
+  const { resolveRepoTarget, pathKey } = require('../src/git');
+  let root, main, vtt, other, sameName, ax, bx;
+
+  beforeAll(() => {
+    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'revue-linked-')));
+    main = path.join(root, 'proj');
+    vtt = path.join(root, 'proj-vtt');
+    other = path.join(root, 'proj-other');
+    sameName = path.join(root, 'elsewhere', 'proj');
+    ax = path.join(root, 'a', 'proj-x');
+    bx = path.join(root, 'b', 'x');
+    fs.mkdirSync(main);
+    git(main, 'init -q');
+    git(main, 'config user.email "test@test.com"');
+    git(main, 'config user.name "Test"');
+    fs.mkdirSync(path.join(main, 'sub'));
+    fs.writeFileSync(path.join(main, 'sub', 'f'), 'x\n');
+    git(main, 'add .');
+    git(main, 'commit -q -m initial');
+    for (const [i, wt] of [other, vtt, sameName, ax, bx].entries()) git(main, `worktree add -q -b b${i} "${wt}"`);
+  });
+
+  afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  test('resolveRepoTarget maps the main repo, a linked worktree and a subfolder of one', () => {
+    expect(resolveRepoTarget(main)).toEqual({ repoPath: main, worktreePath: null });
+    expect(resolveRepoTarget(path.join(main, 'sub'))).toEqual({ repoPath: main, worktreePath: null });
+    expect(resolveRepoTarget(vtt)).toEqual({ repoPath: main, worktreePath: vtt });
+    expect(resolveRepoTarget(path.join(vtt, 'sub'))).toEqual({ repoPath: main, worktreePath: vtt });
+  });
+
+  test('resolveRepoTarget leaves a path outside any git repo unchanged', () => {
+    const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-plain-'));
+    try {
+      expect(resolveRepoTarget(plain)).toEqual({ repoPath: plain, worktreePath: null });
+    } finally {
+      fs.rmSync(plain, { recursive: true, force: true });
+    }
+  });
+
+  test('pathKey gives every spelling of one directory the same key', () => {
+    const link = path.join(root, 'link-to-proj');
+    fs.symlinkSync(main, link);
+    try {
+      expect(pathKey(`${main}/`)).toBe(pathKey(main));
+      expect(pathKey(link)).toBe(pathKey(main));
+      expect(pathKey(path.join(main, 'sub', '..'))).toBe(pathKey(main));
+      expect(pathKey(path.join(root, 'missing'))).toBe(path.join(root, 'missing'));
+    } finally {
+      fs.unlinkSync(link);
+    }
+  });
+
+  test('resolveProject: a worktree name wins over the worktree the path is in', () => {
+    expect(resolveProject({ repoPath: vtt })).toEqual({ repoPath: main, worktree: 'vtt' });
+    expect(resolveProject({ repoPath: path.join(vtt, 'sub') })).toEqual({ repoPath: main, worktree: 'vtt' });
+    expect(resolveProject({ repoPath: vtt, worktree: 'other' })).toEqual({ repoPath: main, worktree: 'other' });
+    expect(resolveProject({ repoPath: main })).toEqual({ repoPath: main, worktree: null });
+  });
+
+  test('worktrees that would share a name get unique names', () => {
+    // git lists linked worktrees in its own order, which decides which "x" keeps the plain name.
+    const names = nameOf();
+    expect(names).toMatchObject({ 'proj-other': 'other', 'proj-vtt': 'vtt', 'elsewhere/proj': 'proj-2' });
+    expect([names['a/proj-x'], names['b/x']].sort()).toEqual(['x', 'x-2']);
+  });
+
+  const nameOf = () => Object.fromEntries(discoverWorktrees(main).map((w) => [path.relative(root, w.path), w.worktreeName]));
+  const current = (hub, slug) => hub.listProjects().find((p) => p.slug === slug).worktree;
+
+  test('addProject with a linked worktree mounts the main repo and selects that worktree', () => {
+    const hub = createHub();
+    expect(hub.addProject({ repoPath: vtt })).toBe('proj');
+    expect(hub.listProjects()).toEqual([expect.objectContaining({ slug: 'proj', repoPath: main, worktree: 'vtt' })]);
+  });
+
+  test('addProject with a subfolder of a linked worktree selects that worktree', () => {
+    const hub = createHub();
+    expect(hub.addProject({ repoPath: path.join(vtt, 'sub') })).toBe('proj');
+    expect(current(hub, 'proj')).toBe('vtt');
+  });
+
+  test('a worktree name argument wins over the linked path', () => {
+    const hub = createHub();
+    hub.addProject({ repoPath: vtt, worktree: 'other' });
+    expect(current(hub, 'proj')).toBe('other');
+  });
+
+  test('the main repo path keeps opening the first linked worktree; a name still selects', () => {
+    const hub = createHub();
+    hub.addProject({ repoPath: main });
+    expect(current(hub, 'proj')).toBe(discoverWorktrees(main)[0].worktreeName);
+    hub.addProject({ repoPath: main, worktree: 'vtt' });
+    expect(current(hub, 'proj')).toBe('vtt');
+  });
+
+  test('a linked path selects by path even when its folder name collides', () => {
+    const hub = createHub();
+    const names = nameOf();
+    hub.addProject({ repoPath: bx });
+    expect(current(hub, 'proj')).toBe(names['b/x']);
+    hub.addProject({ repoPath: sameName });
+    expect(current(hub, 'proj')).toBe('proj-2');
+    hub.addProject({ repoPath: ax });
+    expect(current(hub, 'proj')).toBe(names['a/proj-x']);
+  });
+
+  test('spellings of one repo mount it once and switch it to the given worktree', () => {
+    const hub = createHub();
+    const link = path.join(root, 'link-to-vtt');
+    fs.symlinkSync(vtt, link);
+    try {
+      hub.addProject({ repoPath: main });
+      expect(hub.addProject({ repoPath: `${main}/` })).toBe('proj');
+      expect(hub.addProject({ repoPath: path.join(main, 'sub') })).toBe('proj');
+      expect(hub.addProject({ repoPath: other })).toBe('proj');
+      expect(current(hub, 'proj')).toBe('other');
+      expect(hub.addProject({ repoPath: `${link}/` })).toBe('proj');
+      expect(current(hub, 'proj')).toBe('vtt');
+      expect(hub.listProjects()).toHaveLength(1);
+    } finally {
+      fs.unlinkSync(link);
+    }
+  });
+
+  test('POST /api/hub/projects with a linked path switches the mounted repo to it', async () => {
+    const hub = createHub();
+    hub.addProject({ repoPath: main });
+    const port = await findAvailablePort(19700);
+    const server = await new Promise((r) => { const s = hub.app.listen(port, '127.0.0.1', () => r(s)); });
+    try {
+      const res = await httpRequest(`http://127.0.0.1:${port}/api/hub/projects`, { method: 'POST', body: { repoPath: vtt } });
+      expect(res.body).toEqual({ ok: true, slug: 'proj', path: '/r/proj/' });
+      const wts = await httpRequest(`http://127.0.0.1:${port}/r/proj/api/worktrees`);
+      expect(wts.body.current).toBe('vtt');
+      const names = wts.body.worktrees.map((w) => w.worktreeName);
+      expect(new Set(names).size).toBe(names.length);
+    } finally {
+      await new Promise((r) => server.close(r));
+    }
+  });
+
+  test('mergeProjects compares repo paths by pathKey', () => {
+    expect(mergeProjects([
+      { repoPath: main, worktree: null },
+      { repoPath: `${main}/`, worktree: 'vtt' },
+      { repoPath: path.join(main, 'sub', '..'), worktree: 'other' },
+    ])).toEqual([{ repoPath: main, worktree: 'vtt' }]);
+  });
+
+  test('startHub with an old defaultRepo that is a linked worktree mounts the main repo once', async () => {
+    const pidDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-linkpid-'));
+    const { server: s, hub, port } = await startHub({
+      projects: [
+        { repoPath: vtt, worktree: null },     // the CLI's repo (a stale linked defaultRepo)
+        { repoPath: main, worktree: 'other' }, // what the previous daemon had mounted
+        { repoPath: other, worktree: null },   // an old daemon that mounted a worktree as its own project
+      ],
+      port: 19750, pidFile: path.join(pidDir, 'pid'), noOpen: true,
+    });
+    try {
+      expect(hub.listProjects()).toEqual([expect.objectContaining({ slug: 'proj', repoPath: main, worktree: 'vtt' })]);
+      const wts = await httpRequest(`http://127.0.0.1:${port}/r/proj/api/worktrees`);
+      expect(wts.body.current).toBe('vtt');
+    } finally {
       await new Promise((r) => s.close(r));
       fs.rmSync(pidDir, { recursive: true, force: true });
     }
@@ -2122,8 +2301,8 @@ describe('CLI hub client — revue --repo X joins the running hub', () => {
   test('collectHubProjects returns every mounted project for --restart', async () => {
     const projects = await collectHubProjects();
     expect(projects).toEqual(expect.arrayContaining([
-      expect.objectContaining({ repoPath: workRepoPath, worktree: 'work-repo' }),
-      expect.objectContaining({ repoPath: mainRepoPath, worktree: 'main-repo' }),
+      expect.objectContaining({ repoPath: fs.realpathSync(workRepoPath), worktree: 'work-repo' }),
+      expect.objectContaining({ repoPath: fs.realpathSync(mainRepoPath), worktree: 'main-repo' }),
     ]));
   });
 });

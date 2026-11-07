@@ -680,6 +680,7 @@ function getDiffPerCommit(worktreePath, mainRepoPath, maxCommits) {
  * The worktreeName is derived from the directory basename. If the basename
  * starts with "<mainRepoBasename>-" (e.g. "firefox-bugABC" for a main repo
  * named "firefox"), that prefix is stripped to produce a shorter name.
+ * Names are unique: a worktree whose name is already taken gets "<name>-N".
  *
  * The prefix is derived from the true main worktree, which `git worktree list
  * --porcelain` always reports first — not from mainRepoPath, which may itself
@@ -689,9 +690,8 @@ function getDiffPerCommit(worktreePath, mainRepoPath, maxCommits) {
  * @param {string} mainRepoPath - path to exclude (the main repo itself)
  * @returns {Array<{ path: string, branch: string|null, worktreeName: string }>}
  */
-function parseWorktreeList(output, mainRepoPath) {
-  const blocks = output.trim().split(/\n\n+/);
-  const parsed = blocks
+function parseWorktreeBlocks(output) {
+  return output.trim().split(/\n\n+/)
     .map((block) => {
       const lines = block.split('\n');
       const pathLine = lines.find((l) => l.startsWith('worktree '));
@@ -701,22 +701,41 @@ function parseWorktreeList(output, mainRepoPath) {
       const branch = branchLine
         ? branchLine.slice('branch refs/heads/'.length).trim()
         : null;
-      return { path: wtPath, branch };
+      return { path: wtPath, branch, bare: lines.includes('bare') };
     })
     .filter(Boolean);
+}
+
+function parseWorktreeList(output, mainRepoPath) {
+  const parsed = parseWorktreeBlocks(output);
 
   const rootBasename = parsed.length > 0
     ? path.basename(parsed[0].path.replace(/\\/g, '/'))
     : '';
   const prefix = rootBasename + '-';
 
-  return parsed
-    .filter((wt) => normPath(wt.path) !== normPath(mainRepoPath))
-    .map((wt) => {
-      const basename = path.basename(wt.path);
-      const worktreeName = basename.startsWith(prefix) ? basename.slice(prefix.length) : basename;
-      return { path: wt.path, branch: wt.branch, worktreeName };
-    });
+  // A name must map to one worktree, so a worktree whose name is taken (by
+  // the main repo, which callers list as basename(mainRepoPath), or by an
+  // earlier worktree) gets the first free "<name>-N".
+  const mainName = path.basename(normPath(mainRepoPath));
+  const linked = parsed.filter((wt) => normPath(wt.path) !== normPath(mainRepoPath));
+  const natural = linked.map((wt) => {
+    const basename = path.basename(wt.path);
+    return basename.startsWith(prefix) ? basename.slice(prefix.length) : basename;
+  });
+  const taken = new Set([mainName, ...natural]);
+  const assigned = new Set([mainName]);
+  return linked.map((wt, i) => {
+    let worktreeName = natural[i];
+    if (assigned.has(worktreeName)) {
+      let n = 2;
+      while (taken.has(`${natural[i]}-${n}`)) n++;
+      worktreeName = `${natural[i]}-${n}`;
+      taken.add(worktreeName);
+    }
+    assigned.add(worktreeName);
+    return { path: wt.path, branch: wt.branch, worktreeName };
+  });
 }
 
 /**
@@ -738,26 +757,38 @@ function discoverWorktrees(mainRepoPath) {
 }
 
 /**
- * Return the basename of the repository's true main worktree, regardless of
- * which worktree `repoPath` points at. Used to strip the repo-name prefix from
- * worktree display names (e.g. "firefox-2044124" -> "2044124") consistently,
- * even when Revue is pointed at a sibling worktree via --repo.
- *
- * Falls back to the basename of repoPath if the common dir can't be resolved.
- *
- * @param {string} repoPath - any worktree of the repo
- * @returns {string}
+ * Comparison key for a filesystem path: symlinks resolved, forward slashes,
+ * no trailing slash, and lower case on Windows.  Two spellings of one
+ * directory get the same key.
  */
-function getMainWorktreeBasename(repoPath) {
+function pathKey(p) {
+  let r;
+  try { r = fs.realpathSync.native(p); } catch { r = path.resolve(p); }
+  r = normPath(r).replace(/(.)\/+$/, '$1');
+  return process.platform === 'win32' ? r.toLowerCase() : r;
+}
+
+/**
+ * Resolve any path inside a repo (the main worktree, a linked worktree, or a
+ * subfolder of either) to { repoPath, worktreePath }: repoPath is the main
+ * worktree, and worktreePath is the top of the linked worktree that `p` is
+ * in, or null when `p` is in the main worktree.  A path that is not in a git
+ * worktree comes back unchanged with worktreePath null.
+ *
+ * @param {string} p - absolute path
+ * @returns {{ repoPath: string, worktreePath: string|null }}
+ */
+function resolveRepoTarget(p) {
   try {
-    const commonDir = execSync(
-      `git -C "${repoPath}" rev-parse --path-format=absolute --git-common-dir`,
-      { encoding: 'utf8' }
-    ).trim();
-    // commonDir is the main repo's ".git"; its parent is the main worktree.
-    return path.basename(path.dirname(commonDir));
+    const opts = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] };
+    const top = execSync(`git -C "${p}" rev-parse --show-toplevel`, opts).trim();
+    const [first] = parseWorktreeBlocks(execSync(`git -C "${p}" worktree list --porcelain`, opts));
+    // A bare repo lists the bare directory first; it has no main worktree.
+    if (first.bare) return { repoPath: top, worktreePath: null };
+    const main = first.path;
+    return { repoPath: main, worktreePath: pathKey(top) === pathKey(main) ? null : top };
   } catch {
-    return path.basename(repoPath.replace(/\\/g, '/'));
+    return { repoPath: p, worktreePath: null };
   }
 }
 
@@ -781,4 +812,4 @@ function getFileLines(worktreePath, hash, filePath, start, end) {
   return { lines, totalLines };
 }
 
-module.exports = { getHeadHash, getCommits, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getMergeBase, parseDiff, parseCommitBody, parseWorktreeList, discoverWorktrees, getMainWorktreeBasename, getFileLines, getPatchLines, lcsCompare };
+module.exports = { getHeadHash, getCommits, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getMergeBase, parseDiff, parseCommitBody, parseWorktreeList, discoverWorktrees, pathKey, resolveRepoTarget, getFileLines, getPatchLines, lcsCompare };

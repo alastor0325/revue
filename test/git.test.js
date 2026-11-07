@@ -376,6 +376,34 @@ describe('parseWorktreeList', () => {
     expect(result.map(w => w.worktreeName)).toEqual(['firefox', '2045395']);
   });
 
+  test('a worktree whose folder name equals the main repo name gets a unique name', () => {
+    const output = porcelainOutput([
+      { p: MAIN,                        branch: 'main' },
+      { p: '/tmp/elsewhere/firefox',    branch: 'other' },
+    ]);
+    expect(parseWorktreeList(output, MAIN).map((w) => w.worktreeName)).toEqual(['firefox-2']);
+  });
+
+  test('two worktrees that strip to the same name get distinct names, first keeps it', () => {
+    const output = porcelainOutput([
+      { p: MAIN,                 branch: 'main' },
+      { p: '/a/firefox-x',       branch: 'a' },
+      { p: '/b/x',               branch: 'b' },
+      { p: '/c/x',               branch: 'c' },
+    ]);
+    expect(parseWorktreeList(output, MAIN).map((w) => w.worktreeName)).toEqual(['x', 'x-2', 'x-3']);
+  });
+
+  test('a generated name skips a name another worktree already has', () => {
+    const output = porcelainOutput([
+      { p: MAIN,                 branch: 'main' },
+      { p: '/a/x',               branch: 'a' },
+      { p: '/b/x',               branch: 'b' },
+      { p: '/c/firefox-x-2',     branch: 'c' },
+    ]);
+    expect(parseWorktreeList(output, MAIN).map((w) => w.worktreeName)).toEqual(['x', 'x-3', 'x-2']);
+  });
+
   test('filters main repo when git outputs forward slashes but mainRepoPath uses backslashes (Windows)', () => {
     // Simulate Windows: git outputs C:/Users/user/firefox but mainRepoPath uses backslashes
     const windowsMain = 'C:\\Users\\user\\firefox';
