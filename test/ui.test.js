@@ -963,6 +963,68 @@ describe('syntax highlighting — hunk inside a <script>', () => {
   });
 });
 
+// URLs and bug numbers in code comments are links, like in commit messages.
+describe('links in code comments', () => {
+  let lkServer, lkPage, lkTmpDir;
+
+  beforeAll(async () => {
+    lkTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-ui-links-'));
+    const lkMain = path.join(lkTmpDir, 'main');
+    const lkWork = path.join(lkTmpDir, 'work');
+
+    fs.mkdirSync(lkMain);
+    git(lkMain, 'init');
+    git(lkMain, 'config user.email "test@test.com"');
+    git(lkMain, 'config user.name "Test"');
+    fs.writeFileSync(path.join(lkMain, 'base.txt'), 'base\n');
+    git(lkMain, 'add .');
+    git(lkMain, 'commit -m "initial"');
+
+    execSync(`git clone "${lkMain}" "${lkWork}"`, { encoding: 'utf8' });
+    git(lkWork, 'config user.email "test@test.com"');
+    git(lkWork, 'config user.name "Test"');
+    git(lkWork, 'remote add upstream https://github.com/mozilla-firefox/firefox.git');
+    fs.writeFileSync(path.join(lkWork, 'a.cpp'),
+      '// See https://example.com/spec and bug 1321489.\nconst char* s = "https://example.com/str";\n');
+    git(lkWork, 'add .');
+    git(lkWork, 'commit -m "feat: add a.cpp"');
+
+    const app = createApp({ worktreeName: 'work', worktreePath: lkWork, mainRepoPath: lkMain });
+    const port = await findAvailablePort(19740);
+    await new Promise((resolve) => { lkServer = app.listen(port, '127.0.0.1', resolve); });
+
+    lkPage = await browser.newPage();
+    await lkPage.goto(`http://127.0.0.1:${port}`);
+    await lkPage.waitForSelector('.patch-heading', { state: 'visible' });
+  }, 30000);
+
+  afterAll(async () => {
+    await lkPage?.close();
+    await new Promise((resolve) => lkServer?.close(resolve));
+    fs.rmSync(lkTmpDir, { recursive: true, force: true });
+  });
+
+  test('the URL and the bug number in the comment are links that open in a new tab', async () => {
+    const links = await lkPage.$$eval('.diff-table .ln-content a', (els) =>
+      els.map((a) => ({ href: a.getAttribute('href'), text: a.textContent, target: a.target })));
+    expect(links).toEqual([
+      { href: 'https://example.com/spec', text: 'https://example.com/spec', target: '_blank' },
+      { href: 'https://bugzilla.mozilla.org/show_bug.cgi?id=1321489', text: 'bug 1321489', target: '_blank' },
+    ]);
+  });
+
+  test('clicking a link opens it without opening the comment form', async () => {
+    // Keep the click from leaving the test: answer the new tab locally.
+    await lkPage.context().route('https://example.com/**', (route) => route.fulfill({ status: 200, body: 'ok' }));
+    const [popup] = await Promise.all([
+      lkPage.context().waitForEvent('page'),
+      lkPage.click('.diff-table .ln-content a[href="https://example.com/spec"]'),
+    ]);
+    await popup.close();
+    expect(await lkPage.$('.comment-form-row')).toBeNull();
+  });
+});
+
 // Expanded context lines must behave like any other diff line: clickable to
 // leave a comment, and that comment must persist as a display row.
 describe('expand context — commenting on expanded lines', () => {

@@ -2480,3 +2480,48 @@ describe('GET /api/rendered', () => {
     expect(body.base).toBe('https://example.org/spec/');
   }, 60000);
 });
+
+// Links in code comments: the client links URLs, and the issue references
+// matched by /api/diff's linkRules, inside the comments of diff lines.  So a
+// Mozilla repo's diff must carry the Bugzilla rule and the line text verbatim.
+describe('links in code comments — server data', () => {
+  let lkTmp, lkServer, lkUrl;
+
+  beforeAll(async () => {
+    lkTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-links-'));
+    const main = path.join(lkTmp, 'main');
+    const work = path.join(lkTmp, 'work');
+    fs.mkdirSync(main);
+    git(main, 'init');
+    git(main, 'config user.email "t@t.com"');
+    git(main, 'config user.name "T"');
+    fs.writeFileSync(path.join(main, 'base.txt'), 'base\n');
+    git(main, 'add .');
+    git(main, 'commit -m "initial"');
+    execSync(`git clone "${main}" "${work}"`, { encoding: 'utf8' });
+    git(work, 'config user.email "t@t.com"');
+    git(work, 'config user.name "T"');
+    git(work, 'remote add upstream https://github.com/mozilla-firefox/firefox.git');
+    fs.writeFileSync(path.join(work, 'a.cpp'), '// See https://example.com/spec?a=1&b=2 and bug 1321489.\nint x;\n');
+    git(work, 'add .');
+    git(work, 'commit -m "feat: add a.cpp"');
+
+    const app = createApp({ worktreeName: 'work', worktreePath: work, mainRepoPath: main });
+    const port = await findAvailablePort(19420);
+    await new Promise((resolve) => { lkServer = app.listen(port, '127.0.0.1', resolve); });
+    lkUrl = `http://127.0.0.1:${port}`;
+  });
+
+  afterAll((done) => {
+    fs.rmSync(lkTmp, { recursive: true, force: true });
+    lkServer.close(done);
+  });
+
+  test('GET /api/diff returns the Bugzilla rule and the comment text unchanged', async () => {
+    const { status, body } = await httpRequest(`${lkUrl}/api/diff`);
+    expect(status).toBe(200);
+    expect(body.linkRules.map((r) => r.url)).toEqual(['https://bugzilla.mozilla.org/show_bug.cgi?id=$1']);
+    const line = body.patches[0].files.find((f) => f.newPath === 'a.cpp').hunks[0].lines[0];
+    expect(line.content).toBe('// See https://example.com/spec?a=1&b=2 and bug 1321489.');
+  });
+});

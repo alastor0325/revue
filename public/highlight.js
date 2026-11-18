@@ -176,9 +176,30 @@ export function highlightFromSources(lines, sources) {
   return out;
 }
 
+// The entities highlight.js writes for text (its escapeHTML), by name.
+const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', '#x27': "'" };
+const unescapeHtml = (s) => s.replace(/&(amp|lt|gt|quot|#x27);/g, (_, name) => ENTITIES[name]);
+
+/**
+ * A highlighted line with the text inside its comments, or all of its text
+ * when `everywhere`, replaced by `fn(plain text)`, which returns HTML — e.g.
+ * to make URLs links.  The markup is kept; it walks the spans the way
+ * splitHighlightedLines does.
+ */
+export function mapCommentText(html, fn, everywhere = false) {
+  if (!everywhere && !html.includes('hljs-comment')) return html; // most lines
+  const inComment = [everywhere]; // per open span: is it (inside) a comment?
+  return html.replace(/(<span[^>]*>)|(<\/span>)|([^<]+)/g, (m, open, close) => {
+    if (open) inComment.push(inComment.at(-1) || /\bhljs-comment\b/.test(open));
+    else if (close) inComment.pop();
+    else if (inComment.at(-1)) return fn(unescapeHtml(m));
+    return m;
+  });
+}
+
 if (typeof module !== 'undefined') {
   module.exports = {
     loadHighlighter, setHighlighter, languageFor, languageClass, splitHighlightedLines, highlightDiffLines,
-    highlightSource, highlightFromSources,
+    highlightSource, highlightFromSources, mapCommentText,
   };
 }

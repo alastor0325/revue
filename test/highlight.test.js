@@ -12,8 +12,9 @@ global.EventSource = jest.fn(() => ({ addEventListener: jest.fn(), close: jest.f
 const hljs = require('../public/vendor/highlight.min.js').default;
 const {
   setHighlighter, languageFor, languageClass, splitHighlightedLines, highlightDiffLines,
-  highlightSource, highlightFromSources,
+  highlightSource, highlightFromSources, mapCommentText,
 } = require('../public/highlight');
+const { linkRulesFromRemotes } = require('../src/links');
 const { renderFile, state } = require('../public/app');
 
 const ctx = (content) => ({ type: 'context', content });
@@ -328,5 +329,86 @@ describe('whole-file highlighting', () => {
       renderFile(top, 'abc1234');
       expect(global.fetch).not.toHaveBeenCalledWith(expect.stringMatching(/^api\/filesource/));
     });
+  });
+});
+
+// URLs and issue references in code comments become links, like in commit
+// messages (public/renderer.js linkifyText); code and strings are left alone.
+describe('links in code comments', () => {
+  const MOZILLA = linkRulesFromRemotes({ origin: 'https://github.com/mozilla-firefox/firefox.git' });
+  const hrefs = (el) => [...el.querySelectorAll('.ln-content a')].map((a) => a.getAttribute('href'));
+  const file = (newPath, contents) => ({
+    newPath, oldPath: newPath, binary: false,
+    hunks: [{ header: '@@ -0,0 +1 @@', oldStart: 0, oldCount: 0, newStart: 1, newCount: contents.length,
+      lines: contents.map((content, i) => ({ type: 'added', content, oldLineNum: null, newLineNum: i + 1 })) }],
+  });
+
+  beforeEach(() => { state.comments = {}; state.linkRules = MOZILLA; });
+  afterAll(() => { state.linkRules = []; });
+
+  test('mapCommentText rewrites only the text inside comments, unescaped', () => {
+    const html = '<span class="hljs-keyword">if</span> a &amp;&amp; b <span class="hljs-comment">// x &lt; y <span class="hljs-doctag">TODO</span> z</span>';
+    const out = mapCommentText(html, (t) => `[${t}]`);
+    expect(out).toBe('<span class="hljs-keyword">if</span> a &amp;&amp; b <span class="hljs-comment">[// x < y ]<span class="hljs-doctag">[TODO]</span>[ z]</span>');
+  });
+
+  test('a URL and a bug number in a comment are links; a URL in a string is not', () => {
+    const el = renderFile(file('a.cpp', [
+      '// See https://w3c.github.io/webvtt/#the-cue-pseudo-element and bug 1321489.',
+      'const char* u = "https://example.com/not-linked";',
+    ]), 'h');
+    expect(hrefs(el)).toEqual([
+      'https://w3c.github.io/webvtt/#the-cue-pseudo-element',
+      'https://bugzilla.mozilla.org/show_bug.cgi?id=1321489',
+    ]);
+    const cell = el.querySelector('.ln-content');
+    expect(cell.textContent).toBe('＋+// See https://w3c.github.io/webvtt/#the-cue-pseudo-element and bug 1321489.');
+    expect(cell.querySelector('a').closest('.hljs-comment')).not.toBeNull(); // keeps the comment colour
+  });
+
+  test('every line of a multi-line comment links its URLs', () => {
+    const el = renderFile(file('a.js', ['/*', ' * https://example.com/a?x=1&y=2', ' */', 'f();']), 'h');
+    expect(hrefs(el)).toEqual(['https://example.com/a?x=1&y=2']);
+  });
+
+  test('a comment in a <script> of an HTML file links its URLs', () => {
+    const el = renderFile(file('t.html', ['<script>', '// https://example.com/spec', '</script>']), 'h');
+    expect(hrefs(el)).toEqual(['https://example.com/spec']);
+  });
+
+  test('mapCommentText with `everywhere` rewrites all text, and skips lines with no comment otherwise', () => {
+    const html = 'a <span class="hljs-string">&quot;b&quot;</span>';
+    expect(mapCommentText(html, (t) => `[${t}]`, true)).toBe('[a ]<span class="hljs-string">["b"]</span>');
+    expect(mapCommentText(html, () => 'x')).toBe(html);
+  });
+
+  // Prose files link anywhere in a line: plain text, Markdown and unknown types.
+  test.each([
+    ['notes.txt', 'see https://example.com/doc <b> and bug 1321489'],
+    ['README.md', '- see https://example.com/doc <b> and bug 1321489'],
+    ['notes.xyz', 'see https://example.com/doc <b> and bug 1321489'],
+  ])('%s links URLs and bug numbers anywhere in a line', (name, text) => {
+    const el = renderFile(file(name, [text]), 'h');
+    expect(hrefs(el)).toEqual(['https://example.com/doc', 'https://bugzilla.mozilla.org/show_bug.cgi?id=1321489']);
+    expect(el.querySelector('.ln-content').textContent).toBe(`＋+${text}`);
+  });
+
+  test('a Markdown link is clickable', () => {
+    expect(hrefs(renderFile(file('README.md', ['[spec](https://example.com/spec)']), 'h'))).toEqual(['https://example.com/spec']);
+  });
+
+  test('code shown as plain text (a hunk too large to highlight) gets no links: comments cannot be told apart', () => {
+    const el = renderFile(file('a.cpp', [`f("${'x'.repeat(200000)}"); // https://example.com/y`]), 'h');
+    expect(el.querySelector('.ln-content').classList.contains('hl')).toBe(false);
+    expect(hrefs(el)).toEqual([]);
+  });
+
+  test('clicking a link does not open the comment form; clicking the code does', () => {
+    const el = document.body.appendChild(renderFile(file('a.cpp', ['// https://example.com/x']), 'h'));
+    el.querySelector('.ln-content a').click();
+    expect(document.querySelector('.comment-form-row')).toBeNull();
+    el.querySelector('.ln-content').click();
+    expect(document.querySelector('.comment-form-row')).not.toBeNull();
+    document.body.innerHTML = '';
   });
 });

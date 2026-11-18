@@ -11,7 +11,7 @@ import {
   refreshPromptBar,
 } from './persistence.js';
 import { getRevisionList } from './revisions.js';
-import { highlightDiffLines, highlightFromSources, highlightSource, languageClass } from './highlight.js';
+import { highlightDiffLines, highlightFromSources, highlightSource, languageClass, mapCommentText } from './highlight.js';
 import { mountRichView } from './richdiff.js';
 import {
   getSidebarCollapsed, setSidebarCollapsed, isRenderedView, setRenderedView,
@@ -30,14 +30,21 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
-// ── Links in commit text ───────────────────────────────────────────────────
-// Commit titles and messages: URLs become links, and so do issue references
-// matched by `rules` — per repo, from the server (src/links.js): "Bug 1234567"
-// to Bugzilla in Mozilla repos, "#123" to GitHub in GitHub repos.  Returns
-// escaped HTML.
+// ── Links in commit text and code comments ─────────────────────────────────
+// Commit titles and messages, and comments in the code (contentCell): URLs
+// become links, and so do issue references matched by `rules` — per repo,
+// from the server (src/links.js): "Bug 1234567" to Bugzilla in Mozilla repos,
+// "#123" to GitHub in GitHub repos.  Returns escaped HTML.
 const URL_RE = /https?:\/\/[^\s<>"']+/g;
 const linkTag = (href, text) =>
   `<a class="commit-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`;
+
+// Each rule's pattern compiled once: code lines call linkifyText many times.
+const ruleRegExps = new WeakMap(); // rule → RegExp
+function ruleRegExp(rule) {
+  if (!ruleRegExps.has(rule)) ruleRegExps.set(rule, new RegExp(rule.pattern, 'gi'));
+  return ruleRegExps.get(rule);
+}
 
 export function linkifyText(text, rules = state.linkRules) {
   text = String(text ?? '');
@@ -49,7 +56,7 @@ export function linkifyText(text, rules = state.linkRules) {
     spans.push({ start: m.index, end: m.index + url.length, href: url });
   }
   for (const rule of rules || []) {
-    for (const m of text.matchAll(new RegExp(rule.pattern, 'gi'))) {
+    for (const m of text.matchAll(ruleRegExp(rule))) {
       spans.push({ start: m.index, end: m.index + m[0].length, href: rule.url.replace('$1', m[1]) });
     }
   }
@@ -189,8 +196,9 @@ export function wireLineComment(tr, patchHash, filePath, line) {
   const key = lineKey(line);
   tr.dataset.filePath = filePath;
   tr.dataset.lineKey = key;
-  tr.querySelector('.ln-content').addEventListener('click', () => {
+  tr.querySelector('.ln-content').addEventListener('click', (e) => {
     if (window.getSelection().toString().length > 0) return;
+    if (e.target.closest('a')) return; // a link in the code opens, not the comment form
     const next = tr.nextElementSibling;
     if (next && next.classList.contains('comment-form-row')) {
       const ctx = next._draftContext;
@@ -509,7 +517,7 @@ export function renderExpandRow(table, patchHash, filePath, hiddenStart, hiddenE
         row.innerHTML = `
           <td class="ln-old">${line.oldLineNum != null ? line.oldLineNum : ''}</td>
           <td class="ln-new">${line.newLineNum != null ? line.newLineNum : ''}</td>
-          ${contentCell(' ', line.content, hl && hl[i])}`;
+          ${contentCell(' ', line.content, hl && hl[i], filePath)}`;
         parent.insertBefore(row, anchor);
         // Treat expanded context lines like any other line so comments can be
         // left on them too.
@@ -574,17 +582,24 @@ function makeCollapsible(header, body, key) {
   });
 }
 
+// Files that are prose: their URLs and issue references become links
+// anywhere in a line.  In code, only those in comments do.
+const PROSE = new Set([null, 'language-plaintext', 'language-markdown']); // null: an unknown type
+const isProse = (filePath) => PROSE.has(languageClass(filePath));
+
 // The code cell of one diff row.  `html` is the line's syntax-highlighted
-// markup (from highlightDiffLines); without it the line is plain escaped text.
-function contentCell(prefix, content, html) {
+// markup (from highlightDiffLines); without it the line is plain escaped text
+// (with links only in prose: in code, comments can't be told apart).
+function contentCell(prefix, content, html, filePath) {
   if (html == null) {
-    return `<td class="ln-content"><span class="line-icon">＋</span>${escapeHtml(prefix + content)}</td>`;
+    const text = isProse(filePath) ? linkifyText(content) : escapeHtml(content);
+    return `<td class="ln-content"><span class="line-icon">＋</span>${escapeHtml(prefix)}${text}</td>`;
   }
-  return `<td class="ln-content hl">${highlightedContent(prefix, html)}</td>`;
+  return `<td class="ln-content hl">${highlightedContent(prefix, html, filePath)}</td>`;
 }
 
-const highlightedContent = (prefix, html) =>
-  `<span class="line-icon">＋</span><span class="diff-sign">${escapeHtml(prefix)}</span>${html}`;
+const highlightedContent = (prefix, html, filePath) =>
+  `<span class="line-icon">＋</span><span class="diff-sign">${escapeHtml(prefix)}</span>${mapCommentText(html, linkifyText, isProse(filePath))}`;
 
 // A real commit, not the synthetic "compare:…" hash of a compare view.
 const isCommitHash = (hash) => /^[0-9a-f]{4,40}$/i.test(hash);
@@ -716,7 +731,7 @@ export function renderFile(fileData, patchHash) {
       tr.innerHTML = `
         <td class="ln-old">${escapeHtml(String(oldNum))}</td>
         <td class="ln-new">${escapeHtml(String(newNum))}</td>
-        ${contentCell(prefix, line.content, hl && hl[li])}`;
+        ${contentCell(prefix, line.content, hl && hl[li], filePath)}`;
 
       table.appendChild(tr);
       wireLineComment(tr, patchHash, filePath, line);
@@ -742,7 +757,7 @@ export function renderFile(fileData, patchHash) {
         hunk.lines.forEach((line, li) => {
           const cell = hunkCells[hi][li];
           cell.classList.add('hl');
-          cell.innerHTML = highlightedContent(signFor(line.type), hl[li]);
+          cell.innerHTML = highlightedContent(signFor(line.type), hl[li], filePath);
         });
       });
     });
