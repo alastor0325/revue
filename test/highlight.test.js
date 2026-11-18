@@ -12,6 +12,7 @@ global.EventSource = jest.fn(() => ({ addEventListener: jest.fn(), close: jest.f
 const hljs = require('../public/vendor/highlight.min.js').default;
 const {
   setHighlighter, languageFor, languageClass, splitHighlightedLines, highlightDiffLines,
+  highlightSource, highlightFromSources,
 } = require('../public/highlight');
 const { renderFile, state } = require('../public/app');
 
@@ -214,5 +215,118 @@ describe('per-language rules', () => {
   ])('%s emits the classes its rules use', (path, code, classes) => {
     const html = tokens(path, code);
     for (const c of classes) expect(html).toContain(`class="${c}"`);
+  });
+});
+
+// A hunk that starts inside a block (the JS of an HTML <script>) is coloured
+// from the whole file, which shows the highlighter the lines above it.
+describe('whole-file highlighting', () => {
+  const OLD = '<p>x</p>\n<script>\nlet a = 1;\n</script>\n';
+  const NEW = '<p>x</p>\n<script>\nlet a = 2;\n</script>\n';
+  const line = (type, content, oldLineNum, newLineNum) => ({ type, content, oldLineNum, newLineNum });
+  const hunkLines = () => [line('removed', 'let a = 1;', 3, null), line('added', 'let a = 2;', null, 3), line('context', '</script>', 4, 4)];
+  const keyword = '<span class="hljs-keyword">let</span>';
+  const sources = () => ({ old: highlightSource(OLD, 'page.html'), new: highlightSource(NEW, 'page.html') });
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+
+  test('a hunk inside a <script> is plain text on its own', () => {
+    expect(highlightDiffLines(hunkLines(), 'page.html')[1]).not.toContain(keyword);
+  });
+
+  test('highlightSource splits the file into lines, without the empty one after the last newline', () => {
+    const src = highlightSource(NEW, 'page.html');
+    expect(src.text).toEqual(['<p>x</p>', '<script>', 'let a = 2;', '</script>']);
+    expect(src.html).toHaveLength(4);
+    expect(src.html[2]).toContain(keyword);
+  });
+
+  test('highlightSource returns null for a missing side or an unknown type', () => {
+    expect(highlightSource(null, 'page.html')).toBeNull();
+    expect(highlightSource('x', 'blob.xyz')).toBeNull();
+  });
+
+  test('highlightFromSources colours removed lines from the old file, others from the new', () => {
+    const out = highlightFromSources(hunkLines(), sources());
+    expect(out[0]).toContain(keyword);
+    expect(out[0]).toContain('1');
+    expect(out[1]).toContain(keyword);
+    expect(out[1]).toContain('2');
+  });
+
+  test('highlightFromSources returns null when a line is not in the file as in the diff', () => {
+    expect(highlightFromSources([line('added', 'let b = 3;', null, 3)], sources())).toBeNull();
+    expect(highlightFromSources(hunkLines(), { old: null, new: sources().new })).toBeNull();
+  });
+
+  describe('renderFile', () => {
+    const fileData = () => ({
+      newPath: 'page.html', oldPath: 'page.html', binary: false,
+      hunks: [{ header: '@@ -3,2 +3,2 @@', oldStart: 3, oldCount: 2, newStart: 3, newCount: 2, lines: hunkLines() }],
+    });
+    afterEach(() => { document.body.innerHTML = ''; });
+    const codeCells = (el) => [...el.querySelectorAll('tr.line-added .ln-content, tr.line-removed .ln-content')];
+
+    beforeEach(() => {
+      state.comments = {};
+      global.fetch.mockReset();
+      global.fetch.mockImplementation((url) => Promise.resolve(
+        String(url).startsWith('api/filesource')
+          ? { ok: true, json: () => Promise.resolve({ old: OLD, new: NEW }) }
+          : { ok: true, json: () => Promise.resolve({ lines: [], totalLines: 4 }) }));
+    });
+
+    test('recolours a hunk from the whole file when both versions arrive', async () => {
+      const el = document.body.appendChild(renderFile(fileData(), 'abc1230'));
+      expect(codeCells(el)[1].innerHTML).not.toContain(keyword); // per-hunk colours first
+      expect(global.fetch).toHaveBeenCalledWith('api/filesource?hash=abc1230&file=page.html');
+      await flush();
+      const cells = codeCells(el);
+      expect(cells.map((c) => c.innerHTML.includes(keyword))).toEqual([true, true]);
+      // The sign and the text are unchanged.
+      expect(cells.map((c) => c.textContent)).toEqual(['＋-let a = 1;', '＋+let a = 2;']);
+    });
+
+    test('a re-render uses the fetched versions at once, without fetching again', async () => {
+      document.body.appendChild(renderFile(fileData(), 'abc1231'));
+      await flush();
+      global.fetch.mockClear();
+      const el = renderFile(fileData(), 'abc1231');
+      expect(codeCells(el)[1].innerHTML).toContain(keyword);
+      expect(global.fetch).not.toHaveBeenCalledWith(expect.stringMatching(/^api\/filesource/));
+    });
+
+    test('a hunk that does not match the file keeps its own colours; the others are recoloured', async () => {
+      const data = fileData();
+      data.hunks.push({ header: '@@ -9 +9 @@', oldStart: 9, oldCount: 1, newStart: 9, newCount: 1,
+        lines: [line('added', 'not in the file', null, 9)] });
+      const el = document.body.appendChild(renderFile(data, 'abc1235'));
+      await flush();
+      const cells = codeCells(el);
+      expect(cells.slice(0, 2).map((c) => c.innerHTML.includes(keyword))).toEqual([true, true]);
+      expect(cells[2].textContent).toBe('＋+not in the file');
+    });
+
+    test('does not touch a table that a re-render has replaced', async () => {
+      const el = renderFile(fileData(), 'abc1236'); // never attached to the document
+      await flush();
+      expect(codeCells(el)[1].innerHTML).not.toContain(keyword);
+    });
+
+    test('keeps per-hunk colours when the file versions cannot be read', async () => {
+      global.fetch.mockImplementation(() => Promise.resolve({ ok: false, json: () => Promise.resolve({}) }));
+      const el = renderFile(fileData(), 'abc1232');
+      await flush();
+      expect(codeCells(el)[1].classList.contains('hl')).toBe(true);
+      expect(codeCells(el)[1].innerHTML).not.toContain(keyword);
+    });
+
+    test('does not fetch for a compare view, an unknown type, or a hunk at the top of the file', () => {
+      renderFile(fileData(), 'compare:abc:def');
+      renderFile({ ...fileData(), newPath: 'a.xyz', oldPath: 'a.xyz' }, 'abc1233');
+      const top = fileData();
+      Object.assign(top.hunks[0], { oldStart: 1, newStart: 1 });
+      renderFile(top, 'abc1234');
+      expect(global.fetch).not.toHaveBeenCalledWith(expect.stringMatching(/^api\/filesource/));
+    });
   });
 });

@@ -142,6 +142,43 @@ export function highlightDiffLines(lines, filePath) {
 
 const cache = new WeakMap(); // hunk lines array → { filePath, hljs, out }
 
+// A hunk highlighted on its own starts with no state, so a hunk that begins
+// inside a block (JS in an HTML <script>, a multi-line comment or string) is
+// coloured wrongly.  Highlighting each whole version of the file once fixes
+// that: every diff line then takes its HTML by line number.
+
+/**
+ * One version of a file, highlighted: { text, html }, one entry per line, or
+ * null when the file isn't highlighted or is missing (null text; the server
+ * also sends null for a file over 1 MB).
+ */
+export function highlightSource(text, filePath) {
+  const lang = languageFor(filePath);
+  if (!lang || typeof text !== 'string') return null;
+  const lines = text.split('\n');
+  if (lines[lines.length - 1] === '') lines.pop(); // after the last newline
+  const html = highlightBlock(lines, lang);
+  return html && { text: lines, html };
+}
+
+/**
+ * Highlighted HTML for each diff line, from the highlighted old and new
+ * versions of the file (highlightSource), or null when a line isn't in them
+ * as it is in the diff (callers then use highlightDiffLines).
+ */
+export function highlightFromSources(lines, sources) {
+  const out = [];
+  for (const l of lines) {
+    const [src, num] = l.type === 'removed' ? [sources.old, l.oldLineNum] : [sources.new, l.newLineNum];
+    if (!src || src.text[num - 1] !== l.content) return null;
+    out.push(src.html[num - 1]);
+  }
+  return out;
+}
+
 if (typeof module !== 'undefined') {
-  module.exports = { loadHighlighter, setHighlighter, languageFor, languageClass, splitHighlightedLines, highlightDiffLines };
+  module.exports = {
+    loadHighlighter, setHighlighter, languageFor, languageClass, splitHighlightedLines, highlightDiffLines,
+    highlightSource, highlightFromSources,
+  };
 }

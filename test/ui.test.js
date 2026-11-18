@@ -913,6 +913,56 @@ describe('expand context — larger file', () => {
   });
 });
 
+// A hunk that starts inside an HTML <script> has no <script> tag of its own;
+// it is coloured as JavaScript because the whole file is highlighted.
+describe('syntax highlighting — hunk inside a <script>', () => {
+  let hlServer, hlPage, hlTmpDir;
+
+  beforeAll(async () => {
+    hlTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-ui-hl-'));
+    const hlMain = path.join(hlTmpDir, 'main');
+    const hlWork = path.join(hlTmpDir, 'work');
+
+    fs.mkdirSync(hlMain);
+    git(hlMain, 'init');
+    git(hlMain, 'config user.email "test@test.com"');
+    git(hlMain, 'config user.name "Test"');
+    const body = Array.from({ length: 30 }, (_, i) => `let v${i} = ${i};`);
+    const page = (extra) => ['<!doctype html>', '<script>', ...body, ...extra, '</script>', ''].join('\n');
+    fs.writeFileSync(path.join(hlMain, 'page.html'), page([]));
+    git(hlMain, 'add .');
+    git(hlMain, 'commit -m "initial"');
+
+    execSync(`git clone "${hlMain}" "${hlWork}"`, { encoding: 'utf8' });
+    git(hlWork, 'config user.email "test@test.com"');
+    git(hlWork, 'config user.name "Test"');
+    fs.writeFileSync(path.join(hlWork, 'page.html'), page(['async function added() { return 1; }']));
+    git(hlWork, 'add .');
+    git(hlWork, 'commit -m "feat: add a function in the script"');
+
+    const app = createApp({ worktreeName: 'work', worktreePath: hlWork, mainRepoPath: hlMain });
+    const port = await findAvailablePort(19730);
+    await new Promise((resolve) => { hlServer = app.listen(port, '127.0.0.1', resolve); });
+
+    hlPage = await browser.newPage();
+    await hlPage.goto(`http://127.0.0.1:${port}`);
+    await hlPage.waitForSelector('.patch-heading', { state: 'visible' });
+  }, 30000);
+
+  afterAll(async () => {
+    await hlPage?.close();
+    await new Promise((resolve) => hlServer?.close(resolve));
+    fs.rmSync(hlTmpDir, { recursive: true, force: true });
+  });
+
+  test('the added line is coloured as JavaScript', async () => {
+    await hlPage.waitForSelector('tr.line-added .ln-content .hljs-keyword', { timeout: 5000 });
+    const keywords = await hlPage.$$eval('tr.line-added .ln-content .hljs-keyword', (els) => els.map((e) => e.textContent));
+    expect(keywords).toEqual(expect.arrayContaining(['async', 'function', 'return']));
+    expect(await hlPage.textContent('tr.line-added .ln-content')).toBe('＋+async function added() { return 1; }');
+  });
+});
+
 // Expanded context lines must behave like any other diff line: clickable to
 // leave a comment, and that comment must persist as a display row.
 describe('expand context — commenting on expanded lines', () => {

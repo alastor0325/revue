@@ -2,6 +2,7 @@
 
 jest.mock('child_process', () => ({
   execSync: jest.fn(),
+  execFile: jest.fn(), // getFileVersions; tested in test/integration.test.js
 }));
 
 const { execSync } = require('child_process');
@@ -52,6 +53,24 @@ function fakeGit({ refs = {}, mainHead, mergeBases = {}, counts = {}, log = '' }
 // ── parseDiff ─────────────────────────────────────────────────────────────
 
 describe('parseDiff', () => {
+  // Each hunk ends at the counts in its header: the empty string after the
+  // diff's last newline is not an extra blank context line.
+  test('a hunk holds exactly the lines its header counts', () => {
+    const diff = [
+      'diff --git a/x.js b/x.js', '--- a/x.js', '+++ b/x.js',
+      '@@ -3,2 +3,3 @@', ' a', '+b', ' c', '',
+    ].join('\n');
+    const [file] = parseDiff(diff);
+    expect(file.hunks[0].lines.map((l) => [l.type, l.content])).toEqual([['context', 'a'], ['added', 'b'], ['context', 'c']]);
+  });
+
+  test('a blank context line written without its leading space still counts', () => {
+    const diff = ['diff --git a/x.js b/x.js', '--- a/x.js', '+++ b/x.js', '@@ -1,3 +1,3 @@', ' a', '', '-c', '+d', ''].join('\n');
+    const lines = parseDiff(diff)[0].hunks[0].lines;
+    expect(lines.map((l) => l.type)).toEqual(['context', 'context', 'removed', 'added']);
+    expect(lines[1]).toMatchObject({ content: '', oldLineNum: 2, newLineNum: 2 });
+  });
+
   test('returns empty array for empty input', () => {
     expect(parseDiff('')).toEqual([]);
     expect(parseDiff('\n\n')).toEqual([]);

@@ -16,6 +16,7 @@ jest.mock('../src/git', () => ({
   getDiffForCommit: jest.fn(),
   getDiffBetweenCommits: jest.fn(),
   getFileLines: jest.fn(),
+  getFileVersions: jest.fn(),
   discoverWorktrees: jest.fn(),
 }));
 
@@ -23,7 +24,7 @@ jest.mock('../src/claude', () => ({
   submitReview: jest.fn(),
 }));
 
-const { getHeadHash, getMergeBase, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getFileLines, discoverWorktrees } = require('../src/git');
+const { getHeadHash, getMergeBase, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getFileLines, getFileVersions, discoverWorktrees } = require('../src/git');
 const { submitReview }     = require('../src/claude');
 const { createApp, findAvailablePort, startServer } = require('../src/server');
 
@@ -573,6 +574,40 @@ describe('findAvailablePort', () => {
     } finally {
       await new Promise((resolve) => blocker.close(resolve));
     }
+  });
+});
+
+// ── GET /api/filesource ────────────────────────────────────────────────────
+
+describe('GET /api/filesource', () => {
+  beforeEach(() => {
+    getHeadHash.mockReturnValue('abc123');
+    getFileVersions.mockReset();
+  });
+
+  test('returns both versions of the file, with the old path for a rename', async () => {
+    getFileVersions.mockResolvedValue({ old: 'a\n', new: 'b\n' });
+    const res = await request(makeApp()).get('/api/filesource?hash=abc1234&file=new/x.html&oldFile=old/x.html');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ old: 'a\n', new: 'b\n' });
+    expect(getFileVersions).toHaveBeenCalledWith('/fake/worktree', 'abc1234', 'new/x.html', 'old/x.html');
+  });
+
+  test('the old path defaults to the file path', async () => {
+    getFileVersions.mockResolvedValue({ old: null, new: 'b\n' });
+    await request(makeApp()).get('/api/filesource?hash=abc1234&file=x.html');
+    expect(getFileVersions).toHaveBeenCalledWith('/fake/worktree', 'abc1234', 'x.html', 'x.html');
+  });
+
+  test.each([
+    ['a bad hash', 'hash=nothex!&file=x.html'],
+    ['no file', 'hash=abc1234'],
+    ['an absolute path', 'hash=abc1234&file=/etc/passwd'],
+    ['a path out of the repo', 'hash=abc1234&file=x.html&oldFile=../../secret'],
+  ])('returns 400 for %s', async (_, query) => {
+    const res = await request(makeApp()).get(`/api/filesource?${query}`);
+    expect(res.status).toBe(400);
+    expect(getFileVersions).not.toHaveBeenCalled();
   });
 });
 

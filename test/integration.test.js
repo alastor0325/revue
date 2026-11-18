@@ -12,7 +12,7 @@ const http = require('http');
 const { execSync } = require('child_process');
 
 const {
-  getHeadHash, getCommits, getDiffPerCommit, getFileLines,
+  getHeadHash, getCommits, getDiffPerCommit, getFileLines, getFileVersions,
   getDiffForCommit, getDiffBetweenCommits, discoverWorktrees, getMergeBase,
 } = require('../src/git');
 const { createApp, startServer, findAvailablePort } = require('../src/server');
@@ -445,6 +445,49 @@ describe('server HTTP integration', () => {
     // context lines must carry the line numbers for the requested range.
     expect(body.lines[0].newLineNum).toBe(1);
     expect(body.lines[1].newLineNum).toBe(2);
+  });
+
+  // The client highlights both versions of a file as a whole, so a hunk that
+  // starts inside a <script> or comment is coloured right.
+  test('GET /api/filesource returns the file at the commit, and null where it is new', async () => {
+    const { status, body } = await httpRequest(`${baseUrl}/api/filesource?hash=${commitHash.slice(0, 8)}&file=feature.js`);
+    expect(status).toBe(200);
+    expect(body.new.split('\n')[0]).toBe('function hello() {');
+    expect(body.old).toBeNull(); // feature.js was added by this commit
+  });
+
+  test('getFileVersions reads the parent version under the old path of a renamed file', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-filesource-'));
+    try {
+      git(dir, 'init');
+      git(dir, 'config user.email "test@test.com"');
+      git(dir, 'config user.name "Test"');
+      fs.writeFileSync(path.join(dir, 'old.html'), '<script>\nlet a = 1;\n</script>\n');
+      git(dir, 'add .');
+      git(dir, 'commit -m "initial"');
+      git(dir, 'mv old.html page.html');
+      fs.writeFileSync(path.join(dir, 'page.html'), '<script>\nlet a = 2;\n</script>\n');
+      git(dir, 'add .');
+      git(dir, 'commit -m "rename and edit"');
+      const head = git(dir, 'rev-parse HEAD');
+      expect(await getFileVersions(dir, head, 'page.html', 'old.html')).toEqual({
+        old: '<script>\nlet a = 1;\n</script>\n',
+        new: '<script>\nlet a = 2;\n</script>\n',
+      });
+      // A version over 1 MB is not sent: the client keeps per-hunk colours.
+      fs.writeFileSync(path.join(dir, 'page.html'), 'x'.repeat(1024 * 1024 + 1));
+      git(dir, 'commit -am "grow"');
+      expect(await getFileVersions(dir, git(dir, 'rev-parse HEAD'), 'page.html', 'page.html')).toEqual({
+        old: '<script>\nlet a = 2;\n</script>\n', new: null,
+      });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('GET /api/filesource rejects a path that leaves the repo', async () => {
+    const { status } = await httpRequest(`${baseUrl}/api/filesource?hash=${commitHash.slice(0, 8)}&file=../../etc/passwd`);
+    expect(status).toBe(400);
   });
 
   test('GET /api/filecontext with bad params returns 400', async () => {

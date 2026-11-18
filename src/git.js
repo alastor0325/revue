@@ -2,7 +2,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execSync, execFile } = require('child_process');
+const execFileAsync = require('util').promisify(execFile);
 
 function normPath(p) {
   return path.normalize(p).replace(/\\/g, '/');
@@ -420,8 +421,12 @@ function parseDiff(diffText) {
       continue;
     }
 
-    // Diff content lines
-    if (currentHunk) {
+    // Diff content lines, up to the counts in the hunk header.  Past them a
+    // line isn't the hunk's: the empty string after the diff's last newline
+    // would otherwise read as an extra blank context line.
+    const hunkOpen = currentHunk && (oldLineNum < currentHunk.oldStart + currentHunk.oldCount
+      || newLineNum < currentHunk.newStart + currentHunk.newCount);
+    if (hunkOpen) {
       if (line.startsWith('+')) {
         currentHunk.lines.push({
           type: 'added',
@@ -824,4 +829,21 @@ function getFileLines(worktreePath, hash, filePath, start, end) {
   return { lines, totalLines };
 }
 
-module.exports = { getHeadHash, getCommits, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getMergeBase, parseDiff, parseCommitBody, parseWorktreeList, discoverWorktrees, pathKey, resolveRepoTarget, getFileLines, getPatchLines, lcsCompare };
+// Larger versions aren't sent for whole-file highlighting (getFileVersions).
+const MAX_SOURCE_BYTES = 1024 * 1024;
+
+/**
+ * The text of a file at commit `hash` (`filePath`) and at its parent
+ * (`oldPath`, for renames): a promise of { old, new }, null for a side where
+ * the file doesn't exist (added or deleted file, root commit, unknown commit)
+ * or is over 1 MB.  Asynchronous, so it doesn't block the server.
+ */
+function getFileVersions(worktreePath, hash, filePath, oldPath) {
+  const show = (spec) => execFileAsync('git', ['-C', worktreePath, 'show', spec],
+    { encoding: 'utf8', maxBuffer: MAX_SOURCE_BYTES })
+    .then((r) => r.stdout, () => null);
+  return Promise.all([show(`${hash}^:${oldPath}`), show(`${hash}:${filePath}`)])
+    .then(([o, n]) => ({ old: o, new: n }));
+}
+
+module.exports = { getHeadHash, getCommits, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getMergeBase, parseDiff, parseCommitBody, parseWorktreeList, discoverWorktrees, pathKey, resolveRepoTarget, getFileLines, getFileVersions, getPatchLines, lcsCompare };

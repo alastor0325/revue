@@ -8,13 +8,15 @@ const net = require('net');
 const os = require('os');
 const fs = require('fs');
 const { execSync } = require('child_process');
-const { getHeadHash, getMergeBase, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getFileLines, discoverWorktrees } = require('./git');
+const { getHeadHash, getMergeBase, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getFileLines, getFileVersions, discoverWorktrees } = require('./git');
 const { submitReview } = require('./claude');
 const { renderFileVersions, tagRenderableFiles } = require('./render');
 const { linkRules } = require('./links');
 
 // A (possibly abbreviated) commit hash, as accepted in API parameters.
 const HASH_RE = /^[0-9a-f]{4,40}$/i;
+// A repo-relative path that can't leave the repo.
+const badPath = (p) => typeof p !== 'string' || !p || p.startsWith('/') || p.split('/').includes('..');
 
 /**
  * Open the browser in a cross-platform way.
@@ -580,7 +582,6 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
   app.get('/api/rendered', async (req, res) => {
     const { hash, file } = req.query;
     const oldFile = req.query.oldFile || file;
-    const badPath = (p) => typeof p !== 'string' || !p || p.startsWith('/') || p.split('/').includes('..');
     if (!HASH_RE.test(hash) || badPath(file) || badPath(oldFile)) {
       return res.status(400).json({ error: 'Invalid parameters.' });
     }
@@ -589,6 +590,20 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
     } catch (err) {
       res.status(err.status || 500).json({ error: err.message });
     }
+  });
+
+  // GET /api/filesource?hash=<hash>&file=<path>[&oldFile=<path>]
+  // The whole file at a commit and at its parent: { old, new }, null for a
+  // side where it doesn't exist or is over 1 MB.  The client highlights each version as a
+  // whole, so a hunk that starts inside a block (e.g. a <script>) is coloured
+  // as the code it is.
+  app.get('/api/filesource', async (req, res) => {
+    const { hash, file } = req.query;
+    const oldFile = req.query.oldFile || file;
+    if (!HASH_RE.test(hash) || badPath(file) || badPath(oldFile)) {
+      return res.status(400).json({ error: 'Invalid parameters.' });
+    }
+    res.json(await getFileVersions(worktreePath, hash, file, oldFile));
   });
 
   // GET /api/filecontext?hash=<hash>&file=<path>&start=<n>&end=<n>

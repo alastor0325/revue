@@ -11,7 +11,7 @@ import {
   refreshPromptBar,
 } from './persistence.js';
 import { getRevisionList } from './revisions.js';
-import { highlightDiffLines, languageClass } from './highlight.js';
+import { highlightDiffLines, highlightFromSources, highlightSource, languageClass } from './highlight.js';
 import { mountRichView } from './richdiff.js';
 import {
   getSidebarCollapsed, setSidebarCollapsed, isRenderedView, setRenderedView,
@@ -421,8 +421,9 @@ export function renderCommitMessageSection(container, patchHash, commitMessage, 
  *
  * hiddenEnd may be null when the file length is not yet known (after-last-
  * hunk case); it is updated from the server's totalLines response.
+ * `sources` is the file's fileSources entry, used to colour the new lines.
  */
-export function renderExpandRow(table, patchHash, filePath, hiddenStart, hiddenEnd, insertBeforeEl) {
+export function renderExpandRow(table, patchHash, filePath, hiddenStart, hiddenEnd, insertBeforeEl, sources = null) {
   if (hiddenEnd !== null && hiddenStart > hiddenEnd) return;
 
   const CHUNK = 20;
@@ -500,7 +501,8 @@ export function renderExpandRow(table, patchHash, filePath, hiddenStart, hiddenE
       // fromTop=true  → insert before tr (rows appear above the expand bar)
       // fromTop=false → insert before tr.nextSibling (rows appear below the bar)
       const anchor = fromTop ? tr : tr.nextSibling;
-      const hl = highlightDiffLines(data.lines, filePath); // the server tags these as context lines
+      // The server tags these as context lines, with new-side line numbers.
+      const hl = highlightLines(data.lines, filePath, sources);
       data.lines.forEach((line, i) => {
         const row = document.createElement('tr');
         row.className = 'line-context line-context-expanded';
@@ -578,8 +580,49 @@ function contentCell(prefix, content, html) {
   if (html == null) {
     return `<td class="ln-content"><span class="line-icon">＋</span>${escapeHtml(prefix + content)}</td>`;
   }
-  return `<td class="ln-content hl"><span class="line-icon">＋</span><span class="diff-sign">${escapeHtml(prefix)}</span>${html}</td>`;
+  return `<td class="ln-content hl">${highlightedContent(prefix, html)}</td>`;
 }
+
+const highlightedContent = (prefix, html) =>
+  `<span class="line-icon">＋</span><span class="diff-sign">${escapeHtml(prefix)}</span>${html}`;
+
+// A real commit, not the synthetic "compare:…" hash of a compare view.
+const isCommitHash = (hash) => /^[0-9a-f]{4,40}$/i.test(hash);
+
+// Both versions of a file, highlighted as a whole (public/highlight.js
+// highlightSource), per commit and file: a promise, and its value once it has
+// arrived (undefined until then, null when unavailable) so a re-render
+// (approve, refresh) uses it at once.
+const sourceCache = new Map(); // key → { promise, value }
+const SOURCE_CACHE_MAX = 64;
+
+function fileSources(hash, file, oldFile) {
+  const key = [hash, file, oldFile].join('\0');
+  let entry = sourceCache.get(key);
+  if (entry) {
+    sourceCache.delete(key); sourceCache.set(key, entry); // most recently used
+    return entry;
+  }
+  entry = { value: undefined };
+  const query = new URLSearchParams({ hash, file, ...(oldFile !== file && { oldFile }) });
+  entry.promise = fetch(`api/filesource?${query}`)
+    .then((resp) => (resp.ok ? resp.json() : null))
+    .then((data) => {
+      const src = data && { old: highlightSource(data.old, file), new: highlightSource(data.new, file) };
+      return (entry.value = src && (src.old || src.new) ? src : null);
+    })
+    .catch(() => (entry.value = null));
+  sourceCache.set(key, entry);
+  if (sourceCache.size > SOURCE_CACHE_MAX) sourceCache.delete(sourceCache.keys().next().value);
+  return entry;
+}
+
+// Highlighted HTML for diff lines: from the whole file when it has arrived,
+// else from the lines alone (public/highlight.js).
+const highlightLines = (lines, filePath, sources) =>
+  (sources?.value && highlightFromSources(lines, sources.value)) || highlightDiffLines(lines, filePath);
+
+const signFor = (type) => (type === 'added' ? '+' : type === 'removed' ? '-' : ' ');
 
 export function renderFile(fileData, patchHash) {
   const filePath = fileData.newPath || fileData.oldPath || '(unknown)';
@@ -602,7 +645,7 @@ export function renderFile(fileData, patchHash) {
   body.className = 'diff-body';
   // The server tags files it can render (Markdown, Bikeshed when installed).
   // Compare views pass a synthetic "compare:…" hash and get no toggle.
-  const richToggle = fileData.richFormat && /^[0-9a-f]{4,40}$/i.test(patchHash)
+  const richToggle = fileData.richFormat && isCommitHash(patchHash)
     ? addRichViewToggle(header, body, { hash: patchHash, file: filePath, oldFile: fileData.oldPath })
     : null;
 
@@ -623,6 +666,13 @@ export function renderFile(fileData, patchHash) {
   // The language class lets style.css apply that format's token rules.
   const langClass = languageClass(filePath);
   table.className = langClass ? `diff-table ${langClass}` : 'diff-table';
+
+  // Hunks are coloured on their own until both versions of the file arrive,
+  // then recoloured from them (see fileSources).  That is needed only when a
+  // hunk starts below line 1: one at the top already sees all lines above it.
+  const sources = isCommitHash(patchHash) && langClass && fileData.hunks.some((h) => h.oldStart > 1 || h.newStart > 1)
+    ? fileSources(patchHash, filePath, fileData.oldPath || filePath) : null;
+  const hunkCells = []; // the code cells of each hunk, for the recolouring
 
   for (let hi = 0; hi < fileData.hunks.length; hi++) {
     const hunk = fileData.hunks[hi];
@@ -645,10 +695,12 @@ export function renderFile(fileData, patchHash) {
 
     // Insert expand row before the @@ header
     if (gapStart <= gapEnd) {
-      renderExpandRow(table, patchHash, filePath, gapStart, gapEnd, hunkTr);
+      renderExpandRow(table, patchHash, filePath, gapStart, gapEnd, hunkTr, sources);
     }
 
-    const hl = highlightDiffLines(hunk.lines, filePath);
+    const hl = highlightLines(hunk.lines, filePath, sources);
+    const cells = [];
+    hunkCells.push(cells);
     hunk.lines.forEach((line, li) => {
       const tr = document.createElement('tr');
       const typeClass =
@@ -656,9 +708,7 @@ export function renderFile(fileData, patchHash) {
         line.type === 'removed' ? 'line-removed' : 'line-context';
       tr.className = typeClass;
 
-      const prefix =
-        line.type === 'added' ? '+' :
-        line.type === 'removed' ? '-' : ' ';
+      const prefix = signFor(line.type);
 
       const oldNum = line.oldLineNum != null ? line.oldLineNum : '';
       const newNum = line.newLineNum != null ? line.newLineNum : '';
@@ -670,16 +720,33 @@ export function renderFile(fileData, patchHash) {
 
       table.appendChild(tr);
       wireLineComment(tr, patchHash, filePath, line);
+      cells.push(tr.querySelector('.ln-content'));
     });
 
     // After the last hunk: expand row for remaining lines to end of file
     if (hi === fileData.hunks.length - 1 && hunk.newCount > 0) {
-      renderExpandRow(table, patchHash, filePath, hunk.newStart + hunk.newCount, null, null);
+      renderExpandRow(table, patchHash, filePath, hunk.newStart + hunk.newCount, null, null, sources);
     }
   }
 
   body.appendChild(table);
   block.appendChild(body);
+
+  if (sources && sources.value === undefined) {
+    sources.promise.then((src) => {
+      // A re-render may have replaced this table meanwhile.
+      if (!src || !table.isConnected) return;
+      fileData.hunks.forEach((hunk, hi) => {
+        const hl = highlightFromSources(hunk.lines, src);
+        if (!hl) return; // this hunk keeps its own colours
+        hunk.lines.forEach((line, li) => {
+          const cell = hunkCells[hi][li];
+          cell.classList.add('hl');
+          cell.innerHTML = highlightedContent(signFor(line.type), hl[li]);
+        });
+      });
+    });
+  }
 
   makeCollapsible(header, body, `${patchHash}:${filePath}`);
   if (richToggle) richToggle.restore();
