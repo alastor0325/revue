@@ -15,6 +15,7 @@ import {
 // Revisions: detect changes on load
 import { diffFingerprint, migrateApprovals, detectRevisionChanges, getRevisionList } from './revisions.js';
 import { loadHighlighter } from './highlight.js';
+import { searchWorktrees, markHtml } from './worktreesearch.js';
 import { setLayoutWorktree, savedPatchIndex, savedRevisionView, savedScroll, saveScroll } from './layout.js';
 
 // Restore this tab's revision / compare choices if those revisions still exist.
@@ -132,125 +133,264 @@ async function submitReview() {
 }
 
 // ── Worktree switcher ──────────────────────────────────────────────────────
+// One row: the worktrees matching the search box on the left, best match
+// first (all of them for an empty query, the current one first, then the
+// server's order), and the box on the right.  Pills that don't fit are listed
+// under "+N".  In the box, ↑/↓ move the highlight, Enter switches to it, Esc
+// clears the query and then leaves the box; "/" anywhere else focuses it.
+const wtBar = {
+  worktrees: [],
+  current: null,
+  active: -1,      // index of the highlighted option (Enter switches to it)
+  width: 0,        // the row's width at the last render
+  switching: false,
+};
+let wtStatusTimer = null;
+
+// The server-side switch; true when it worked.
+async function postSwitch(name) {
+  const r = await fetch('api/switch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ worktreeName: name }),
+  });
+  return r.ok;
+}
+
+// { current, worktrees } from the server, or null.
+async function fetchWorktrees() {
+  const res = await fetch('api/worktrees');
+  return res.ok ? res.json() : null;
+}
+
+function worktreeOptionHtml({ wt, field, marks }, i) {
+  const name = wt.worktreeName;
+  const cls = `worktree-pill${name === wtBar.current ? ' active' : ''}`;
+  // In the row the branch shows only when the query matched it; the "+N"
+  // list has room for it always (style.css); it is always the tooltip.
+  const label = field === 'branch'
+    ? `${escapeHtml(name)}<span class="worktree-pill-branch"> · ${markHtml(wt.branch, marks, escapeHtml)}</span>`
+    : markHtml(name, marks, escapeHtml)
+      + (wt.branch ? `<span class="worktree-pill-branch worktree-pill-branch-extra"> · ${escapeHtml(wt.branch)}</span>` : '');
+  const title = wt.branch ? ` title="${escapeHtml(wt.branch)}"` : '';
+  return `<button type="button" class="${cls}" role="option" tabindex="-1" id="wt-opt-${i}" aria-selected="false" data-name="${escapeHtml(name)}"${title}>${label}</button>`;
+}
+
+// Draw the results for the query: pills in the row as far as they fit, the
+// rest in the "+N" list.  The highlight goes to the best match, or with
+// `keepHighlight` (the list or the width changed, not the query) stays on
+// the worktree it was on.
+function renderWorktreeResults({ keepHighlight = false } = {}) {
+  const pills = $('#worktree-pills');
+  const more = $('#worktree-more');
+  const list = $('#worktree-more-list');
+  const query = $('#worktree-search').value.trim();
+  const kept = keepHighlight ? worktreeOptions()[wtBar.active]?.dataset.name : null;
+  let results = searchWorktrees(wtBar.worktrees, query);
+  if (!query) {
+    const cur = results.findIndex((r) => r.wt.worktreeName === wtBar.current);
+    if (cur > 0) results = [results[cur], ...results.slice(0, cur), ...results.slice(cur + 1)];
+  }
+
+  list.innerHTML = '';
+  more.hidden = true;
+  if (results.length === 0) {
+    pills.innerHTML = `<span class="worktree-empty">No worktree matches “${escapeHtml(query)}”</span>`;
+  } else {
+    pills.innerHTML = results.map(worktreeOptionHtml).join('');
+    // Without layout (hidden bar, tests) every pill counts as fitting.
+    const fit = () => {
+      const width = pills.clientWidth;
+      const all = [...pills.children];
+      const n = all.findIndex((el) => el.offsetLeft + el.offsetWidth > width);
+      return width > 0 && n >= 0 ? Math.max(n, 1) : all.length;
+    };
+    const label = (shown) => { more.textContent = `+${results.length - shown} ▾`; };
+    let shown = fit();
+    if (shown < results.length) {
+      more.hidden = false; // takes room from the row, so measure again
+      label(shown);
+      shown = fit();
+      label(shown);
+      more.setAttribute('aria-label', `${results.length - shown} more worktrees`);
+      for (const el of [...pills.children].slice(shown)) list.appendChild(el);
+    }
+  }
+  wtBar.width = pills.clientWidth;
+
+  const names = results.map((r) => r.wt.worktreeName);
+  if (kept && names.includes(kept)) wtBar.active = names.indexOf(kept);
+  // For an empty query the current worktree is first: Enter goes to the next.
+  else if (!query) wtBar.active = names.findIndex((n) => n !== wtBar.current);
+  else wtBar.active = results.length ? 0 : -1;
+  setWorktreeListOpen(false);
+  updateWorktreeHighlight();
+
+  // Announce the count once typing pauses, not on every keystroke.
+  clearTimeout(wtStatusTimer);
+  if (query && !keepHighlight) {
+    wtStatusTimer = setTimeout(() => {
+      const n = results.length;
+      $('#worktree-search-status').textContent = `${n} worktree${n === 1 ? '' : 's'} match`;
+    }, 400);
+  }
+}
+
+function worktreeOptions() {
+  return [...$('#worktree-pills').querySelectorAll('.worktree-pill'), ...$('#worktree-more-list').children];
+}
+
+function setWorktreeListOpen(open) {
+  const more = $('#worktree-more');
+  const list = $('#worktree-more-list');
+  list.hidden = !open || more.hidden;
+  more.setAttribute('aria-expanded', String(!list.hidden));
+}
+
+function updateWorktreeHighlight() {
+  const input = $('#worktree-search');
+  const options = worktreeOptions();
+  options.forEach((el, i) => {
+    el.classList.toggle('highlighted', i === wtBar.active);
+    el.setAttribute('aria-selected', String(i === wtBar.active));
+  });
+  const el = options[wtBar.active];
+  if (el) input.setAttribute('aria-activedescendant', el.id);
+  else input.removeAttribute('aria-activedescendant');
+  if (el && el.parentElement.id === 'worktree-more-list') {
+    setWorktreeListOpen(true);
+    el.scrollIntoView?.({ block: 'nearest' });
+  }
+}
+
+// Switch the server to worktree `name` and reload the page's data.
+async function switchWorktree(name) {
+  if (wtBar.switching || name === wtBar.current) return;
+  wtBar.switching = true;
+  const busy = worktreeOptions().filter((el) => el.dataset.name === name);
+  busy.forEach((el) => { el.classList.add('switching'); el.setAttribute('aria-busy', 'true'); });
+  try {
+    if (!(await postSwitch(name))) throw new Error('Switch failed');
+    wtBar.current = name;
+    history.replaceState(null, '', '#' + name);
+    // Done searching: clear the box and leave it, so the arrow keys go back
+    // to patch and file navigation.
+    const input = $('#worktree-search');
+    input.value = '';
+    input.blur();
+    renderWorktreeResults();
+    await loadAndRender();
+  } catch {
+    busy.forEach((el) => { el.classList.remove('switching'); el.removeAttribute('aria-busy'); });
+  } finally {
+    wtBar.switching = false;
+  }
+}
+
+function onWorktreeSearchKey(e) {
+  const options = worktreeOptions();
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (options.length === 0) return;
+    const dir = e.key === 'ArrowDown' ? 1 : -1;
+    wtBar.active = wtBar.active < 0 ? 0 : Math.max(0, Math.min(options.length - 1, wtBar.active + dir));
+    updateWorktreeHighlight();
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    const el = options[wtBar.active];
+    if (el) switchWorktree(el.dataset.name);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    if (e.target.value) { e.target.value = ''; renderWorktreeResults(); }
+    else e.target.blur();
+  }
+}
+
+// "/" focuses the search box (it replaces Firefox's Quick Find on this page).
+function onSlashKey(e) {
+  if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey || shortcutsPaused(e)) return;
+  if ($('#worktree-bar').style.display === 'none') return;
+  e.preventDefault();
+  $('#worktree-search').focus();
+}
+
+function onDocumentClick(e) {
+  if (e.target.closest('#worktree-more, #worktree-more-list')) return;
+  setWorktreeListOpen(false);
+}
+
+// A worktree made after the page loaded shows up when the box is focused.
+// The bar is redrawn only if the list changed, so the highlight stays put.
+async function refreshWorktreeList() {
+  try {
+    const data = await fetchWorktrees();
+    const worktrees = data?.worktrees;
+    if (!Array.isArray(worktrees) || !worktrees.length) return;
+    const key = (list) => JSON.stringify(list.map((wt) => [wt.worktreeName, wt.branch]));
+    if (key(worktrees) === key(wtBar.worktrees)) return;
+    wtBar.worktrees = worktrees;
+    renderWorktreeResults({ keepHighlight: true });
+  } catch { /* keep the list we have */ }
+}
+
+// Redraw when the row's width changes (how many pills fit), not on every resize.
+let wtResizeFrame = 0;
+function onWindowResize() {
+  cancelAnimationFrame(wtResizeFrame);
+  wtResizeFrame = requestAnimationFrame(() => {
+    const pills = $('#worktree-pills');
+    if (pills && pills.clientWidth !== wtBar.width) renderWorktreeResults({ keepHighlight: true });
+  });
+}
+
+// A hash change after load (e.g. the user edits the address bar) switches.
+function onWorktreeHashChange() {
+  const name = window.location.hash.slice(1);
+  if (name && wtBar.worktrees.some((wt) => wt.worktreeName === name)) return switchWorktree(name);
+}
+
 async function initWorktreeBar() {
   try {
-    const res = await fetch('api/worktrees');
-    if (!res.ok) return;
-    let { current, worktrees } = await res.json();
+    const data = await fetchWorktrees();
+    if (!data) return;
+    let { current, worktrees } = data;
     if (worktrees.length <= 1) return; // nothing to switch to
 
     // ── Hash navigation: switch to worktree named in URL hash on load ──
+    // (init() renders right after, so this needs only the server's switch.)
     const hashName = window.location.hash.slice(1);
-    if (hashName && hashName !== current) {
-      const target = worktrees.find((wt) => wt.worktreeName === hashName);
-      if (target) {
-        const r = await fetch('api/switch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ worktreeName: hashName }),
-        });
-        if (r.ok) current = hashName;
-      }
+    if (hashName && hashName !== current && worktrees.some((wt) => wt.worktreeName === hashName)) {
+      if (await postSwitch(hashName)) current = hashName;
     }
 
     // Keep URL hash in sync with active worktree
     history.replaceState(null, '', '#' + current);
 
-    const bar = $('#worktree-bar');
-    const pills = $('#worktree-pills');
-    const btnLeft = $('#worktree-scroll-left');
-    const btnRight = $('#worktree-scroll-right');
+    Object.assign(wtBar, { worktrees, current });
+    $('#worktree-bar').style.display = '';
+    renderWorktreeResults();
 
-    pills.innerHTML = worktrees.map((wt) =>
-      `<button class="worktree-pill${wt.worktreeName === current ? ' active' : ''}" data-name="${escapeHtml(wt.worktreeName)}">${escapeHtml(wt.worktreeName)}</button>`
-    ).join('');
-
-    // Drag to scroll the bar left/right, same as the patch-tabs bar.
-    addDragScroll(pills);
-
-    // Scroll arrow logic
-    function updateScrollBtns() {
-      const atLeft = pills.scrollLeft <= 0;
-      const atRight = pills.scrollLeft + pills.clientWidth >= pills.scrollWidth - 1;
-      btnLeft.disabled = atLeft;
-      btnRight.disabled = atRight;
-      btnLeft.style.display = pills.scrollWidth <= pills.clientWidth ? 'none' : '';
-      btnRight.style.display = pills.scrollWidth <= pills.clientWidth ? 'none' : '';
-    }
-    const SCROLL_STEP = 160;
-    btnLeft.addEventListener('click', () => { pills.scrollBy({ left: -SCROLL_STEP, behavior: 'smooth' }); });
-    btnRight.addEventListener('click', () => { pills.scrollBy({ left: SCROLL_STEP, behavior: 'smooth' }); });
-    pills.addEventListener('scroll', updateScrollBtns, { passive: true });
-    // Re-check after layout (fonts/widths may not be ready yet)
-    setTimeout(updateScrollBtns, 50);
-
-    pills.addEventListener('click', async (e) => {
+    const input = $('#worktree-search');
+    input.addEventListener('input', () => renderWorktreeResults());
+    input.addEventListener('keydown', onWorktreeSearchKey);
+    input.addEventListener('focus', refreshWorktreeList);
+    const onPick = (e) => {
       const btn = e.target.closest('.worktree-pill');
-      if (!btn || btn.classList.contains('active')) return;
-      const name = btn.dataset.name;
-      btn.textContent = 'Switching…';
-      btn.disabled = true;
-      try {
-        const r = await fetch('api/switch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ worktreeName: name }),
-        });
-        if (!r.ok) throw new Error('Switch failed');
-        history.replaceState(null, '', '#' + name);
-        // Update active pill
-        pills.querySelectorAll('.worktree-pill').forEach((p) => {
-          p.classList.toggle('active', p.dataset.name === name);
-          p.disabled = false;
-          p.textContent = p.dataset.name;
-        });
-        await loadAndRender();
-      } catch {
-        btn.textContent = name;
-        btn.disabled = false;
-      }
-    });
-
-    bar.style.display = '';
-
-    // Handle hash changes after page load (e.g. user edits hash in address bar).
-    // Remove any previous listener before adding a new one so re-initialisation
-    // (e.g. in tests) never accumulates duplicate handlers.
-    if (initWorktreeBar._hashHandler) {
-      window.removeEventListener('hashchange', initWorktreeBar._hashHandler);
-    }
-    initWorktreeBar._hashHandler = async () => {
-      const name = window.location.hash.slice(1);
-      if (!name) return;
-      const active = pills.querySelector('.worktree-pill.active');
-      if (active && active.dataset.name === name) return; // already on it
-      const target = worktrees.find((wt) => wt.worktreeName === name);
-      if (!target) return;
-      pills.querySelectorAll('.worktree-pill').forEach((p) => {
-        p.disabled = p.dataset.name !== name;
-        if (p.dataset.name === name) p.textContent = 'Switching…';
-      });
-      try {
-        const r = await fetch('api/switch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ worktreeName: name }),
-        });
-        if (!r.ok) throw new Error('Switch failed');
-        pills.querySelectorAll('.worktree-pill').forEach((p) => {
-          p.classList.toggle('active', p.dataset.name === name);
-          p.disabled = false;
-          p.textContent = p.dataset.name;
-        });
-        await loadAndRender();
-      } catch {
-        pills.querySelectorAll('.worktree-pill').forEach((p) => {
-          p.disabled = false;
-          p.textContent = p.dataset.name;
-        });
-      }
+      if (btn) switchWorktree(btn.dataset.name);
     };
-    window.addEventListener('hashchange', initWorktreeBar._hashHandler);
+    $('#worktree-pills').addEventListener('click', onPick);
+    $('#worktree-more-list').addEventListener('click', onPick);
+    $('#worktree-more').addEventListener('click', () => setWorktreeListOpen($('#worktree-more-list').hidden));
+
+    // Window and document handlers read the bar from the DOM, so one of each
+    // is enough however often the bar is set up (e.g. in tests).
+    for (const [target, type, fn] of [
+      [document, 'keydown', onSlashKey], [document, 'click', onDocumentClick],
+      [window, 'resize', onWindowResize], [window, 'hashchange', onWorktreeHashChange],
+    ]) {
+      target.removeEventListener(type, fn);
+      target.addEventListener(type, fn);
+    }
   } catch { /* non-fatal */ }
 }
 
@@ -579,6 +719,14 @@ async function fullRefresh() {
 }
 
 // ── Keyboard shortcuts ───────────────────────────────────────────────────────
+// Page-wide keys stand down while a text field has the focus (they keep their
+// native meaning there) or the result overlay is open.
+function shortcutsPaused(e) {
+  const t = e.target;
+  if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.isContentEditable)) return true;
+  return !!$('#result-overlay')?.classList.contains('visible');
+}
+
 // Left/Right arrows move between patch tabs; Up/Down arrows move between files
 // in the current patch.  Ignored while a text field is focused or the result
 // overlay is open, so the keys keep their native behavior there.
@@ -590,9 +738,7 @@ function handleArrowKeys(e) {
   const vertical   = e.key === 'ArrowUp'   || e.key === 'ArrowDown';
   if (!horizontal && !vertical) return;
 
-  const t = e.target;
-  if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.isContentEditable)) return;
-  if ($('#result-overlay').classList.contains('visible')) return;
+  if (shortcutsPaused(e)) return;
 
   if (horizontal) {
     const n = state.patches.length;
@@ -757,6 +903,7 @@ if (typeof module !== 'undefined') {
     loadAndRender,
     init,
     initWorktreeBar,
+    onWorktreeHashChange,
     getPollTimer: () => _pollTimer,
   };
 }

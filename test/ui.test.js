@@ -1938,50 +1938,24 @@ describe('worktree switcher bar', () => {
     expect(await activePill.getAttribute('data-name')).toBe('feature');
   });
 
-  test('pills bar is drag-scrollable (grab cursor + grabbing while dragging)', async () => {
-    expect(await wtBarPage.$eval('#worktree-pills', (el) => getComputedStyle(el).cursor)).toBe('grab');
-    // Dispatch mousedown on the container itself (not a pill) so addDragScroll
-    // engages without triggering a worktree switch.
-    const grabbing = await wtBarPage.$eval('#worktree-pills', (el) => {
-      el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 5 }));
-      const cursor = el.style.cursor;
-      document.dispatchEvent(new MouseEvent('mouseup'));
-      return cursor;
-    });
-    expect(grabbing).toBe('grabbing');
-    expect(await wtBarPage.$eval('#worktree-pills', (el) => el.style.cursor)).toBe('');
-  });
-
-  test('drag-release over an inactive pill does NOT switch worktree', async () => {
-    const inactive = await wtBarPage.$('.worktree-pill:not(.active)');
-    const box = await inactive.boundingBox();
-    const cx = box.x + box.width / 2;
-    const cy = box.y + box.height / 2;
-
-    let switchFired = false;
-    const onReq = (req) => { if (req.url().includes('/api/switch')) switchFired = true; };
-    wtBarPage.on('request', onReq);
-
-    // Press on the pill and drag past the threshold (staying over it), then
-    // release — without the fix this release would be read as a click.
-    await wtBarPage.mouse.move(cx, cy);
-    await wtBarPage.mouse.down();
-    await wtBarPage.mouse.move(cx + 8, cy, { steps: 4 });
-    await wtBarPage.mouse.up();
-    await wtBarPage.waitForTimeout(300);
-
-    wtBarPage.off('request', onReq);
-    expect(switchFired).toBe(false);
-    expect(await wtBarPage.$eval('.worktree-pill.active', (el) => el.dataset.name)).toBe('feature');
+  test('typing in the search box filters the pills, and Esc brings them back', async () => {
+    await wtBarPage.press('body', '/'); // "/" focuses the box
+    expect(await wtBarPage.evaluate(() => document.activeElement.id)).toBe('worktree-search');
+    await wtBarPage.keyboard.type('mai');
+    expect(await wtBarPage.$$eval('#worktree-pills .worktree-pill', (els) => els.map((e) => e.dataset.name))).toEqual([mainRepoName]);
+    expect(await wtBarPage.$eval('#worktree-pills .worktree-pill', (el) => el.innerHTML)).toContain('<b>mai</b>n-repo');
+    await wtBarPage.keyboard.press('Escape');
+    expect(await wtBarPage.$$eval('#worktree-pills .worktree-pill', (els) => els.length)).toBe(2);
+    await wtBarPage.keyboard.press('Escape');
+    expect(await wtBarPage.evaluate(() => document.activeElement.id)).not.toBe('worktree-search');
   });
 
   test('clicking an inactive pill fires POST /api/switch and makes it active', async () => {
     const switchReqPromise = wtBarPage.waitForRequest(
       (req) => req.url().includes('/api/switch') && req.method() === 'POST'
     );
-    // Click the first pill (main repo — not active)
-    const pills = await wtBarPage.$$('.worktree-pill');
-    await pills[0].click();
+    // The current worktree is listed first; click the other one (main repo).
+    await wtBarPage.click('#worktree-pills .worktree-pill:not(.active)');
     const req = await switchReqPromise;
     expect(JSON.parse(req.postData()).worktreeName).toBe(mainRepoName);
     await wtBarPage.waitForFunction(
@@ -2018,6 +1992,70 @@ describe('worktree switcher bar', () => {
     // Let a full poll cycle elapse; the banner must stay hidden.
     await wtBarPage.waitForTimeout(5500);
     expect(await wtBarPage.$eval('#update-banner', (el) => el.style.display)).toBe('none');
+  });
+});
+
+// With more worktrees than fit, the row shows the first matches and "+N"
+// lists the rest; the search box finds any of them, and Enter switches.
+describe('worktree bar with many worktrees', () => {
+  let mwServer, mwPage, mwTmpDir;
+  const NAMES = Array.from({ length: 14 }, (_, i) => `${2050000 + i * 1111}`);
+
+  beforeAll(async () => {
+    mwTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-ui-manywt-'));
+    const main = path.join(mwTmpDir, 'firefox');
+    fs.mkdirSync(main);
+    git(main, 'init');
+    git(main, 'config user.email "test@test.com"');
+    git(main, 'config user.name "Test"');
+    fs.writeFileSync(path.join(main, 'base.txt'), 'base\n');
+    git(main, 'add .');
+    git(main, 'commit -m "initial"');
+    for (const n of NAMES) git(main, `worktree add -b bug-${n} "${path.join(mwTmpDir, `firefox-${n}`)}"`);
+
+    const app = createApp({ worktreeName: NAMES[0], worktreePath: path.join(mwTmpDir, `firefox-${NAMES[0]}`), mainRepoPath: main });
+    const port = await findAvailablePort(19760);
+    await new Promise((resolve) => { mwServer = app.listen(port, '127.0.0.1', resolve); });
+
+    mwPage = await browser.newPage({ viewport: { width: 900, height: 600 } });
+    await mwPage.goto(`http://127.0.0.1:${port}`);
+    await mwPage.waitForSelector('#worktree-pills .worktree-pill');
+  }, 30000);
+
+  afterAll(async () => {
+    await mwPage?.close();
+    await new Promise((resolve) => mwServer?.close(resolve));
+    fs.rmSync(mwTmpDir, { recursive: true, force: true });
+  });
+
+  const rowNames = () => mwPage.$$eval('#worktree-pills .worktree-pill', (els) => els.map((e) => e.dataset.name));
+
+  test('the row shows what fits, without scrolling, and "+N" lists the rest', async () => {
+    const shown = await rowNames();
+    expect(shown.length).toBeGreaterThan(1);
+    expect(shown.length).toBeLessThan(NAMES.length + 1);
+    expect(shown[0]).toBe(NAMES[0]); // the current one first
+    expect(await mwPage.$eval('#worktree-pills', (el) => el.scrollWidth > el.clientWidth + 1)).toBe(false);
+    const hidden = NAMES.length + 1 - shown.length;
+    expect(await mwPage.textContent('#worktree-more')).toBe(`+${hidden} ▾`);
+    await mwPage.click('#worktree-more');
+    expect(await mwPage.isVisible('#worktree-more-list')).toBe(true);
+    expect(await mwPage.$$eval('#worktree-more-list .worktree-pill', (els) => els.length)).toBe(hidden);
+    await mwPage.click('#header'); // a click elsewhere closes it
+    expect(await mwPage.isVisible('#worktree-more-list')).toBe(false);
+  });
+
+  test('a pasted "Bug <number>" finds the last worktree, and Enter switches to it', async () => {
+    const last = NAMES[NAMES.length - 1];
+    await mwPage.fill('#worktree-search', `Bug ${last}`);
+    expect(await rowNames()).toEqual([last]);
+    expect(await mwPage.isHidden('#worktree-more')).toBe(true);
+    const req = mwPage.waitForRequest((r) => r.url().includes('/api/switch'));
+    await mwPage.press('#worktree-search', 'Enter');
+    expect(JSON.parse((await req).postData()).worktreeName).toBe(last);
+    await mwPage.waitForFunction((n) => document.querySelector('.worktree-pill.active')?.dataset.name === n, last);
+    expect(await mwPage.inputValue('#worktree-search')).toBe('');
+    expect(mwPage.url()).toContain(`#${last}`);
   });
 });
 

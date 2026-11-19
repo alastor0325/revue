@@ -116,10 +116,12 @@ button { font-family: inherit; }
   background: var(--bg);
 }
 
-/* ─── Worktree pills row ────────────────────────────────────────────────── */
+/* ─── Worktree bar: results (pills) on the left, search on the right ───── */
 #worktree-bar {
   display: flex;
-  align-items: stretch;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
   background: var(--bg);
   border-bottom: 1px solid var(--rule);
 }
@@ -129,30 +131,11 @@ button { font-family: inherit; }
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 8px 12px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  cursor: grab;
-  user-select: none;
+  overflow: hidden; /* pills that don't fit go behind "+N" */
 }
-#worktree-pills::-webkit-scrollbar { display: none; }
-
-.worktree-scroll-btn {
-  flex-shrink: 0;
-  background: transparent;
-  border: none;
-  color: var(--ink-faint);
-  font-size: 16px;
-  padding: 0 12px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  transition: color 0.12s var(--ease);
-}
-.worktree-scroll-btn:hover { color: var(--ink); }
-.worktree-scroll-btn:disabled { opacity: 0.2; cursor: default; }
 
 .worktree-pill {
+  flex-shrink: 0;
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 500;
@@ -165,7 +148,10 @@ button { font-family: inherit; }
   white-space: nowrap;
   transition: background 0.12s var(--ease), color 0.12s var(--ease), border-color 0.12s var(--ease);
 }
-.worktree-pill:hover:not(.active):not(:disabled) {
+.worktree-pill b { color: var(--ink); font-weight: 700; } /* the matched characters */
+.worktree-pill-branch { color: var(--ink-faint); }
+#worktree-pills .worktree-pill-branch-extra { display: none; }
+.worktree-pill:hover:not(.active) {
   background: var(--bg-elev-2);
   color: var(--ink);
   border-color: var(--rule-strong);
@@ -177,7 +163,93 @@ button { font-family: inherit; }
   font-weight: 600;
   cursor: default;
 }
-.worktree-pill:disabled { opacity: 0.5; cursor: default; }
+/* The result Enter switches to. */
+.worktree-pill.highlighted {
+  border-color: var(--blue);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--blue);
+}
+.worktree-pill.highlighted::after { content: " ↵"; color: var(--ink-faint); }
+.worktree-pill.switching { opacity: 0.5; cursor: progress; }
+.worktree-pill.switching::after { content: " …"; }
+.worktree-empty { font-size: 12px; color: var(--ink-faint); white-space: nowrap; }
+
+#worktree-more {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 5px 10px;
+  border: 1px dashed var(--rule-strong);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--ink-quiet);
+  cursor: pointer;
+  white-space: nowrap;
+}
+#worktree-more:hover, #worktree-more[aria-expanded="true"] { color: var(--ink); border-color: var(--rule-focus); }
+
+#worktree-search-wrap {
+  position: relative;
+  flex: 0 1 200px;
+  min-width: 140px;
+}
+#worktree-search {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 5px 28px 5px 10px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  color: var(--ink);
+}
+#worktree-search::placeholder { color: var(--ink-faint); }
+#worktree-search:focus { outline: none; border-color: var(--blue-line); }
+.worktree-search-hint {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+  border: 1px solid var(--rule-strong);
+  border-radius: 3px;
+  padding: 0 4px;
+  pointer-events: none;
+}
+#worktree-search:focus + .worktree-search-hint { display: none; }
+
+/* The matches that don't fit in the row, under the search box. */
+#worktree-more-list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 200;
+  min-width: 100%;
+  max-height: 50vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-elev);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+#worktree-more-list[hidden] { display: none; }
+#worktree-more-list .worktree-pill { text-align: left; }
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
 
 /* ─── Update banner ─────────────────────────────────────────────────────── */
 #update-banner {

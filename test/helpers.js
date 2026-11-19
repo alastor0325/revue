@@ -26,4 +26,13 @@ function bikeshedSpec({ title = 'T', ed = 'https://example.org/t/', body = 'Hell
     + `Editor: A B\nAbstract: x\n</pre>\n\nIntro {#intro}\n=====\n\n${body}\n`;
 }
 
-module.exports = { git, stateFilePathFor, hasBikeshed, bikeshedSpec };
+// The worktree bar's markup, taken from public/index.html so jsdom tests use
+// the real one.
+const WORKTREE_BAR_HTML = (() => {
+  const html = require('fs').readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const start = html.indexOf('<div id="worktree-bar"');
+  const end = html.indexOf('<!-- ── Update notification banner', start);
+  return html.slice(start, end).replace(' style="display:none;"', '');
+})();
+
+module.exports = { git, stateFilePathFor, hasBikeshed, bikeshedSpec, WORKTREE_BAR_HTML };

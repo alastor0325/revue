@@ -16,10 +16,19 @@
   <div id="top-bar">
 
     <!-- ── Worktree switcher (shown when multiple worktrees exist) ── -->
+    <!-- Results on the left (pills, best match first), search on the right;
+         matches that don't fit are behind "+N". -->
     <div id="worktree-bar" style="display:none;">
-      <button id="worktree-scroll-left" class="worktree-scroll-btn" aria-label="Scroll left">&#8249;</button>
-      <div id="worktree-pills"></div>
-      <button id="worktree-scroll-right" class="worktree-scroll-btn" aria-label="Scroll right">&#8250;</button>
+      <div id="worktree-pills" role="listbox" aria-label="Worktrees"></div>
+      <button id="worktree-more" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="worktree-more-list" hidden></button>
+      <div id="worktree-search-wrap">
+        <input id="worktree-search" type="text" role="combobox" autocomplete="off" spellcheck="false"
+          placeholder="Filter worktrees…" aria-label="Filter worktrees" aria-autocomplete="list"
+          aria-expanded="true" aria-controls="worktree-pills worktree-more-list">
+        <kbd class="worktree-search-hint" aria-hidden="true">/</kbd>
+        <div id="worktree-more-list" role="listbox" aria-label="More worktrees" hidden></div>
+      </div>
+      <div id="worktree-search-status" class="visually-hidden" aria-live="polite"></div>
     </div>
 
     <!-- ── Update notification banner (shown when worktree HEAD changes) ── -->

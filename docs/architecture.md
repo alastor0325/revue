@@ -12,6 +12,7 @@ The browser-side application is split into five ES modules under `public/`. This
 | `public/renderer.js` | ~1225 | All DOM construction and event wiring |
 | `public/layout.js` | ~140 | View layout kept across reloads: preferences in localStorage (sidebar, Rendered files, collapsed files), where the tab is in sessionStorage (open patch, revision/compare view, scroll); per project page and worktree, read once into memory; no imports |
 | `public/richdiff.js` | ~200 | Rendered (rich) diff of Markdown / Bikeshed files: block-level LCS diff (`diffSequences`), change marking (`markChanges`), the sandboxed-frame view (`mountRichView`). Server side: `src/render.js` + `GET /api/rendered` |
+| `public/worktreesearch.js` | ~90 | Fuzzy search of the worktree bar (`searchWorktrees`, `normalizeQuery`, `markHtml`); the bar itself is `initWorktreeBar` in `public/app.js` |
 | `public/highlight.js` | ~120 | Syntax highlighting of diff lines with the vendored `public/vendor/highlight.min.js`; pure helpers (`languageFor`, `splitHighlightedLines`, `highlightDiffLines`, and `highlightSource` / `highlightFromSources`, which colour diff lines from whole files fetched with `GET /api/filesource`) |
 | `public/app.js` | ~370 | Orchestrators (`loadAndRender`, `submitReview`, `init`, `initWorktreeBar`, `startUpdatePolling`) + entry point |
 
