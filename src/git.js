@@ -846,4 +846,35 @@ function getFileVersions(worktreePath, hash, filePath, oldPath) {
     .then(([o, n]) => ({ old: o, new: n }));
 }
 
-module.exports = { getHeadHash, getCommits, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getMergeBase, parseDiff, parseCommitBody, parseWorktreeList, discoverWorktrees, pathKey, resolveRepoTarget, getFileLines, getFileVersions, getPatchLines, lcsCompare };
+// How much of main's history marks where a worktree's own patches end.
+const MAIN_HISTORY = 2000;
+const MAX_TITLES = 30;
+
+/**
+ * The patch titles of each linked worktree, for the worktree bar's search:
+ * a promise of { [worktreeName]: [title, …] }, newest first.  A worktree's
+ * patches are its commits from HEAD down to the first one in main's recent
+ * history (origin/main and the main repo's HEAD), at most 30.  That needs no
+ * merge-base per worktree, which in a big repo takes seconds.  A worktree
+ * whose history doesn't meet main's within 30 commits (e.g. based on an old,
+ * rewritten history) gets the run of commits by HEAD's author instead.
+ */
+async function getWorktreeTitles(mainRepoPath, worktrees) {
+  const git = (cwd, args) => execFileAsync('git', ['-C', cwd, ...args], { encoding: 'utf8' })
+    .then((r) => r.stdout, () => '');
+  // Each ref on its own: a missing origin/main must not lose HEAD.
+  const lists = await Promise.all(['HEAD', 'origin/main'].map((ref) =>
+    git(mainRepoPath, ['rev-list', `-${MAIN_HISTORY}`, ref, '--'])));
+  const main = new Set(lists.join('\n').split('\n').filter(Boolean));
+  const entries = await Promise.all(worktrees.map(async (wt) => {
+    const commits = (await git(wt.path, ['log', `-${MAX_TITLES}`, '--format=%H%x00%ae%x00%s', 'HEAD']))
+      .split('\n').filter(Boolean).map((line) => line.split('\0'));
+    const onMain = commits.findIndex(([hash]) => main.has(hash));
+    const otherAuthor = commits.findIndex(([, author]) => author !== commits[0][1]);
+    const end = onMain >= 0 ? onMain : otherAuthor >= 0 ? otherAuthor : commits.length;
+    return [wt.worktreeName, commits.slice(0, end).map(([, , subject]) => subject)];
+  }));
+  return Object.fromEntries(entries);
+}
+
+module.exports = { getHeadHash, getCommits, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getMergeBase, parseDiff, parseCommitBody, parseWorktreeList, discoverWorktrees, pathKey, resolveRepoTarget, getFileLines, getFileVersions, getWorktreeTitles, getPatchLines, lcsCompare };

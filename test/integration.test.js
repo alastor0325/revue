@@ -1515,6 +1515,77 @@ describe('revision comparison file scoping', () => {
   });
 });
 
+// ── getWorktreeTitles + GET /api/worktrees/titles ──────────────────────────
+// The worktree bar's search matches a worktree by its patch titles: its
+// commits down to main's history, or, when its history never meets main's,
+// the run of commits by HEAD's author.
+
+describe('worktree patch titles for the search', () => {
+  let tmp, main, server, port;
+
+  beforeAll(async () => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'revue-titles-'));
+    main = path.join(tmp, 'repo');
+    fs.mkdirSync(main);
+    git(main, 'init');
+    git(main, 'config user.email "me@test.com"');
+    git(main, 'config user.name "Me"');
+    const commit = (dir, file, msg, author) => {
+      fs.writeFileSync(path.join(dir, file), msg + '\n');
+      git(dir, 'add .');
+      git(dir, `commit ${author ? `--author="${author}"` : ''} -m "${msg}"`);
+    };
+    commit(main, 'README', 'initial');
+
+    // "series": a colleague's patch with two of mine on top: all three count.
+    const series = path.join(tmp, 'repo-series');
+    git(main, `worktree add -b bug-7 "${series}"`);
+    commit(series, 'base.txt', 'Bug 5 - Their patch below mine. r=x', 'Other <other@test.com>');
+    commit(series, 'a.txt', 'Bug 7 - Part 1: Add the Media Session state. r?#media-playback-reviewers!');
+    commit(series, 'b.txt', 'Bug 7 - Part 2: Test it. r=#media-playback-reviewers!,#webidl!');
+    // "fresh": no commits of its own.
+    git(main, `worktree add -b fresh "${path.join(tmp, 'repo-fresh')}"`);
+    // "older": based on main before main moved on, all by the same author as
+    // main: only its own commit counts, not main's history below it.
+    const older = path.join(tmp, 'repo-older');
+    git(main, `worktree add -b older "${older}"`);
+    commit(main, 'later.txt', 'A later commit on main');
+    commit(older, 'o.txt', 'Bug 9 - My older patch.');
+    // "orphan": a history that never meets main's: the run by HEAD's author.
+    const orphan = path.join(tmp, 'repo-orphan');
+    git(main, `worktree add -b orphan-base "${orphan}"`);
+    git(orphan, 'checkout -q --orphan orphan');
+    commit(orphan, 'x.txt', 'Old history', 'Other <other@test.com>');
+    commit(orphan, 'y.txt', 'Bug 11 - My patch on the old history.');
+
+    const app = createApp({ worktreeName: 'series', worktreePath: series, mainRepoPath: main });
+    port = await findAvailablePort(18850);
+    await new Promise((resolve) => { server = app.listen(port, '127.0.0.1', resolve); });
+  });
+
+  afterAll((done) => {
+    server.close(() => {
+      fs.rmSync(tmp, { recursive: true, force: true });
+      done();
+    });
+  });
+
+  test('GET /api/worktrees/titles returns each worktree\'s own patch titles, newest first, as committed', async () => {
+    const { status, body } = await httpRequest(`http://127.0.0.1:${port}/api/worktrees/titles`);
+    expect(status).toBe(200);
+    expect(body.titles).toEqual({
+      series: [
+        'Bug 7 - Part 2: Test it. r=#media-playback-reviewers!,#webidl!',
+        'Bug 7 - Part 1: Add the Media Session state. r?#media-playback-reviewers!',
+        'Bug 5 - Their patch below mine. r=x',
+      ],
+      fresh: [],
+      older: ['Bug 9 - My older patch.'],
+      orphan: ['Bug 11 - My patch on the old history.'],
+    });
+  });
+});
+
 // ── discoverWorktrees + GET /api/worktrees + POST /api/switch ─────────────
 // Fixture: a real git repo with one `git worktree add` so discoverWorktrees
 // exercises the real `git worktree list --porcelain` path.

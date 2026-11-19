@@ -2012,6 +2012,11 @@ describe('worktree bar with many worktrees', () => {
     git(main, 'add .');
     git(main, 'commit -m "initial"');
     for (const n of NAMES) git(main, `worktree add -b bug-${n} "${path.join(mwTmpDir, `firefox-${n}`)}"`);
+    // One worktree's patch is about Media Session: the search finds it by its title.
+    const titled = path.join(mwTmpDir, `firefox-${NAMES[5]}`);
+    fs.writeFileSync(path.join(titled, 'ms.txt'), 'x\n');
+    git(titled, 'add .');
+    git(titled, `commit -m "Bug ${NAMES[5]} - Add the Media Session capture state. r?#media-playback-reviewers!"`);
 
     const app = createApp({ worktreeName: NAMES[0], worktreePath: path.join(mwTmpDir, `firefox-${NAMES[0]}`), mainRepoPath: main });
     const port = await findAvailablePort(19760);
@@ -2043,6 +2048,16 @@ describe('worktree bar with many worktrees', () => {
     expect(await mwPage.$$eval('#worktree-more-list .worktree-pill', (els) => els.length)).toBe(hidden);
     await mwPage.click('#header'); // a click elsewhere closes it
     expect(await mwPage.isVisible('#worktree-more-list')).toBe(false);
+  });
+
+  test('"media session" finds the worktree whose patch title mentions it, and shows the title', async () => {
+    const titles = mwPage.waitForResponse((r) => r.url().includes('/api/worktrees/titles'));
+    await mwPage.focus('#worktree-search');
+    await titles;
+    await mwPage.fill('#worktree-search', 'media session');
+    expect(await rowNames()).toEqual([NAMES[5]]);
+    expect(await mwPage.textContent('#worktree-pills .worktree-pill')).toBe(`${NAMES[5]} · …Add the Media Session capture state.`);
+    await mwPage.fill('#worktree-search', '');
   });
 
   test('a pasted "Bug <number>" finds the last worktree, and Enter switches to it', async () => {

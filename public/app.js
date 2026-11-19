@@ -15,7 +15,7 @@ import {
 // Revisions: detect changes on load
 import { diffFingerprint, migrateApprovals, detectRevisionChanges, getRevisionList } from './revisions.js';
 import { loadHighlighter } from './highlight.js';
-import { searchWorktrees, markHtml } from './worktreesearch.js';
+import { searchWorktrees, markHtml, snippet } from './worktreesearch.js';
 import { setLayoutWorktree, savedPatchIndex, savedRevisionView, savedScroll, saveScroll } from './layout.js';
 
 // Restore this tab's revision / compare choices if those revisions still exist.
@@ -140,6 +140,8 @@ async function submitReview() {
 // clears the query and then leaves the box; "/" anywhere else focuses it.
 const wtBar = {
   worktrees: [],
+  titles: {},      // worktree name → its patch titles (for the search), loaded on focus
+  titlesAt: 0,     // when they were last asked for (see refreshWorktreeList)
   current: null,
   active: -1,      // index of the highlighted option (Enter switches to it)
   width: 0,        // the row's width at the last render
@@ -157,23 +159,33 @@ async function postSwitch(name) {
   return r.ok;
 }
 
-// { current, worktrees } from the server, or null.
-async function fetchWorktrees() {
-  const res = await fetch('api/worktrees');
+// The JSON of `url`, or null when the request fails.
+async function fetchJson(url) {
+  const res = await fetch(url);
   return res.ok ? res.json() : null;
 }
+const fetchWorktrees = () => fetchJson('api/worktrees'); // { current, worktrees }
 
-function worktreeOptionHtml({ wt, field, marks }, i) {
+function worktreeOptionHtml({ wt, field, marks, title, fullTitle }, i) {
   const name = wt.worktreeName;
   const cls = `worktree-pill${name === wtBar.current ? ' active' : ''}`;
+  const detail = (text, m, extra = '') =>
+    `<span class="worktree-pill-branch${extra}"> · ${markHtml(text, m, escapeHtml)}</span>`;
   // In the row the branch shows only when the query matched it; the "+N"
-  // list has room for it always (style.css); it is always the tooltip.
-  const label = field === 'branch'
-    ? `${escapeHtml(name)}<span class="worktree-pill-branch"> · ${markHtml(wt.branch, marks, escapeHtml)}</span>`
-    : markHtml(name, marks, escapeHtml)
-      + (wt.branch ? `<span class="worktree-pill-branch worktree-pill-branch-extra"> · ${escapeHtml(wt.branch)}</span>` : '');
-  const title = wt.branch ? ` title="${escapeHtml(wt.branch)}"` : '';
-  return `<button type="button" class="${cls}" role="option" tabindex="-1" id="wt-opt-${i}" aria-selected="false" data-name="${escapeHtml(name)}"${title}>${label}</button>`;
+  // list has room for it always (style.css); it is always the tooltip.  A
+  // match in a patch title shows the part of the title around it.
+  let label;
+  if (field === 'branch') {
+    label = escapeHtml(name) + detail(wt.branch, marks);
+  } else if (field === 'title') {
+    const sn = snippet(title, marks);
+    label = escapeHtml(name) + detail(sn.text, sn.marks);
+  } else {
+    label = markHtml(name, marks, escapeHtml) + (wt.branch ? detail(wt.branch, [], ' worktree-pill-branch-extra') : '');
+  }
+  const tip = field === 'title' ? fullTitle : wt.branch;
+  const tipAttr = tip ? ` title="${escapeHtml(tip)}"` : '';
+  return `<button type="button" class="${cls}" role="option" tabindex="-1" id="wt-opt-${i}" aria-selected="false" data-name="${escapeHtml(name)}"${tipAttr}>${label}</button>`;
 }
 
 // Draw the results for the query: pills in the row as far as they fit, the
@@ -186,7 +198,7 @@ function renderWorktreeResults({ keepHighlight = false } = {}) {
   const list = $('#worktree-more-list');
   const query = $('#worktree-search').value.trim();
   const kept = keepHighlight ? worktreeOptions()[wtBar.active]?.dataset.name : null;
-  let results = searchWorktrees(wtBar.worktrees, query);
+  let results = searchWorktrees(wtBar.worktrees, query, wtBar.titles);
   if (!query) {
     const cur = results.findIndex((r) => r.wt.worktreeName === wtBar.current);
     if (cur > 0) results = [results[cur], ...results.slice(0, cur), ...results.slice(cur + 1)];
@@ -319,18 +331,27 @@ function onDocumentClick(e) {
   setWorktreeListOpen(false);
 }
 
-// A worktree made after the page loaded shows up when the box is focused.
-// The bar is redrawn only if the list changed, so the highlight stays put.
-async function refreshWorktreeList() {
-  try {
-    const data = await fetchWorktrees();
-    const worktrees = data?.worktrees;
-    if (!Array.isArray(worktrees) || !worktrees.length) return;
-    const key = (list) => JSON.stringify(list.map((wt) => [wt.worktreeName, wt.branch]));
-    if (key(worktrees) === key(wtBar.worktrees)) return;
-    wtBar.worktrees = worktrees;
-    renderWorktreeResults({ keepHighlight: true });
-  } catch { /* keep the list we have */ }
+// When the box is focused, a worktree made after the page loaded shows up,
+// and the patch titles the search matches are loaded (fresh, as patches
+// change, but at most every 10 s: each load runs git in every worktree).
+// The two load on their own, and the bar is redrawn only if one changed, so
+// the highlight stays put.
+const TITLES_EVERY_MS = 10000;
+function refreshWorktreeList() {
+  const update = (apply) => {
+    const key = () => JSON.stringify([wtBar.worktrees.map((wt) => [wt.worktreeName, wt.branch]), wtBar.titles]);
+    const before = key();
+    apply();
+    if (key() !== before) renderWorktreeResults({ keepHighlight: true });
+  };
+  fetchWorktrees().then((data) => {
+    if (Array.isArray(data?.worktrees) && data.worktrees.length) update(() => { wtBar.worktrees = data.worktrees; });
+  }).catch(() => {});
+  if (Date.now() - wtBar.titlesAt < TITLES_EVERY_MS) return;
+  wtBar.titlesAt = Date.now();
+  fetchJson('api/worktrees/titles').then((data) => {
+    if (data?.titles && typeof data.titles === 'object') update(() => { wtBar.titles = data.titles; });
+  }).catch(() => { wtBar.titlesAt = 0; });
 }
 
 // Redraw when the row's width changes (how many pills fit), not on every resize.
@@ -366,7 +387,7 @@ async function initWorktreeBar() {
     // Keep URL hash in sync with active worktree
     history.replaceState(null, '', '#' + current);
 
-    Object.assign(wtBar, { worktrees, current });
+    Object.assign(wtBar, { worktrees, current, titles: {}, titlesAt: 0 });
     $('#worktree-bar').style.display = '';
     renderWorktreeResults();
 

@@ -8,7 +8,7 @@ const net = require('net');
 const os = require('os');
 const fs = require('fs');
 const { execSync } = require('child_process');
-const { getHeadHash, getMergeBase, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getFileLines, getFileVersions, discoverWorktrees } = require('./git');
+const { getHeadHash, getMergeBase, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getFileLines, getFileVersions, getWorktreeTitles, discoverWorktrees } = require('./git');
 const { submitReview } = require('./claude');
 const { renderFileVersions, tagRenderableFiles } = require('./render');
 const { linkRules } = require('./links');
@@ -547,6 +547,17 @@ function createApp({ worktreeName: initialWorktreeName, worktreePath: initialWor
         ...others,
       ];
       res.json({ current: worktreeName, worktrees: all });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/worktrees/titles — { titles: { [worktreeName]: [title, …] } }:
+  // each linked worktree's patch titles, so the worktree bar's search can
+  // find a worktree by what its patches are about.
+  app.get('/api/worktrees/titles', async (req, res) => {
+    try {
+      res.json({ titles: await getWorktreeTitles(mainRepoPath, discoverWorktrees(mainRepoPath)) });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

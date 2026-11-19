@@ -17,6 +17,7 @@ jest.mock('../src/git', () => ({
   getDiffBetweenCommits: jest.fn(),
   getFileLines: jest.fn(),
   getFileVersions: jest.fn(),
+  getWorktreeTitles: jest.fn(),
   discoverWorktrees: jest.fn(),
 }));
 
@@ -24,7 +25,7 @@ jest.mock('../src/claude', () => ({
   submitReview: jest.fn(),
 }));
 
-const { getHeadHash, getMergeBase, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getFileLines, getFileVersions, discoverWorktrees } = require('../src/git');
+const { getHeadHash, getMergeBase, getDiffPerCommit, getDiffForCommit, getDiffBetweenCommits, getFileLines, getFileVersions, getWorktreeTitles, discoverWorktrees } = require('../src/git');
 const { submitReview }     = require('../src/claude');
 const { createApp, findAvailablePort, startServer } = require('../src/server');
 
@@ -574,6 +575,32 @@ describe('findAvailablePort', () => {
     } finally {
       await new Promise((resolve) => blocker.close(resolve));
     }
+  });
+});
+
+// ── GET /api/worktrees/titles ──────────────────────────────────────────────
+
+describe('GET /api/worktrees/titles', () => {
+  beforeEach(() => {
+    getHeadHash.mockReturnValue('abc123');
+    getWorktreeTitles.mockReset();
+  });
+
+  test('returns the patch titles of the linked worktrees of the main repo', async () => {
+    const linked = [{ worktreeName: 'bugABC', path: '/fake/worktree' }];
+    discoverWorktrees.mockReturnValue(linked);
+    getWorktreeTitles.mockResolvedValue({ bugABC: ['Bug 1 - Fix it.'] });
+    const res = await request(makeApp()).get('/api/worktrees/titles');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ titles: { bugABC: ['Bug 1 - Fix it.'] } });
+    expect(getWorktreeTitles).toHaveBeenCalledWith('/fake/firefox', linked);
+  });
+
+  test('returns 500 when the worktrees cannot be listed', async () => {
+    discoverWorktrees.mockImplementationOnce(() => { throw new Error('not a git repo'); });
+    const res = await request(makeApp()).get('/api/worktrees/titles');
+    expect(res.status).toBe(500);
+    expect(res.body.error).toBe('not a git repo');
   });
 });
 

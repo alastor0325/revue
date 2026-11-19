@@ -9,7 +9,7 @@
 global.fetch = jest.fn();
 global.EventSource = jest.fn(() => ({ addEventListener: jest.fn(), close: jest.fn() }));
 
-const { normalizeQuery, searchWorktrees, markHtml } = require('../public/worktreesearch');
+const { normalizeQuery, searchWorktrees, markHtml, snippet } = require('../public/worktreesearch');
 const { initWorktreeBar } = require('../public/app');
 const { WORKTREE_BAR_HTML } = require('./helpers');
 
@@ -79,6 +79,59 @@ describe('searchWorktrees', () => {
     expect(searchWorktrees(WORKTREES, 'vtti')[0].marks).toEqual([0, 1, 2, 4]); // the "-" is skipped
     expect(markHtml('vtt-interop', [0, 1, 2, 4], (s) => s)).toBe('<b>vtt</b>-<b>i</b>nterop');
     expect(markHtml('<a>', [1], (s) => s.replace('<', '&lt;').replace('>', '&gt;'))).toBe('&lt;<b>a</b>&gt;');
+  });
+});
+
+// A worktree is also found by its patch titles, below every name or branch
+// match: "media session" finds the worktree whose patches add Media Session.
+describe('searchWorktrees on patch titles', () => {
+  const TITLED = [{ worktreeName: 'mediasession' }, { worktreeName: '2094401', branch: 'bug-2094401' }, { worktreeName: 'x' }];
+  const TITLES = {
+    2094401: [
+      'Bug 2094401 - Part 6: Add tests for the Media Session capture state methods. r=#media-playback-reviewers!',
+      'Bug 2094401 - Part 4: Let a page pause its capture through Media Session. r?#media-playback-reviewers!,#webidl!',
+    ],
+    x: ['Update the attribute parser. r=me DONTBUILD'],
+  };
+  const search = (q) => searchWorktrees(TITLED, q, TITLES);
+
+  test('a title match ranks below every name match and says which title matched', () => {
+    const results = search('media session');
+    expect(names(results)).toEqual(['mediasession', '2094401']);
+    expect(results[1]).toMatchObject({
+      field: 'title',
+      title: 'Bug 2094401 - Part 6: Add tests for the Media Session capture state methods.',
+      fullTitle: TITLES[2094401][0],
+    });
+    // Even an exact title match ranks below a subsequence match on a name.
+    const wts = [{ worktreeName: 'p' }, { worktreeName: 'pq-rs' }];
+    expect(names(searchWorktrees(wts, 'prs', { p: ['prs'] }))).toEqual(['pq-rs', 'p']);
+  });
+
+  test('a title matches as a run from the start of a word, across spaces', () => {
+    expect(names(search('capturestate'))).toEqual(['2094401']); // no space typed
+    expect(names(search('ession'))).toEqual(['mediasession']); // the name; in a title it doesn't start a word
+    expect(names(search('eat'))).toEqual([]);    // "updat-e at-tribute"
+    expect(names(search('mss'))).toEqual(['mediasession']); // no initials in titles
+  });
+
+  test('the reviewer tags at the end of a title do not match', () => {
+    expect(names(search('playback'))).toEqual([]);
+    expect(names(search('dontbuild'))).toEqual([]);
+    expect(names(search('parser'))).toEqual(['x']);
+  });
+
+  test('a title needs a query of 3 or more characters', () => {
+    expect(names(search('up'))).toEqual([]);
+    expect(names(search('upd'))).toEqual(['x']);
+  });
+
+  test('snippet shows the part of a long title around the match, from a word start', () => {
+    const [, hit] = search('media session');
+    const sn = snippet(hit.title, hit.marks);
+    expect(sn.text).toBe('…for the Media Session capture state …');
+    expect(sn.marks.map((i) => sn.text[i]).join('')).toBe('MediaSession');
+    expect(snippet('short', [0, 1])).toEqual({ text: 'short', marks: [0, 1] });
   });
 });
 
@@ -247,6 +300,21 @@ describe('worktree bar', () => {
     await flush();
     expect(pillNames()[0]).toBe('vtt');
     expect(document.querySelector('.worktree-pill.highlighted').dataset.name).toBe('vtt-wpt');
+  });
+
+  test('focusing the box loads the patch titles; a title match shows the title around the match', async () => {
+    global.fetch.mockImplementation((url) => Promise.resolve(url === 'api/worktrees/titles'
+      ? { ok: true, json: () => Promise.resolve({ titles: { '2053175': ['Fix the Media Session state.'] } }) }
+      : { ok: true, json: () => Promise.resolve({ current: 'vtt-interop', worktrees: WORKTREES }) }));
+    type('media session');
+    expect(pillNames()).toEqual([]); // no titles yet
+    input().dispatchEvent(new Event('focus'));
+    await flush();
+    expect(pillNames()).toEqual(['2053175']);
+    const pill = document.querySelector('#worktree-pills .worktree-pill');
+    expect(pill.textContent).toBe('2053175 · Fix the Media Session state.');
+    expect(pill.querySelector('.worktree-pill-branch').innerHTML).toContain('<b>Media</b> <b>Session</b>');
+    expect(pill.title).toBe('Fix the Media Session state.');
   });
 
   test('the pills are options of a listbox and not Tab stops', () => {
